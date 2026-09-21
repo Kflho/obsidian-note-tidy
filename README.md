@@ -203,7 +203,7 @@ Where the LaTeX layout owns the code **inside** `$…$`, this one owns the space
 | `100kg` (optional, off by default) | `100 kg` | one space between a number and a unit from the built-in list |
 | `元素: $A$` | `元素：$A$` | half-width `, : ; ! ?` in Chinese context become full-width, and full-width `，。、；！？` in a **pure-English** line become half-width (`什么语境用什么标点`). The Chinese direction is judged per sentence, not per neighbouring character: the mark changes when the text before it is Chinese, the text after it is Chinese, or the sentence is Chinese-dominant (letters inside formulas, code and links do not count as English, and word count is used rather than letter count) — so `没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且`. The English direction only fires when the line has **no Chinese at all and at least two English words**; half-and-half lines such as `参数 gain=50、shift=0` are left alone. `.` is never converted (ellipsis, version numbers, `e.g.`), and neither are `（）`, `：`, `《》`, marks after digits (`1,000`, `12:30`), after a backslash (`\,`), inside half-width brackets (`(mod, k)`), next to `/`, in the chat-log header (`张三: 2024/…`) or inside `《…》` / `“…”` |
 
-Rule sources are the note-taking spec this plugin was built for: languages are separated by one character width, punctuation stays tight, and Chinese↔numbers stay tight. Two rules that would break proper nouns are off by default: English↔numbers (`GPT4`, `3D`, `v1.2.2`) and number↔unit. Symbols follow Chinese typography: a space is only ever called for between Han characters and Western letters/numbers (clreq §6.3.3, up to a quarter of a Han character wide, none at the line start or end), punctuation gets none of it, and Han characters with punctuation are 1:1 squares set seamlessly (§1.2) — the default of CSS `text-autospace` agrees (it spaces CJK against letters/numbers only; punctuation needs the explicit `punctuation` value).
+Rule sources are the note-taking spec this plugin was built for: languages are separated by one character width, punctuation stays tight, and Chinese↔numbers stay tight. **[`docs/规则登记表.md`](docs/规则登记表.md) is the full traceability table** — every rule with the spec item it implements, the setting that switches it, the module that implements it and the test that guards it (`npm test` fails if any of the four drifts). Two rules that would break proper nouns are off by default: English↔numbers (`GPT4`, `3D`, `v1.2.2`) and number↔unit. Symbols follow Chinese typography: a space is only ever called for between Han characters and Western letters/numbers (clreq §6.3.3, up to a quarter of a Han character wide, none at the line start or end), punctuation gets none of it, and Han characters with punctuation are 1:1 squares set seamlessly (§1.2) — the default of CSS `text-autospace` agrees (it spaces CJK against letters/numbers only; punctuation needs the explicit `punctuation` value).
 
 Untouched: frontmatter, fenced and indented code blocks, `$$ … $$` blocks (including every line in between), **GFM table rows** (their spaces are alignment, and `|` is a cell separator), inline code, wikilinks and markdown links, URLs, HTML tags, `%%comments%%`, `#tags`, the inside of `《…》` / `〈…〉` / `“…”` (so 《新 吊带袜天使》 and 《a子计划》 keep their original form), Chinese-to-Chinese spaces, math operators (`ctrl+c` is never split), a pipe glued to letters or digits (`|x|`, `P(A|B)`, `x̂_{k|k}` — that is math notation) and the dot/ampersand inside single-letter abbreviations (`e.g.`, `i.e.`, `Q&A`, `R&D`).
 
@@ -242,6 +242,28 @@ Deliberately conservative — it rewrites prose, so "not sure" means "don't touc
 The variable table has a few limits: it only reads formulas already present in **the same note** (`$…$` and `$$…$$`, multi-line blocks included) and never spans notes; `$z$` inside code blocks, inline code or frontmatter does not count; letters are case-sensitive (writing `$z$` does not make `Z` follow); the Chinese-anchor rule still applies, so English prose such as `the value z is` is untouched; and `_`/`^` names (`Q_inv`, `z^2`, `z_1`) stay untouched. Wrapped formulas become "existing formulas", so running the layout twice gives the same result.
 
 Everything else is left alone: frontmatter, fenced/indented code, inline code, wikilinks, links, URLs, HTML tags, tags, comments, existing formulas (kept verbatim — they are only read into the variable table), the inside of `《…》` / `〈…〉` / `“…”` (so 《a子计划》 keeps its form), English prose, words of three letters or more (`Jordan`, `latex`, `Steinitz`), two-letter abbreviations with no expression around them (`AI`, `QQ`, `pg`, `tv`, `xx`), the two-letter function words (`is`, `to`), abbreviations (`e.g.`, `i.e.`), paths and extensions (`C:\data`, `main.ts`), model numbers (`A4`, `B5`), `_`/`^` naming conventions (`Q_inv`, `x^2`, `a_ij`), list labels (`(a)`, `(b)`), task checkboxes (`- [x]`) and letter-plus-proper-noun pairs (`C 语言`, `D 盘`, `A 股`). Turn the setting off to keep symbols as plain text.
+
+### 10. List numbering and heading levels
+
+Two "guarantee-style" fixes, **on by default**, that only touch what is out of line:
+
+**List numbering** — every list starts at 1. A list whose first number is not 1 is renumbered from 1 upwards; a list that already starts at 1 is never touched, so a deliberate `1. 1. 1.` (letting Markdown count) or `1. 5. 9.` stays as written. Blank lines do not split a list (loose lists are one list), while paragraphs, code blocks and tables do; nested lists each start at 1; numbers get no leading zeros.
+
+| Before | After | Rule |
+|--------|-------|------|
+| `3. a` / `4. b` | `1. a` / `2. b` | first number is not 1 → renumber the whole list |
+| `2. parent` / `⇥3. child` / `4. parent2` | `1. parent` / `⇥1. child` / `2. parent2` | each nested list starts at 1 |
+| `1. a` / `1. b` | unchanged | already starts at 1 |
+| `2. a` / blank / `text` / blank / `3. b` | `1. a` / blank / `text` / blank / `1. b` | a paragraph splits the list |
+
+**Heading levels** — a sub-heading sits exactly one level below its parent: `#### child` right under `# parent` becomes `## child`, siblings stay siblings, and coming back up lands on the right parent. **When several headings change at once, every new level is computed from the original levels in a single pass** rather than from the previous heading's new level — otherwise `# → ### → ###` would be computed as `# → ## → ###` and turn two sibling sections into nested ones, drifting further with every heading. The first heading keeps its own level (a note starting at `##` usually continues a hierarchy from somewhere else). Frontmatter, code blocks, `#tags` and headings inside blockquotes are left alone.
+
+| Before | After | Rule |
+|--------|-------|------|
+| `#` / `####` | `#` / `##` | a skipped level is flattened |
+| `#` / `###` / `###` | `#` / `##` / `##` | siblings stay siblings |
+| `#` / `###` / `##` | `#` / `##` / `##` | coming back up gives siblings, not parent/child |
+| `##` / `#####` | `##` / `###` | the first heading sets the base |
 
 ## How to use
 
@@ -347,22 +369,29 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 
 | Module | Responsibility |
 |--------|----------------|
-| `src/chat-log.ts` | chat log layout (username / date / time toggles, indent, image order, blank lines) |
-| `src/text-pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → plain-text math → formulas → word spacing → tags → block sorting, and **iterates the whole pipeline to a fixed point** (at most 5 rounds, 1–3 in practice): a later step changes text an earlier step looked at — the space the number↔unit rule adds is what makes plain-text math recognise `5/10mm` as an expression, and normalizing `$w\approx 0$` to `$w \approx 0$` changes the key block sorting uses. Without the loop, "run it twice" would edit more lines than "run it once", so every save would rewrite the file |
-| `src/text-math.ts` | plain-text math detection — `矩阵 A`, `n维`, `V(F)`, `x = 0`, `λ` → `$…$`, plus the variable table that reads variables out of the note's existing formulas |
-| `src/inline-scan.ts` | shared inline protection — code spans, links, URLs, tags, comments, existing `$…$` |
-| `src/text-layout.ts` | general layout fixes — leading indentation (4 spaces = 1 tab) |
-| `src/markdown-markers.ts` | block marker spacing — blockquotes, lists, headings |
-| `src/tags.ts` | tag layout — moving tags to the end of a block, per-cell tables, tag sorting |
-| `src/block-sort.ts` | content block sorting — sections, anchors, ordered-list renumbering |
-| `src/latex-layout.ts` | formula layout — spacing rules, `$$` delimiters, `\\` line breaks, continuation indent |
-| `src/symbols.ts` | the per-symbol spacing table — the left/right requirement of `, . ! ? :`, `\|`, `&`, `→`, `^`, `...` and the wrapper symbols, each entry citing its rule in the note spec |
-| `src/line-scan.ts` | shared protection rules — frontmatter, fenced code, indented code, `$$` formulas, GFM table rows |
-| `src/collate.ts` | "first letter" comparison (Chinese by pinyin, numbers numerically) |
-| `src/image-size.ts` | rewriting `\|100` / `\|100x200` sizes, caption-safe |
-| `src/image-links.ts` | link resolution, same-name ambiguity detection, link form choice |
-| `src/image-organizer.ts` | copying images into a note's own attachment folder and repointing links |
-| `src/attachment-folder.ts` | resolving / creating the attachment folder (shared by several features) |
+| `src/rule-registry.ts` | the rule registry: every layout/image rule tied to its spec item, settings switch, implementation and tests (see `docs/规则登记表.md`; regenerated with `node test/run-tests.mjs --update-rules-doc`) |
+| `src/text/pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → list numbering → heading levels → plain-text math → formulas → word spacing → tags → block sorting, and **iterates the whole pipeline to a fixed point** (at most 5 rounds, 1–3 in practice): a later step changes text an earlier step looked at — the space the number↔unit rule adds is what makes plain-text math recognise `5/10mm` as an expression, and normalizing `$w\approx 0$` to `$w \approx 0$` changes the key block sorting uses. Without the loop, "run it twice" would edit more lines than "run it once", so every save would rewrite the file |
+| `src/text/list-numbering.ts` | list numbering: every list starts at 1 (lists that already start at 1 are never touched) |
+| `src/text/heading-levels.ts` | heading levels: a sub-heading sits exactly one level below its parent; when several headings change, all new levels are computed from the original ones in one pass |
+| `src/text/chat-log.ts` | chat log layout (username / date / time toggles, indent, image order, blank lines) |
+| `src/text/math-wrap.ts` | plain-text math detection — `矩阵 A`, `n维`, `V(F)`, `x = 0`, `λ` → `$…$`, plus the variable table that reads variables out of the note's existing formulas |
+| `src/text/inline-scan.ts` | shared inline protection — code spans, links, URLs, tags, comments, existing formulas; **also the single place that recognises and pairs `$…$` / `$$…$$`** (tag layout and block sorting ask `mathOpaqueLines` whether a line may be touched) |
+| `src/text/indent.ts` | general layout fixes — leading indentation (4 spaces = 1 tab) |
+| `src/text/markers.ts` | block marker spacing — blockquotes, lists, headings |
+| `src/text/tags.ts` | tag layout — moving tags to the end of a block, per-cell tables, tag sorting |
+| `src/text/block-sort.ts` | content block sorting — sections, anchors, ordered-list renumbering |
+| `src/text/latex.ts` | formula layout — spacing rules, `$$` delimiters, `\\` line breaks, continuation indent |
+| `src/text/spacing/` | word spacing — `index.ts` (options + `fixSpacing`), `tokenize.ts` (pieces), `gap.ts` (gap between pieces) |
+| `src/text/symbols.ts` | the per-symbol spacing table — the left/right requirement of `, . ! ? :`, `\|`, `&`, `→`, `^`, `...` and the wrapper symbols, each entry citing its rule in the note spec |
+| `src/text/line-scan.ts` | shared protection rules — frontmatter, fenced code, indented code, GFM table rows |
+| `src/text/collate.ts` | "first letter" comparison (Chinese by pinyin, numbers numerically) |
+| `src/image/size.ts` | rewriting `\|100` / `\|100x200` sizes, caption-safe |
+| `src/image/links.ts` | link resolution, same-name ambiguity detection, link form choice |
+| `src/image/organize.ts` | copying images into a note's own attachment folder and repointing links |
+| `src/image/attachment-folder.ts` | resolving / creating the attachment folder (shared by several features) |
+| `src/image/` (rest) | `transfer.ts` external imports, `rename.ts` garbled / bulk renaming, `naming.ts` presets & uniqueness, `external-path.ts` flexible path probing, `constants.ts` extension tables |
+| `src/settings/` | `model.ts` fields & defaults, `fields/` the single source of truth for the settings UI, `tab.ts` renders it declaratively (1.13+) or by hand (below) |
+| `src/tasks.ts` · `src/batch.ts` · `src/ui/` | task orchestration, the batch shell (mutex + notice suppression + progress), menus and modals |
 
 `npm test` runs expected-output checks, idempotency across every settings combination, blank-line and content-loss invariants, and the safety rules that keep captions, non-image links and same-name images untouched.
 
@@ -383,6 +412,14 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 3. Reload Obsidian and enable **Note Tidy** (the old entry can be removed)
 
 ## Changelog
+
+### v1.3.4
+- New: **list numbering** (typesetting, on by default) — every list starts at 1: a list whose first number is not 1 is renumbered from 1 upwards (`3. 4. 5.` → `1. 2. 3.`). A list that already starts at 1 is never touched, so a deliberate `1. 1. 1.` (letting Markdown count) or `1. 5. 9.` stays as written. Blank lines do not split a list (loose lists are one list), while paragraphs, code blocks and tables do; nested lists each start at 1; numbers get no leading zeros. See section 10
+- New: **heading levels** (typesetting, on by default) — a sub-heading sits exactly one level below its parent: `#### child` right under `# parent` becomes `## child`, siblings stay siblings, and coming back up lands on the right parent. **When several headings change at once, every new level is computed from the original levels in one pass** rather than from the previous heading's new level — otherwise `# → ### → ###` would be computed as `# → ## → ###` and turn two sibling sections into nested ones, drifting further with every heading. The first heading keeps its own level (a note starting at `##` usually continues a hierarchy from somewhere else)
+- Fixed: **tags on a line containing a formula were never relocated** — `#tag text $$e^{At}$$` is now laid out as `text $$e^{At}$$ #tag`. "Does this line contain `$$`?" used to have two answers (tag layout treated the whole line as protected, spacing layout treated the whole line as typesettable) that disagreed on the same line; both questions now share one implementation: lines inside a multi-line `$$` block and its opening/closing lines are still skipped whole (a tag can never be moved into a formula), while a same-line `$$…$$` pair is laid out normally
+- Internal: **large cleanup**. `main.ts` went from 1542 lines to 49 (lifecycle and wiring only), with command/task/batch/UI modules split out; `src/` is now organised into `text/`, `image/`, `ui/` and `settings/`; the settings panel's two rendering paths (declarative on 1.13+, hand-written DOM below) are both generated from **one field table**, so adding an option touches a single place; `spacing.ts` (1161 lines) was split into `spacing/` (options / tokenizer / gap rules)
+- Internal: new **rule registry** `src/rule-registry.ts` (59 rules: spec item ↔ setting ↔ implementation ↔ test) with the generated `docs/规则登记表.md`; `test/rules.test.ts` verifies each one — the spec section and item number must exist in the note spec, every switch must be used by a rule, and every implementation symbol and test file must be present. Formula recognition and pairing were also collapsed from six implementations into one (`text/inline-scan.ts`)
+- Internal: every layout step is still idempotent and returns the input unchanged when nothing needs doing (the whole pipeline iterates to a fixed point)
 
 ### v1.3.3
 - New: **per-symbol spacing rules** (typesetting, on by default) — "spaces around symbols" is no longer limited to content neighbours; every rule answers two questions only: one space on the left, one on the right? (`有内容才有一格` is the shared premise of every space, not a special condition of one rule — at the start of a line there is nothing on the left, so nobody has to decide "no space" there)

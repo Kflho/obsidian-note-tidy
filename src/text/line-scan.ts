@@ -85,53 +85,6 @@ export function inlineCodeRanges(line: string): Array<[number, number]> {
 	return ranges;
 }
 
-/**
- * 标记整篇笔记里属于 `$$ … $$` 公式的行（含起止行）。
- *
- * 标签排版不该去动公式里的 `#`（例如 `\textcolor{#fff}{…}`），
- * 板块排序更不能把多行公式拆成一块一块搬走。不成对的 `$$`（未闭合）不标记，
- * 否则会把后面整篇正文都当成公式。
- */
-export function markMathLines(lines: string[]): boolean[] {
-	const flags: boolean[] = new Array<boolean>(lines.length).fill(false);
-	const protectedLines = markProtectedLines(lines);
-
-	/** 先配对，再标记：未闭合的 `$$` 不参与 */
-	let open = -1;
-	for (let i = 0; i < lines.length; i++) {
-		if (protectedLines[i]) continue;
-		const line = lines[i] ?? '';
-		const codeRanges = inlineCodeRanges(line);
-
-		let count = 0;
-		let at = line.indexOf('$$');
-		while (at >= 0) {
-			const escaped = at > 0 && line.charAt(at - 1) === '\\';
-			const inCode = codeRanges.some(([start, end]) => at < end && at + 2 > start);
-			if (!escaped && !inCode) count++;
-			at = line.indexOf('$$', at + 2);
-		}
-		if (count === 0) continue;
-
-		if (open < 0) {
-			flags[i] = true;
-			if (count % 2 === 1) open = i;
-			continue;
-		}
-		flags[i] = true;
-		if (count % 2 === 1) open = -1;
-	}
-
-	// 没闭合：把这一段标记撤掉（否则后面整篇都会被当成公式）
-	if (open >= 0) {
-		for (let i = open; i < lines.length; i++) {
-			if (!protectedLines[i]) flags[i] = false;
-		}
-	}
-
-	return flags;
-}
-
 /** 缩进代码块的缩进：一个 Tab，或 4 个以上空格 */
 const INDENTED_CODE_RE = /^(?:\t[ \t]*| {4,})\S/;
 

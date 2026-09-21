@@ -1,54 +1,9 @@
 /**
- * 排版格式：空格排版（纯函数，除参数外不依赖任何 Obsidian API，可脱离 Obsidian 验证幂等性）。
+ * 空格排版的分词：字符分类 → 逐字符切分（tokenizeLine）→ 分词期的标点 / 符号处理。
  *
- * 与「公式排版」（latex-layout.ts，属于**代码格式**）的分工：
- * - 公式排版管 `$…$` **里面**的 LaTeX 代码怎么写；
- * - 这里管 `$…$` **外面**，以及正文里 中文 / 英文 / 数字 / 标点 / 符号 之间的空格。
- *
- * 八条规则（与设置面板「排版格式」一一对应）：
- * 1. **中文 ↔ 英文**：空一个字宽（文字格式 1）。行内代码、双链、链接、标签与英文等价
- *    ——「代码块和英文、数字等价，需要留空格」（标记命名 10）；GPT4、3D、v1.2.2、100kg
- *    这类**含字母的连写**也整体算一个英文单词，免得型号被从数字那一侧拆开。
- * 2. **中文 ↔ 数字**：不留空格（数字 2：中文和数字之间都不空一个字宽），
- *    已有空格一并删掉，`第 3 章` → `第3章`；只针对**纯数字**（3、3.14、2024）。
- * 3. **英文 ↔ 数字**：默认保持原样（数字 3 说"一般要空"，但 GPT4 / 3D / v1.2 这类
- *    专有名词一拆就错，见文字格式 4「专有名词空格以原有形式为准」）。
- * 4. **行内公式 ↔ 文字**：空一格（`设$x$为` → `设 $x$ 为`）。
- *    `$` 内侧永远不空 —— 那是 latex 符号格式 1 的特例，也是 Obsidian 能否认出公式的前提。
- * 5. **全角标点**：两侧不留空格（文字格式 1「与标点间不用空」）。
- *    两个例外：引号 `“”‘’` 两侧、书名号 `《》〈〉` 内侧 —— 那里可能是
- *    《新 吊带袜天使》《a子计划》这类故意留空的专有名词（文字格式 4），
- *    所以**书名号与引号内部一个字符都不动**。
- * 6. **半角标点** `, . ! ? :`：标点前不留空格、标点后空一格（英文符号 1）。
- *    小数点 / 版本号（`1.2.2`、`12:30`）、省略号（`...`）不适用。
- * 7. **括号 `()`**：内侧不留空格（英文符号 3）。
- * 8. **数字 ↔ 单位**：空一格（数学符号 2），默认关闭，单位须落在词表里。
- * 9. **符号自己的空格规则**（symbols.ts）：**空格只用来分隔不同语言的内容** ——
- *    `space` 一律读作"与西文内容（字母 / 数字 / 公式 / 行内代码）之间留一格"，
- *    邻居是中文、全角标点、另一个符号时都贴紧（已有的空格一并收掉）。
- *    依据是中文排版规范：clreq §6.3.3（汉字与西文字母、数字之间不多于 1/4 汉字宽的字距或空白，
- *    标点旁边连这个空隙都不加）、§1.2（汉字与标点是 1:1 方块、无缝隙并列），
- *    以及 CSS `text-autospace` 的默认值（只在中西文之间加空隙，标点要显式开 `punctuation`）。
- *    于是 `word, word` / `A & B` / `$A$ & $B$` 留一格，而 `甲&乙`、`如, ：`、`|：单独一个`、
- *    `7. 并列：&` 全部贴紧；`|x|`、`P(A|B)`、`x̂_{k|k}` 这类竖线属于数学记号，一个字符都不动。
- *
- * 不管的地方（不碰就是最安全的排版）：
- * - frontmatter、围栏代码块、缩进代码块、`$$…$$` 公式块（含中间那些行，整块跳过）、
- *   **GFM 表格**（表头 / 分隔 / 数据行整行跳过：表格里的空格是对齐用的）；
- * - 书名号与引号内部（《新 吊带袜天使》《a子计划》：专有名词原样保留）；
- * - 强调标记本身（`**粗体**`、`*斜体*`、`==高亮==`、`~~删除~~`）：它并进所包裹的内容里，
- *   规则看到的是内容 —— `**可逆矩阵**$P$` 因此会补成 `**可逆矩阵** $P$`，
- *   而空格只会加在标记**外面**（插进 `** English**` 会让粗体失效）；配不成对的
- *   星号（`2*3`、`a*b`）原样留着，不当强调处理；
- * - 行内代码、双链 `[[…]]`、markdown 链接、URL、HTML 标签、`%%注释%%`、`#标签`
- *   的内部（当成一个"英文单词"整体看，只决定它与左右邻居之间的空格）；
- * - 中文与中文之间的空格（可能是《新 吊带袜天使》这类故意留的，标点概论 3 也要求别乱删）；
- * - 数学运算符（`ctrl+c` 不能加空格，数学符号 1 自己也写了"非数学语境就不加"）。
- *
- * 幂等：每条规则的结果都是"恰好一个空格"或"没有空格"，输出再跑一次不会变。
+ * 对应原 spacing.ts 的「字符分类」「token」「符号」三节；分词之后的间距判定见 ./gap。
  */
-import { markProtectedLines, markIndentedCodeLines, markTableLines } from './line-scan';
-import { collectMaskedRanges, isSpaceChar, mathRanges, readInlineMath } from './inline-scan';
+import { collectMaskedRanges, isSpaceChar, readInlineMath } from '../inline-scan';
 import {
 	CLOSE_QUOTE_RULE,
 	OPEN_QUOTE_RULE,
@@ -57,76 +12,10 @@ import {
 	SYMBOL_RULES as SYMBOL_TABLE,
 	isMathGlue,
 	isSymbolChar,
-} from './symbols';
-import type { SymbolPad, SymbolRule } from './symbols';
-
-/** 只决定"空一格"还是"不动"的规则 */
-export type SpacingMode = 'space' | 'keep';
-
-/** 中文与数字之间：可以选"不留空格"（按文档）、"空一格"或"不动" */
-export type SpacingCjkDigitMode = 'none' | 'space' | 'keep';
-
-/** 空格排版的九项规则 */
-export interface SpacingOptions {
-	/** 中文 ↔ 英文（含行内代码 / 双链 / 链接 / 标签） */
-	cjkLatin: SpacingMode;
-	/** 中文 ↔ 数字 */
-	cjkDigit: SpacingCjkDigitMode;
-	/** 英文 ↔ 数字 */
-	latinDigit: SpacingMode;
-	/** 行内公式 ↔ 文字 */
-	mathText: SpacingMode;
-	/** 全角标点两侧不留空格 */
-	fullPunct: boolean;
-	/** 半角标点 `, . ! ? :` 前不留空格、后空一格 */
-	halfPunct: boolean;
-	/** 括号 `()` 内侧不留空格 */
-	bracketInner: boolean;
-	/** 数字 ↔ 单位之间空一格 */
-	digitUnit: boolean;
-	/** 紧跟在中文后面的半角标点换成全角（写中文就是全中文标点） */
-	halfToFullPunct: boolean;
-	/** 符号自己的空格规则（`,` `.` 后空一格、`| & →` 左右空一格、`^` 不空…） */
-	symbolPad: boolean;
-}
-
-/** 默认值：文字的规则全开、可能误伤的规则先关（英文↔数字、数字↔单位） */
-export const DEFAULT_SPACING_OPTIONS: SpacingOptions = {
-	cjkLatin: 'space',
-	cjkDigit: 'none',
-	latinDigit: 'keep',
-	mathText: 'space',
-	fullPunct: true,
-	halfPunct: true,
-	bracketInner: true,
-	digitUnit: false,
-	halfToFullPunct: true,
-	symbolPad: true,
-};
-
-/** data.json 里被手工改成非法值时收敛回合法取值 */
-export function resolveSpacingMode(value: unknown, fallback: SpacingMode): SpacingMode {
-	return value === 'space' || value === 'keep' ? value : fallback;
-}
-
-export function resolveCjkDigitMode(value: unknown): SpacingCjkDigitMode {
-	if (value === 'none' || value === 'space' || value === 'keep') return value;
-	return DEFAULT_SPACING_OPTIONS.cjkDigit;
-}
-
-/** 九条规则是否全都处于"不动"状态 —— 是则整篇跳过，不做任何扫描 */
-export function isSpacingActive(options: SpacingOptions): boolean {
-	return options.cjkLatin !== 'keep'
-		|| options.cjkDigit !== 'keep'
-		|| options.latinDigit !== 'keep'
-		|| options.mathText !== 'keep'
-		|| options.fullPunct
-		|| options.halfPunct
-		|| options.bracketInner
-		|| options.digitUnit
-		|| options.halfToFullPunct
-		|| options.symbolPad;
-}
+} from '../symbols';
+import type { SymbolRule } from '../symbols';
+import { isLatinContent } from './gap';
+import type { SpacingOptions } from './index';
 
 // ------------------------------------------------------------------ 字符分类
 
@@ -157,17 +46,6 @@ const FP_ANGLE_OPEN = new Set<string>([...'《〈']);
 /** 引号：两侧都不动（引号里可能是英文短语或带空格的专有名词） */
 const FP_QUOTE = new Set<string>([...'“”‘’']);
 
-/**
- * 包裹符号的两个半边：内侧不留空格。
- *
- * 包裹符号是"表示里面的内容"的，**本身不算内容** —— 所以它和被它圈住的东西之间不留空格：
- * `（ 内容 ）` → `（内容）`、`《 书名 》` → `《书名》`、`“ 引文 ”` → `“引文”`。
- * 里面的符号（`（+）`、`（→）`、`（|）`）紧贴包裹符号的那一侧因此也不会被自己的规则
- * 加出一格来 —— 那一格正是"符号左右要加空格"遇上"包裹符号不算内容"时的结果。
- */
-const FP_WRAPPER_OPEN = new Set<string>([...'（【「『〔〖｛［《〈“‘']);
-const FP_WRAPPER_CLOSE = new Set<string>([...'）】」』〕〗｝］》〉”’']);
-
 /** 半角标点：标点前不留空格、标点后空一格 */
 const HALF_PUNCT = new Set<string>([...',.!?:']);
 
@@ -186,21 +64,6 @@ const HALF_TO_FULL_PUNCT: Record<string, string> = {
 const FULL_TO_HALF_PUNCT: Record<string, string> = {
 	'，': ',', '。': '.', '、': ',', '；': ';', '！': '!', '？': '?',
 };
-
-/** 单位词表（数字与单位之间空一格时用）；`%` 故意不收 —— `50%` 是通行写法 */
-const UNITS = new Set<string>([
-	// 长度 / 面积 / 体积
-	'km', 'cm', 'mm', 'um', 'μm', 'nm', 'm', 'ml', 'mL', 'L',
-	// 时间 / 频率
-	'ms', 'us', 'μs', 'ns', 'min', 'h', 'Hz', 'kHz', 'MHz', 'GHz', 'rpm',
-	// 质量
-	'kg', 'mg', 'ug', 'μg', 'g',
-	// 电 / 磁 / 热 / 力
-	'W', 'kW', 'MW', 'V', 'mV', 'kV', 'A', 'mA', 'Ω', 'ohm', 'Pa', 'kPa', 'MPa', 'GPa',
-	'N', 'J', 'kJ', 'MJ', 'cal', 'kcal', 'mol',
-	// 数据 / 显示
-	'KB', 'MB', 'GB', 'TB', 'bit', 'Byte', 'px', 'pt', 'dpi', 'ppi', 'fps',
-]);
 
 /** 一个字符就表示单位的：摄氏度、华氏度 */
 const UNIT_CHARS = new Set<string>([...'℃℉']);
@@ -244,7 +107,7 @@ type PieceKind =
 	/** 其它（`*` `=` `+` `-` `/` `|` `{` `}` `%` `#` …）：不参与任何规则 */
 	| 'other';
 
-interface Piece {
+export interface Piece {
 	kind: PieceKind;
 	text: string;
 	fp?: FpClass;
@@ -637,7 +500,7 @@ function classifyChar(char: string, line: string, at: number): { piece: Piece; n
 }
 
 /** 把一行切成 piece；空白单独成 piece，输出里的空格全部由规则决定 */
-function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
+export function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 	const ranges = collectMaskedRanges(line);
 	const inCode = (at: number): boolean => ranges.some(([start, end]) => at >= start && at < end);
 	const pieces: Piece[] = [];
@@ -759,7 +622,7 @@ function markEllipsisRuns(pieces: Piece[]): void {
  * 竖线。连续两个及以上（`||`）整体是包裹符号，按 176 贴紧；
  * 单独一个要看它是不是数学记号的一部分 —— `|x|`、`P(A|B)`、`x̂_{k|k}`、`\left\|`
  * 这类紧贴字母 / 数字 / `_` `^` `{` `}` `\` 的竖线是数学里的一部分，一个字符都不动；
- * 只有"单独一个"（latex 符号格式 4）才左右各留一格，如 `a | b`、`| ：单独一个`。
+ * 只有"单独一个"（通用符号 4）才左右各留一格，如 `a | b`、`| ：单独一个`。
  */
 function markPipePieces(pieces: Piece[]): void {
 	let i = 0;
@@ -871,11 +734,6 @@ function markQuotePieces(pieces: Piece[]): void {
 	}
 }
 
-/** 西文内容：字母 / 数字 / 公式 / 行内代码（`scope: 'latin'` 的符号认这个当"西文语境"） */
-function isLatinContent(piece: Piece | null): boolean {
-	return piece !== null && (isForeign(piece) || isRawDigit(piece) || piece.kind === 'math');
-}
-
 /** 从 index 往 step 方向找第一个非空白 piece（行首 / 行尾返回 null） */
 function neighbourOf(pieces: Piece[], index: number, step: 1 | -1): Piece | null {
 	for (let i = index + step; i >= 0 && i < pieces.length; i += step) {
@@ -916,246 +774,4 @@ function markSymbolPieces(pieces: Piece[]): void {
 	markQuotePieces(pieces);
 	markAbbreviationPieces(pieces);
 	markLatinContextPieces(pieces);
-}
-
-// ------------------------------------------------------------------ 间距规则
-
-const isCjk = (piece: Piece): boolean => piece.kind === 'cjk';
-/** 纯数字：与中文之间贴紧（数字 2）。GPT4 这类连写里的数字不算 */
-const isDigit = (piece: Piece): boolean => piece.kind === 'digit' && piece.inWord !== true;
-/** 半角数字本身（不论是否属于连写） */
-const isRawDigit = (piece: Piece): boolean => piece.kind === 'digit';
-/** 中文语境里的"英文"：拉丁字母、含字母的连写，以及与之等价的行内代码 / 双链 / 链接 / 标签 */
-const isForeign = (piece: Piece): boolean =>
-	piece.kind === 'latin' || piece.kind === 'word' || (piece.kind === 'digit' && piece.inWord === true);
-/** 只按拉丁字母算（判断"英文 ↔ 数字"用，连写内部也照这条走） */
-const isLatin = (piece: Piece): boolean => piece.kind === 'latin' || piece.kind === 'word';
-/** 会被"标点后空一格"照顾到的内容 */
-const isContent = (piece: Piece): boolean =>
-	isCjk(piece) || isForeign(piece) || isRawDigit(piece) || piece.kind === 'math' || piece.kind === 'close';
-
-const isUnit = (piece: Piece): boolean =>
-	piece.kind === 'unit' || (piece.kind === 'latin' && UNITS.has(piece.text));
-
-/** 按模式给出这个位置的空格：`space` → 恰好一个，`none` → 没有，`keep` → null（原样保留） */
-function applyMode(mode: SpacingMode | SpacingCjkDigitMode): string | null {
-	if (mode === 'space') return ' ';
-	if (mode === 'none') return '';
-	return null;
-}
-
-/** 全角括号 / 书名号 / 引号：包裹符号，空格规则交给下面原有的分支 */
-function defersToWrapper(piece: Piece): boolean {
-	return piece.kind === 'fpunct' && piece.fp !== 'other';
-}
-
-/**
- * 认不出来的邻居：`other` 里没有自己规则的杂项（希腊字母 `ε`、`*`、`%`、`[`、`\` …）。
- *
- * 这些既不是中文也不是认得的符号，规则不敢替它们做主 —— 删空格会把
- * `(ε_r, ε_a)`、`test_XX_<被测函数>. m` 这类写法拆坏，所以遇到它们"不动"。
- */
-function isUnknownPiece(piece: Piece): boolean {
-	return piece.kind === 'other' && piece.rule === undefined && !isSymbolChar(piece.text);
-}
-
-/**
- * 取一个符号对自己某一侧的要求。
- *
- * `scope: 'latin'` 的符号已经由 `markLatinContextPieces` 定过语境（非西文语境的一律改成贴紧），
- * 所以这里的判断只是兜底。
- *
- * - `space`（要一格）：邻居在规则的作用范围里就留一格（`word, word`、`A & B`、
- *   `1.矩阵指数` → `1. 矩阵指数`）；邻居是中文或认得的符号却不在范围内 → 贴紧
- *   （`甲 & 乙` → `甲&乙`、`如, ：` → `如,：`）；邻居认不出来 → 不动；
- * - `none`（不留）：一律生效（`中文 ：内容` → `中文：内容`、`x ^ 2` → `x^2`）；
- * - 行首左边、行尾右边没有邻居，自然没有空格要判。
- */
-function symbolPadOf(piece: Piece, side: 'left' | 'right', neighbour: Piece): SymbolPad | undefined {
-	const rule = piece.rule;
-	if (!rule) return undefined;
-
-	const pad = side === 'left' ? rule.left : rule.right;
-	if (pad !== 'space') return pad;
-	if (isUnknownPiece(neighbour)) return 'keep';
-
-	const accepts = rule.scope === 'latin' ? isLatinContent(neighbour) : isContent(neighbour);
-	return accepts ? 'space' : 'none';
-}
-
-/**
- * 符号自己的空格规则。
- *
- * 两个符号相邻时贴紧 —— `如, ：` → `如,：`、`| ：单独一个` → `|：单独一个`
- * （符号的"要一格"只朝西文内容生效，所以这种位置上两边都不作主）；
- * 一边是西文内容时按规则留一格：`$A$ & $B$`、`A & B`、`word, word`。
- *
- * 遇到括号 / 书名号 / 引号这类包裹符号就让位给原有分支（`word (x)`、`如《书》等` 原样保留）。
- */
-function symbolGap(previous: Piece, next: Piece): string | null {
-	if (defersToWrapper(previous) || defersToWrapper(next)) return null;
-
-	const leftPad = symbolPadOf(previous, 'right', next);
-	const rightPad = symbolPadOf(next, 'left', previous);
-	if (leftPad === 'none' || rightPad === 'none') return '';
-	if (leftPad === 'space' || rightPad === 'space') return ' ';
-	return null;
-}
-
-/**
- * 两个 piece 之间该留什么空格。
- *
- * @param previous 上一个非空 piece；行首为 null
- * @param next 当前 piece
- * @param gap 原文里两者之间的空白
- * @returns 新的空白；null 表示保持原样
- */
-function decideGap(previous: Piece | null, next: Piece, gap: string, options: SpacingOptions): string | null {
-	if (!previous) return null;
-
-	// 书名号 / 引号内部：专有名词与引文原样保留，《a子计划》不能被拆成《a 子计划》
-	if (previous.title && next.title) return null;
-
-	// 符号自己的规则优先：`如, ：` 的那一格不能被子句的"全角标点前不留空格"吃掉
-	if (options.symbolPad) {
-		const pad = symbolGap(previous, next);
-		if (pad !== null) return pad;
-	}
-
-	// 括号：内侧不留空格；外侧也贴紧 —— 英文符号 3「括号前后都没有空格」，
-	// 也就是 `f(x)` 那种函数写法（`中文 (说明)` → `中文(说明)`）。
-	// 英文句子里括号两侧是英文词距，外侧保留（与全角标点同一条规矩）
-	if (options.bracketInner) {
-		if (previous.kind === 'open' || next.kind === 'close') return '';
-		const english = previous.en === true || next.en === true;
-		if (!english && (next.kind === 'open' || previous.kind === 'close')) return '';
-	}
-
-	// 全角标点：两侧不留空格（引号两侧、书名号内侧除外）
-	// 英文句子里的全角标点（`see 《book》 and`）两侧是英文词距，不删
-	if (options.fullPunct && previous.en !== true && next.en !== true) {
-		// 包裹符号内侧不留空格：包裹符号本身不算内容，`（ 内容 ）` → `（内容）`、
-		// `《 书名 》` → `《书名》`、`“ 引文 ”` → `“引文”`（里面的专有名词空格照旧保留）
-		if (previous.kind === 'fpunct' && FP_WRAPPER_OPEN.has(previous.text)) return '';
-		if (next.kind === 'fpunct' && FP_WRAPPER_CLOSE.has(next.text)) return '';
-		if (next.kind === 'fpunct' && next.fp !== 'quote') return '';
-		if (previous.kind === 'fpunct') {
-			if (previous.fp === 'quote' || previous.fp === 'angleOpen') return null;
-			return '';
-		}
-	}
-
-	// 数字 ↔ 单位：比「英文 ↔ 数字」更具体，先判
-	if (options.digitUnit && isRawDigit(previous) && isUnit(next)) return ' ';
-
-	// 中文 ↔ 英文（含行内代码 / 双链 / 链接 / 标签，以及 GPT4 这类含字母的连写）
-	if ((isCjk(previous) && isForeign(next)) || (isForeign(previous) && isCjk(next))) {
-		return applyMode(options.cjkLatin);
-	}
-
-	// 中文 ↔ 数字（纯数字）
-	if ((isCjk(previous) && isDigit(next)) || (isDigit(previous) && isCjk(next))) {
-		return applyMode(options.cjkDigit);
-	}
-
-	// 英文 ↔ 数字
-	if ((isLatin(previous) && isRawDigit(next)) || (isRawDigit(previous) && isLatin(next))) {
-		return applyMode(options.latinDigit);
-	}
-
-	// 行内公式 ↔ 文字
-	if ((previous.kind === 'math' && isContent(next)) || (isContent(previous) && next.kind === 'math')) {
-		if (next.kind !== 'close' && previous.kind !== 'open') return applyMode(options.mathText);
-	}
-
-	// 半角标点：前不留空格、后空一格
-	if (options.halfPunct) {
-		if (previous.kind === 'hpunct' && isContent(next)) return ' ';
-		if (next.kind === 'hpunct' && isContent(previous)) return '';
-	}
-
-	return null;
-}
-
-/**
- * 行首标记（列表 `-` `1.`、标题 `#`、引用 `>`，以及列表项里的任务复选框 `- [x]`）：
- * 标记与它后面那一个空格是语法，交给标记排版（markdown-markers.ts）管，空格规则不许碰 ——
- * 否则 `1. , /. …` 里的 `,` 会按"标点前不留空格"把列表标记后面那一个空格吃掉。
- *
- * 要求标记后面确实跟着空白：`1.矩阵指数` 不是标记（它的空格该由规则补上），
- * `#标签` 也不是标题。
- */
-const LINE_MARKER_RE = /^(?:[-*+]|\d{1,9}[.)]|#{1,6}|>+)[ \t]+(?:\[[ xX]\][ \t]+)?/;
-
-/** 处理一行 */
-function formatLine(line: string, options: SpacingOptions): string {
-	const marker = LINE_MARKER_RE.exec(line);
-	const prefix = marker ? marker[0] : '';
-
-	const pieces = tokenizeLine(prefix ? line.substring(prefix.length) : line, options);
-	let out = '';
-	let previous: Piece | null = null;
-	let gap = '';
-
-	for (const piece of pieces) {
-		if (piece.kind === 'space') {
-			gap += piece.text;
-			continue;
-		}
-		const decided = decideGap(previous, piece, gap, options);
-		out += (decided === null ? gap : decided) + piece.text;
-		previous = piece;
-		gap = '';
-	}
-
-	// 行尾空白（Markdown 的硬换行就是两个空格）原样保留
-	return prefix + out + gap;
-}
-
-/**
- * 空格排版：给整篇笔记补 / 删 中文、英文、数字、公式、标点之间的空格。
- *
- * 幂等：输出的每个位置要么恰好一个空格、要么没有空格，再跑一次不会变。
- *
- * @param content 笔记原文
- * @param options 八条规则的开关（由插件设置转换而来）
- * @returns 排版后的内容；没有任何改动时原样返回（调用方据此避免无谓写盘）
- */
-export function fixSpacing(content: string, options: SpacingOptions): string {
-	if (content === '' || !isSpacingActive(options)) return content;
-
-	const lines = content.split('\n');
-	const protectedLines = markProtectedLines(lines);
-	const codeLines = markIndentedCodeLines(lines);
-	const tableLines = markTableLines(lines);
-	const ranges = mathRanges(lines, protectedLines);
-	let changed = false;
-
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
-		if (line === undefined) continue;
-		// frontmatter、代码块、`$$…$$` 区块内部、表格行：整行跳过
-		if (protectedLines[i] || codeLines[i] || tableLines[i]) continue;
-		const range = ranges[i];
-		if (!range) continue;
-		// 只有空白的行统一成真正的空行：肉眼没区别，但不再留"看不见的缩进 / NBSP"
-		if (line.trim() === '') {
-			if (line !== '') {
-				lines[i] = '';
-				changed = true;
-			}
-			continue;
-		}
-
-		const head = line.substring(0, range[0]);
-		const body = line.substring(range[0], range[1]);
-		const tail = line.substring(range[1]);
-		const fixed = head + formatLine(body, options) + tail;
-		if (fixed !== line) {
-			lines[i] = fixed;
-			changed = true;
-		}
-	}
-
-	return changed ? lines.join('\n') : content;
 }

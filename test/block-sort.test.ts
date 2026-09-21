@@ -9,7 +9,7 @@
  *   3. 锚点安全 —— 标题、表格、图片、聊天记录、代码块原地不动，也把排序范围切开
  *   4. 严格幂等 —— 排好序的内容再排一次不变
  */
-import { sortContentBlocks } from "../src/block-sort";
+import { sortContentBlocks } from "../src/text/block-sort";
 
 const T = "\t";
 const sp = (n: number): string => " ".repeat(n);

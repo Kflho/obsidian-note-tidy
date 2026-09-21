@@ -11,7 +11,7 @@
  *   3. 与其它排版串联 —— 公式所在行的正文原样保留，标签排版与板块排序不碰公式
  *   4. 严格幂等 —— 排好版的公式再跑一次不变
  */
-import { formatDisplayMath } from "../src/latex-layout";
+import { formatDisplayMath } from "../src/text/latex";
 
 const T = "\t";
 const sp = (n: number): string => " ".repeat(n);

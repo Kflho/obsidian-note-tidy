@@ -8,8 +8,8 @@
  *   2. 链接形式 —— 文件名不唯一时不能写裸文件名，否则会显示成另一张同名图
  */
 import { TFile, TFolder } from "obsidian";
-import { buildCopyName, chooseLinkTarget, isImagePath, linkBasename, resolveImageLink } from "../src/image-links";
-import { organizeNoteImages } from "../src/image-organizer";
+import { buildCopyName, chooseLinkTarget, isImagePath, linkBasename, resolveImageLink } from "../src/image/links";
+import { organizeNoteImages } from "../src/image/organize";
 
 // -------------------------------------------------------------------- 断言
 let checks = 0;

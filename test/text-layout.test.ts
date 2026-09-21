@@ -9,10 +9,10 @@
  *   3. 安全边界 —— frontmatter、代码块、列表子项缩进不许动
  *   4. 与聊天记录排版串联 —— 组合结果同样幂等，且不会覆盖「正文缩进」设置
  */
-import { fixLeadingIndent, resolveLeadingIndentMode } from "../src/text-layout";
-import type { LeadingIndentMode } from "../src/text-layout";
-import { formatChatLog, DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/chat-log";
-import type { ChatLogOptions } from "../src/chat-log";
+import { fixLeadingIndent, resolveLeadingIndentMode } from "../src/text/indent";
+import type { LeadingIndentMode } from "../src/text/indent";
+import { formatChatLog, DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/text/chat-log";
+import type { ChatLogOptions } from "../src/text/chat-log";
 
 const T = "\t";
 /** n 个空格（写成 repeat 免得数错） */

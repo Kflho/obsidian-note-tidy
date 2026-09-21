@@ -10,8 +10,8 @@
  *   3. 开关生效 —— 每条规则关闭后确实不动；全部关闭时整篇跳过
  *   4. 严格幂等 —— 排好版的内容再跑一次不变（否则每次保存都会重写文件）
  */
-import { DEFAULT_SPACING_OPTIONS, fixSpacing } from "../src/spacing";
-import type { SpacingOptions } from "../src/spacing";
+import { DEFAULT_SPACING_OPTIONS, fixSpacing } from "../src/text/spacing";
+import type { SpacingOptions } from "../src/text/spacing";
 
 // -------------------------------------------------------------------- 断言
 let checks = 0;
@@ -480,7 +480,7 @@ function symbolTests(): void {
 	caseCheck("包裹：里面的算式不动", "（a+b）与（a + b）", "（a+b）与（a + b）");
 	caseCheck("包裹：外侧按内容规则", "中文（ 说明 ）与 如（+）等", "中文（说明）与 如（+）等");
 
-	// 包裹符号：`||` 贴紧（英文符号 3 / latex 符号格式 2）
+	// 包裹符号：`||` 贴紧（通用符号 3 的包裹符号子条目）
 	caseCheck("符号：包裹符号 || 贴紧", "如（）、||等", "如（）、||等");
 	caseCheck("符号：范数外侧留给文字间距规则", "范数 ||x|| 的写法", "范数 ||x|| 的写法");
 
@@ -489,7 +489,7 @@ function symbolTests(): void {
 	caseCheck("符号：条件记号贴紧", "P(A|B) 与 x̂_{k|k}", "P(A|B)与 x̂_{k|k}");
 	caseCheck("符号：行内公式里的竖线不动", "范数 $\\lVert x\\rVert$ 与 $|f_y|$", "范数 $\\lVert x\\rVert$ 与 $|f_y|$");
 
-	// latex 符号格式 2：修饰符号前后不加空格
+	// 通用符号 3：修饰符号前后不加空格
 	caseCheck("符号：上标前后不加空格", "x ^ 2", "x^2");
 	caseCheck("符号：被提到的上标仍然贴紧", "^：和前后内容间不加空格", "^：和前后内容间不加空格");
 
@@ -498,12 +498,30 @@ function symbolTests(): void {
 	caseCheck("符号：版本号里的点不当标点处理", "版本 v1.2.2 更新", "版本 v1.2.2 更新");
 	caseCheck("符号：时间里的冒号不当标点处理", "at 12:30 sharp", "at 12:30 sharp");
 
+	// 通用符号 6、7：`~`、`-` 两边不加空格 —— 靠"不进符号表"实现：不添，也不删作者写的。
+	// 所以下面这些行只可能被**别的**规则碰到（例如 `第 1 - 2 章` 里中文↔数字那一格）
+	caseCheck("波浪号：两边已有的空格不删", "甲 ~ 乙 与 大约 ~ 五", "甲 ~ 乙 与 大约 ~ 五");
+	caseCheck("波浪号：贴紧的也不加空格", "甲~乙 与 约~5个", "甲~乙 与 约~5个");
+	caseCheck("波浪号：删除线不受影响", "~~删除线~~ 与 ~~ 空的 ~~", "~~删除线~~ 与 ~~ 空的 ~~");
+	caseCheck("连字符：两边不加空格，也不删已有的", "well-known 与 well - known", "well-known 与 well - known");
+	caseCheck("连字符：范围里的空格不动（只收中文↔数字那一格）", "第 1 - 2 章", "第1 - 2章");
+
 	// 半角引号也是包裹符号：内侧不留空格；外侧照"分隔语言"办 —— 中文旁贴紧、西文旁留一格
 	caseCheck("包裹：半角引号内侧收空格", '他说" 你好 "了', '他说"你好"了');
 	caseCheck("包裹：半角引号里的符号贴紧", '写作 " + " 与 "+" 两种', '写作"+"与"+"两种');
 	caseCheck("包裹：半角引号外侧在中文旁贴紧", '他说 "你好" 了', '他说"你好"了');
 	caseCheck("包裹：半角引号外侧在西文旁留一格", 'He said "hello" loudly', 'He said "hello" loudly');
 	caseCheck("包裹：落单的引号不动", '2" 的管子', '2" 的管子');
+
+	// 英文符号 2：英文中修饰符号与所修饰的词看作整体 —— 周围那一格是**英文自带的词距**，保留；
+	// 中文侧那条写的是「包裹符号内外均没有空格」（通用符号 3 的子条目），中文旁本来就贴紧。
+	// 两句话说的是同一件事的两面：修饰符号自己不添空格，也不删语言自带的词距
+	caseCheck("英文修饰：修饰符号与词看作整体，词距保留", 'he is the "man"', 'he is the "man"');
+	caseCheck("英文修饰：漏了词距会补上", 'he is the"man"', 'he is the "man"');
+	caseCheck("英文修饰：多个修饰符号互不影响", 'he is the "man" and "woman"', 'he is the "man" and "woman"');
+	caseCheck("英文修饰：同一个词在中文旁贴紧", '他说 "你好" 了', '他说"你好"了');
+	caseCheck("英文修饰：中文旁的括号贴紧", "he said 你好 (nihao)", "he said 你好(nihao)");
+	caseCheck("英文修饰：英文旁的括号保留词距", "the (page 3) note", "the (page 3) note");
 
 	// 关闭后回到旧行为（「全角标点前不留空格」会把符号后面那一格吃掉）
 	caseCheck(

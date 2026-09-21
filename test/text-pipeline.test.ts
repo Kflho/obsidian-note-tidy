@@ -10,20 +10,22 @@
  *   3. 开关生效 —— 「行首缩进修复」关闭时标记排版一并停用；标签排版关闭时不碰标签
  *   4. 全组合幂等 —— 同一篇笔记连跑两次不再改动（否则每次保存都会重写文件）
  */
-import { formatNoteText } from "../src/text-pipeline";
-import type { TextPipelineOptions } from "../src/text-pipeline";
-import { DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/chat-log";
-import type { ChatLogOptions } from "../src/chat-log";
-import { DEFAULT_SPACING_OPTIONS } from "../src/spacing";
-import { DEFAULT_TEXT_MATH_OPTIONS } from "../src/text-math";
+import { formatNoteText } from "../src/text/pipeline";
+import type { TextPipelineOptions } from "../src/text/pipeline";
+import { DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/text/chat-log";
+import type { ChatLogOptions } from "../src/text/chat-log";
+import { DEFAULT_SPACING_OPTIONS } from "../src/text/spacing";
+import { DEFAULT_TEXT_MATH_OPTIONS } from "../src/text/math-wrap";
 
 const T = "\t";
 const sp = (n: number): string => " ".repeat(n);
 
-/** 默认：行首缩进、标记排版、智能公式与空格排版（都与插件默认设置一致） */
+/** 默认：行首缩进、标记排版、序号、标题级别、智能公式与空格排版（都与插件默认设置一致） */
 const BASE: TextPipelineOptions = {
 	leadingIndent: "smart",
 	chat: DEFAULT_CHAT_LOG_OPTIONS,
+	listRenumber: true,
+	headingLevels: true,
 	textMath: DEFAULT_TEXT_MATH_OPTIONS,
 	mathLayout: false,
 	spacing: DEFAULT_SPACING_OPTIONS,
@@ -333,6 +335,36 @@ function idempotencyTests(): void {
 	console.log(`流水线幂等：${combos.length} 种组合 × ${inputs.length} 个用例`);
 }
 
+// -------------------------------------------------------------------- 5. 序号与标题级别
+function numberingTests(): void {
+	console.log("=== 5. 序号整理与标题级别整理 ===");
+
+	// 序号：首项不是 1 → 整段重排；首项是 1 → 不动
+	check("流水线里整理列表序号", formatNoteText("3. 甲\n4. 乙", BASE), "1. 甲\n2. 乙");
+	check("流水线里不碰已是 1 开头的列表", formatNoteText("1. 甲\n1. 乙", BASE), "1. 甲\n1. 乙");
+	check("关掉开关就不动", formatNoteText("3. 甲\n4. 乙", { ...BASE, listRenumber: false }), "3. 甲\n4. 乙");
+
+	// 标题级别：跳级压平
+	check("流水线里整理标题级别", formatNoteText("# 甲\n#### 乙", BASE), "# 甲\n## 乙");
+	check("关掉开关就不动", formatNoteText("# 甲\n#### 乙", { ...BASE, headingLevels: false }), "# 甲\n#### 乙");
+
+	// 与其它步骤共存：序号整理在标记排版（收空格）之后，标题级别整理不影响其它步骤
+	check(
+		"标记排版收完空格再整理序号",
+		formatNoteText("3.     甲\n4.    乙", BASE),
+		"1. 甲\n2. 乙"
+	);
+	check(
+		"标题级别整理与标签归位互不干扰",
+		formatNoteText("# 甲\n#数学 内容\n#### 子标题", { ...BASE, tags: { sort: true } }),
+		"# 甲\n内容 #数学\n## 子标题"
+	);
+
+	// 板块排序会把列表重排，两边的编号整理不能打架：跑完首项仍是 1
+	const sorted = formatNoteText("3. 乙\n\n4. 甲", { ...BASE, blockSort: true });
+	checkTrue("板块排序后首项仍是 1", /^1\. /.test(sorted), `实际 ${show(sorted)}`);
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 1. 各步骤串起来 ===");
 pipelineTests();
@@ -346,6 +378,8 @@ switchTests();
 console.log("=== 4. 安全与幂等 ===");
 safetyTests();
 idempotencyTests();
+
+numberingTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

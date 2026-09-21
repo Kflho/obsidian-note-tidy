@@ -9,9 +9,9 @@
  *   3. 严格幂等 —— 规范化后的形态再跑一次不变（排版功能每次保存都可能重跑）
  *   4. 与行首缩进修复串联 —— 两步合起来的结果同样幂等
  */
-import { fixBlockMarkers } from "../src/markdown-markers";
-import { fixLeadingIndent } from "../src/text-layout";
-import type { LeadingIndentMode } from "../src/text-layout";
+import { fixBlockMarkers } from "../src/text/markers";
+import { fixLeadingIndent } from "../src/text/indent";
+import type { LeadingIndentMode } from "../src/text/indent";
 
 const T = "\t";
 /** n 个空格 */

@@ -11,8 +11,8 @@
  * 第 3 级针对的是刻意构造的对抗性输入（如 `[图片]:` 这类无法解析的伪用户名
  * 搭配纯时分秒时间戳）：这类输入旧版同样无法一次到底，但绝不允许无限增长或丢字。
  */
-import { formatChatLog, DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/chat-log";
-import type { ChatLogOptions, ChatIndent, ChatImageOrder } from "../src/chat-log";
+import { formatChatLog, DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/text/chat-log";
+import type { ChatLogOptions, ChatIndent, ChatImageOrder } from "../src/text/chat-log";
 
 const IMG = "![[Pasted image 20240101120000.png]]";
 const IMG2 = "![[Pasted image 20240101120500.png]]";

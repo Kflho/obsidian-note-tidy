@@ -18,7 +18,8 @@
  * 段落不会插进列表中间。块与块之间的空行按"位置"保留，紧凑的列表排完仍然紧凑，
  * 有空行分隔的仍然空一行。
  */
-import { markProtectedLines, markIndentedCodeLines, markMathLines } from './line-scan';
+import { markProtectedLines, markIndentedCodeLines } from './line-scan';
+import { mathOpaqueLines } from './inline-scan';
 import { compareByFirstLetter } from './collate';
 
 /** 块的类型；barrier / chat 表示锚点（不参与排序，也切断排序范围） */
@@ -202,8 +203,9 @@ export function sortContentBlocks(content: string): string {
 	const lines = content.split('\n');
 	const protectedLines = markProtectedLines(lines);
 	const codeLines = markIndentedCodeLines(lines);
-	// `$$…$$` 公式整块当锚点：多行公式不能被拆成一块一块搬走
-	const mathLines = markMathLines(lines);
+	// `$$…$$` 公式整块当锚点：多行公式不能被拆成一块一块搬走。判定与标签排版共用
+	// inline-scan 的 mathOpaqueLines（同一行里成对的 `$$…$$` 不算锚点，整行照常参与排序）
+	const mathLines = mathOpaqueLines(lines, protectedLines);
 	/** 这一行不该被排序碰 */
 	const isOpaque = (at: number): boolean =>
 		protectedLines[at] === true || codeLines[at] === true || mathLines[at] === true;

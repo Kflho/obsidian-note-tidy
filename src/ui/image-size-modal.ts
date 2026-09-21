@@ -1,5 +1,5 @@
 import { App, Modal, Setting, TFile } from 'obsidian';
-import { applyImageSize, ImageSizeOptions, ImageSizeSample, validateImageSize } from '../image-size';
+import { applyImageSize, ImageSizeOptions, ImageSizeSample, validateImageSize } from '../image/size';
 
 export interface ImageSizeModalOptions {
 	/** 影响范围描述，如「当前笔记」「文件夹 聊天记录」「整个仓库」 */

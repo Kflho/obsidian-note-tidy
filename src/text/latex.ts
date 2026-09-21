@@ -25,6 +25,7 @@
  * 含 `%` 注释的公式整体跳过；行内公式里出现 `\\` 时跳过（免得把正文行截断）。
  */
 import { markProtectedLines, inlineCodeRanges } from './line-scan';
+import { dollarMarks, readInlineMath } from './inline-scan';
 
 /** token 的间隔类别：决定它与左右邻居之间留不留空格 */
 type TokenKind =
@@ -487,27 +488,6 @@ function leadingWhitespace(text: string): string {
 	return match ? match[0] : '';
 }
 
-/** 收集所有"未被保护、也不在行内代码里"的 `$$` 位置 */
-function collectMarks(lines: string[], protectedLines: boolean[]): Array<{ line: number; column: number }> {
-	const marks: Array<{ line: number; column: number }> = [];
-
-	for (let i = 0; i < lines.length; i++) {
-		if (protectedLines[i]) continue;
-		const line = lines[i] ?? '';
-		const codeRanges = inlineCodeRanges(line);
-
-		let at = line.indexOf('$$');
-		while (at >= 0) {
-			const escaped = at > 0 && line.charAt(at - 1) === '\\';
-			const inCode = codeRanges.some(([start, end]) => at < end && at + 2 > start);
-			if (!escaped && !inCode) marks.push({ line: i, column: at });
-			at = line.indexOf('$$', at + 2);
-		}
-	}
-
-	return marks;
-}
-
 /**
  * 这一段像不像一个公式区域。
  *
@@ -532,7 +512,7 @@ function formatDisplayBlocks(content: string): string {
 
 	const lines = content.split('\n');
 	const protectedLines = markProtectedLines(lines);
-	const marks = collectMarks(lines, protectedLines);
+	const marks = dollarMarks(lines, protectedLines);
 	if (marks.length < 2) return content;
 
 	// 行首偏移，用来把 (行, 列) 换算成绝对位置
@@ -597,18 +577,6 @@ function formatDisplayBlocks(content: string): string {
 	return result === content ? content : result;
 }
 
-/** 行内公式 `$…$` 的收尾 `$` 在哪；找不到返回 -1 */
-function findInlineMathEnd(line: string, start: number, inCode: (at: number) => boolean): number {
-	for (let i = start; i < line.length; i++) {
-		if (line.charAt(i) !== '$') continue;
-		if (line.charAt(i - 1) === '\\' || line.charAt(i + 1) === '$' || inCode(i)) continue;
-		// 收尾 `$` 前面紧贴内容才算公式（`$x $` 在 Obsidian 里不是公式）
-		if (/\s/.test(line.charAt(i - 1))) return -1;
-		return i;
-	}
-	return -1;
-}
-
 /**
  * 行内公式排版：`$M=1$` → `$M = 1$`。
  *
@@ -660,26 +628,29 @@ function formatInlineMath(content: string): string {
 				continue;
 			}
 
-			const end = findInlineMathEnd(line, at + 1, inCode);
-			if (end < 0) {
+			// 行内公式的识别交给共用实现（inline-scan.readInlineMath）："`$` 内侧紧贴内容
+			// 才算公式"是 Obsidian 认不认得出公式的前提，空格排版与智能公式用的是同一份判定。
+			// 调用点已经排除了 `$$`（显示公式定界符走上面那条路），所以 math 一定是 `$…$`
+			const math = readInlineMath(line, at, inCode);
+			if (!math) {
 				out += '$';
 				index = at + 1;
 				continue;
 			}
 
-			const body = line.substring(at + 1, end);
+			const body = math.text.substring(1, math.text.length - 1);
 			const segments = renderTokens(tokenize(body));
 			// 出现 `\\` 就会切成多行：行内公式不能截断正文，整段跳过
 			if (segments.length !== 1) {
-				out += line.substring(at, end + 1);
-				index = end + 1;
+				out += math.text;
+				index = math.next;
 				continue;
 			}
 
 			const fixed = segments[0] ?? '';
 			if (fixed !== body) touched = true;
 			out += `$${fixed}$`;
-			index = end + 1;
+			index = math.next;
 		}
 
 		if (touched) {

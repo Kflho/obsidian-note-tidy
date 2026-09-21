@@ -6,7 +6,7 @@ import {
 	chooseLinkTarget,
 	isImagePath,
 	resolveImageLink,
-} from './image-links';
+} from './links';
 
 /**
  * 整理笔记里的图片位置。

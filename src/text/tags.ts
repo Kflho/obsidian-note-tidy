@@ -19,7 +19,8 @@
  * 行内代码、`%%注释%%`、双链与 Markdown 链接（`[[笔记#标题]]`、`[文字](url#锚点)` 里的 `#` 不是标签）。
  * 不带行首竖线的"表格"（`甲 | 乙 | #标签 丙`）分不清列边界，整行不动。
  */
-import { markProtectedLines, markIndentedCodeLines, markMathLines } from './line-scan';
+import { markProtectedLines, markIndentedCodeLines } from './line-scan';
+import { mathOpaqueLines } from './inline-scan';
 import { compareByFirstLetter } from './collate';
 
 export interface TagLayoutOptions {
@@ -358,8 +359,10 @@ export function formatTags(content: string, options: TagLayoutOptions = DEFAULT_
 	const lines = content.split('\n');
 	const protectedLines = markProtectedLines(lines);
 	const codeLines = markIndentedCodeLines(lines);
-	// `$$…$$` 里的 `#` 不是标签（例如 \textcolor{#fff}{…}），整块不动
-	const mathLines = markMathLines(lines);
+	// `$$…$$` 里的 `#` 不是标签（例如 \textcolor{#fff}{…}）。判定与空格排版共用同一套
+	// （inline-scan 的 mathOpaqueLines）：跨行区块整行不动，而同一行里成对的 `$$…$$`
+	// 整行照常排版 —— 标签该归位就归位，公式那段在 token 层是整体，碰不到
+	const mathLines = mathOpaqueLines(lines, protectedLines);
 	const parsed = lines.map(line => parseLine(line));
 	const out: string[] = [];
 	let changed = false;

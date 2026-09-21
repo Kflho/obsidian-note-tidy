@@ -15,7 +15,7 @@
 import type { App } from "obsidian";
 import { DEFAULT_SETTINGS, ImageTransferSettingTab } from "../src/settings";
 import type { ImageTransferSettings } from "../src/settings";
-import { DEFAULT_SPACING_OPTIONS } from "../src/spacing";
+import { DEFAULT_SPACING_OPTIONS } from "../src/text/spacing";
 import type ImageTransferPlugin from "../src/main";
 
 // -------------------------------------------------------------------- 断言

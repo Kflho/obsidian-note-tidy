@@ -10,8 +10,8 @@
  *   4. 严格幂等 —— 排好版的内容再跑一次不变
  *   5. 关闭排序 —— 标签保持原有先后顺序
  */
-import { formatTags, DEFAULT_TAG_LAYOUT_OPTIONS } from "../src/tags";
-import type { TagLayoutOptions } from "../src/tags";
+import { formatTags, DEFAULT_TAG_LAYOUT_OPTIONS } from "../src/text/tags";
+import type { TagLayoutOptions } from "../src/text/tags";
 
 const T = "\t";
 const sp = (n: number): string => " ".repeat(n);
@@ -182,6 +182,35 @@ function guardTests(): void {
 		"聊天记录正文照常处理",
 		formatTags(["张三: 2024/01/05 14:30:25", `${sp(4)}#标签 你好`].join("\n"), SORTED),
 		["张三: 2024/01/05 14:30:25", `${sp(4)}你好 #标签`].join("\n")
+	);
+
+	// `$$…$$`：跨行区块里的 `#` 不是标签（`\textcolor{#fff}{…}`），整行不动；
+	// 同一行里成对的 `$$…$$` 是行内公式，整行照常排版 —— 标签该归位就归位。
+	// 两种问法共用 inline-scan 的同一套判定（以前这里与空格排版打架，见规则登记表 cross.math-recognition）
+	check(
+		"跨行 $$ 区块内部整行不动",
+		formatTags(["$$", String.raw`\textcolor{#fff}{x} + 1`, "$$"].join("\n"), SORTED),
+		["$$", String.raw`\textcolor{#fff}{x} + 1`, "$$"].join("\n")
+	);
+	check(
+		"跨行 $$ 的起始行整行不动（标签不会被挪进公式）",
+		formatTags(["#标签 $$", "x = 1", "$$"].join("\n"), SORTED),
+		["#标签 $$", "x = 1", "$$"].join("\n")
+	);
+	check(
+		"跨行 $$ 的结束行整行不动",
+		formatTags(["$$", "x = 1", "$$ 后面的 #标签"].join("\n"), SORTED),
+		["$$", "x = 1", "$$ 后面的 #标签"].join("\n")
+	);
+	check(
+		"同一行成对的 $$…$$：标签照常归位",
+		formatTags("#标签 正文 $$e^{At}$$ 后面", SORTED),
+		"正文 $$e^{At}$$ 后面 #标签"
+	);
+	check(
+		"同一行成对的 $$…$$：公式内部一个字符都不动",
+		formatTags(String.raw`#标签 正文 $$\textcolor{#fff}{x}$$`, SORTED),
+		String.raw`正文 $$\textcolor{#fff}{x}$$ #标签`
 	);
 }
 

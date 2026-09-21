@@ -1,5 +1,15 @@
 # Obsidian community plugin
 
+## 本项目专属约定（改代码前先读）
+
+本仓库是 **note-tidy** 插件。目录结构、改动流程与不可破坏的约定写在 **`CLAUDE.md`**（同一份文档，供所有 agent 共用）；规则与规范的对照表在 **`src/rule-registry.ts`** 与 **`docs/规则登记表.md`**。动手前请先看这两处，要点：
+
+- **加/改一条排版规则**要动六处：`src/text/<模块>.ts` 实现 → `src/text/pipeline.ts` 接线 → `src/settings/model.ts` + `src/settings/fields/` 开关 → `src/tasks.ts` 的选项转换 → `src/rule-registry.ts` 登记（并跑 `node test/run-tests.mjs --update-rules-doc`）→ `test/<模块>.test.ts` + `test/run-tests.mjs` 登记。`npm test` 会核对这六处是否一致。
+- **加设置项**只改 `src/settings/model.ts` + `src/settings/fields/`：面板的两条渲染路径都由字段表生成，别再去手写 DOM。
+- **不可破坏**：排版函数必须幂等、必须在没有改动时返回原内容、保护区判定统一走 `src/text/line-scan.ts` 与 `src/text/inline-scan.ts`、`src/text/` 不许 import obsidian。
+- **命令 ID、导出符号、设置字段名是稳定接口**，改名会直接让 `test/commands.test.ts` / `test/rules.test.ts` 失败。
+- **规范笔记改了**（vault 里的 `data/data note/note note.md`）：先改 `rule-registry.ts` 的章节路径与条目号，再跑 `npm test`，最后重新生成文档。
+
 ## Project overview
 
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).

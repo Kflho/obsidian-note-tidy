@@ -78,6 +78,21 @@ export function dollarPositions(line: string): number[] {
 }
 
 /**
+ * 整篇笔记里所有 `$$` 标记的位置（行号 + 列号），跳过保护区。
+ * 公式排版的区块配对用它，配对逻辑见 mathRanges —— 扫描只有 dollarPositions 一份。
+ */
+export function dollarMarks(lines: string[], protectedLines: boolean[]): Array<{ line: number; column: number }> {
+	const marks: Array<{ line: number; column: number }> = [];
+
+	for (let i = 0; i < lines.length; i++) {
+		if (protectedLines[i]) continue;
+		for (const column of dollarPositions(lines[i] ?? '')) marks.push({ line: i, column });
+	}
+
+	return marks;
+}
+
+/**
  * 每行"可以排版"的区间（左闭右开）；`null` 表示整行跳过。
  *
  * - **同一行里成对的 `$$…$$`**（`公式如下：$$e^{At} = …$$`）不是区块：整行照常排版，
@@ -132,9 +147,31 @@ export function mathRanges(lines: string[], protectedLines: boolean[]): Array<[n
 }
 
 /**
+ * 「整行别碰」的公式行 —— 只从 mathRanges 派生，判定只有一条：
+ * **这一行不能整行当普通文字排**。
+ *
+ * - `null`（跨行 `$$` 区块内部，整行是 LaTeX 代码）→ 别碰：里面的 `#fff`、`|` 都不是正文；
+ * - 起始行 `$$` 之前、结束行 `$$` 之后（只有一部分可排）→ 也整行别碰 ——
+ *   行级消费者（标签归位、板块排序）没有"只排某一段"的能力，缩成整行跳过最安全，
+ *   否则标签可能被挪进公式代码里；
+ * - **同一行里成对的 `$$…$$`**（`正文 $$e^{At}$$ 后面`）→ 整行照常排版，不算别碰：
+ *   公式本身在 token 层当一段整体跳过，标签归位挪的是行内文字，碰不到公式。
+ *
+ * 最后这条正是以前两套判定打架的地方：`line-scan.markMathLines` 把含 `$$` 的行一律当保护区，
+ * 而 `mathRanges` 认为成对 `$$` 的行整行可排 —— 「标签该不该归位」于是表现不一致。
+ * 现在两种问法都由这里回答，`markMathLines` 已删除。
+ */
+export function mathOpaqueLines(lines: string[], protectedLines: boolean[]): boolean[] {
+	return mathRanges(lines, protectedLines).map((range, index) => {
+		if (range === null) return true;
+		return !(range[0] === 0 && range[1] === (lines[index] ?? '').length);
+	});
+}
+
+/**
  * 读一段行内公式。
  *
- * 识别方式与 Obsidian、latex-layout.ts 保持一致：`$` 内侧紧贴内容才算公式，
+ * 识别方式与 Obsidian、latex.ts 保持一致：`$` 内侧紧贴内容才算公式，
  * `$ 5 与 $` 这种不会误判；`$$…$$` 整体当一段公式。
  *
  * @returns 公式文本与下一个位置；不是公式时返回 null

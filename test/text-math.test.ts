@@ -12,7 +12,7 @@
  *   4. 开关 —— 关掉后一个字都不改
  *   5. 严格幂等 —— 包好的公式再跑一次不会被包第二层
  */
-import { DEFAULT_TEXT_MATH_OPTIONS, wrapPlainMath } from "../src/text-math";
+import { DEFAULT_TEXT_MATH_OPTIONS, wrapPlainMath } from "../src/text/math-wrap";
 
 // -------------------------------------------------------------------- 断言
 let checks = 0;

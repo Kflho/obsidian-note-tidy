@@ -8,7 +8,7 @@ import { App, TFile, TFolder, normalizePath } from 'obsidian';
  * - ensureFolder 只在真的要写入时才创建，避免给没有图片的笔记凭空建出空文件夹
  */
 
-/** 只依赖这两个设置项，避免与 settings.ts 产生循环依赖 */
+/** 只依赖这两个设置项，避免与 settings/ 产生循环依赖 */
 export interface AttachmentLocationSettings {
 	attachmentLocation: string;
 	customAttachmentFolder: string;

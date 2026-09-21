@@ -8,8 +8,8 @@
  *   2. 幂等 —— 尺寸已经正确时 changed 为 0，内容一字不变
  *   3. 安全 —— 非图片链接、含说明文字的别名、未开启覆盖时一律不碰
  */
-import { applyImageSize, toSizeString, validateImageSize } from "../src/image-size";
-import type { ImageSizeOptions } from "../src/image-size";
+import { applyImageSize, toSizeString, validateImageSize } from "../src/image/size";
+import type { ImageSizeOptions } from "../src/image/size";
 
 // -------------------------------------------------------------------- 断言
 let checks = 0;
