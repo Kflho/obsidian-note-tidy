@@ -23,13 +23,14 @@
  *    小数点 / 版本号（`1.2.2`、`12:30`）、省略号（`...`）不适用。
  * 7. **括号 `()`**：内侧不留空格（英文符号 3）。
  * 8. **数字 ↔ 单位**：空一格（数学符号 2），默认关闭，单位须落在词表里。
- * 9. **符号自己的空格规则**（symbols.ts）：逐符号判定，不是一个"符号周围一律加空格" ——
- *    `, . ! ? :` 后空一格、`| & →` 左右空一格、`"` 左引号后 / 右引号前空一格（右引号后不空）、
- *    `^` 前后不空、`...` 前后不空、`：` 紧跟内容、`||`（包裹符号）贴紧。
- *    「符号与符号之间」（标点符号·概论 4）说这条是强制的：`如, ：`、`| ：`、`→ ：` 都要留那一格，
- *    所以 `：` 的"前不留空格"在左邻是要求空格的符号时让位；两边都说不留才删。
- *    `|x|`、`P(A|B)`、`x̂_{k|k}` 这类竖线属于数学记号（紧贴字母 / 数字 / `_` `^` `{` `}` `\`），
- *    按"写一起的就直接写一起"处理，一个字符都不动。
+ * 9. **符号自己的空格规则**（symbols.ts）：**空格只用来分隔不同语言的内容** ——
+ *    `space` 一律读作"与西文内容（字母 / 数字 / 公式 / 行内代码）之间留一格"，
+ *    邻居是中文、全角标点、另一个符号时都贴紧（已有的空格一并收掉）。
+ *    依据是中文排版规范：clreq §6.3.3（汉字与西文字母、数字之间不多于 1/4 汉字宽的字距或空白，
+ *    标点旁边连这个空隙都不加）、§1.2（汉字与标点是 1:1 方块、无缝隙并列），
+ *    以及 CSS `text-autospace` 的默认值（只在中西文之间加空隙，标点要显式开 `punctuation`）。
+ *    于是 `word, word` / `A & B` / `$A$ & $B$` 留一格，而 `甲&乙`、`如, ：`、`|：单独一个`、
+ *    `7. 并列：&` 全部贴紧；`|x|`、`P(A|B)`、`x̂_{k|k}` 这类竖线属于数学记号，一个字符都不动。
  *
  * 不管的地方（不碰就是最安全的排版）：
  * - frontmatter、围栏代码块、缩进代码块、`$$…$$` 公式块（含中间那些行，整块跳过）、
@@ -52,6 +53,7 @@ import {
 	CLOSE_QUOTE_RULE,
 	OPEN_QUOTE_RULE,
 	PACKAGE_RULE,
+	STANDALONE_PIPE_RULE,
 	SYMBOL_RULES as SYMBOL_TABLE,
 	isMathGlue,
 	isSymbolChar,
@@ -786,11 +788,7 @@ function markPipePieces(pieces: Piece[]): void {
 			&& isMathGlue(before.text.slice(-1));
 		const gluedRight = after !== undefined && after.kind !== 'space'
 			&& isMathGlue(after.text.charAt(0));
-		piece.rule = gluedLeft || gluedRight ? PACKAGE_RULE : {
-			left: 'space',
-			right: 'space',
-			source: 'latex 符号格式 4（单独一个）',
-		};
+		piece.rule = gluedLeft || gluedRight ? PACKAGE_RULE : STANDALONE_PIPE_RULE;
 		i++;
 	}
 }
@@ -864,13 +862,51 @@ function markQuotePieces(pieces: Piece[]): void {
 	}
 }
 
-/** 符号相关的成串扫描：`...`、`|`、`&&`、半角引号、缩写里的点与和号 */
+/** 西文内容：字母 / 数字 / 公式 / 行内代码（`scope: 'latin'` 的符号认这个当"西文语境"） */
+function isLatinContent(piece: Piece | null): boolean {
+	return piece !== null && (isForeign(piece) || isRawDigit(piece) || piece.kind === 'math');
+}
+
+/** 从 index 往 step 方向找第一个非空白 piece（行首 / 行尾返回 null） */
+function neighbourOf(pieces: Piece[], index: number, step: 1 | -1): Piece | null {
+	for (let i = index + step; i >= 0 && i < pieces.length; i += step) {
+		const piece = pieces[i];
+		if (!piece) break;
+		if (piece.kind === 'space') continue;
+		return piece;
+	}
+	return null;
+}
+
+/**
+ * `scope: 'latin'` 的符号（`&` `|` `→` 与引号外侧）：**两侧都是西文内容**才算法"西文语境"，
+ * 这时按英文规则留一格；只要有一侧是中文或符号，整条符号就按中文/数学符号处理，两侧都贴紧。
+ *
+ * 这样同一个符号不会一边留一格、一边贴紧：`A & B`、`mm → voxel` 留一格，
+ * 而 `甲 & 乙`、`前向 → 批量消融前向`、`rel+pred_full → 批量` 统统收成贴紧。
+ * 行首 / 行尾那一侧没有邻居，不算"不是西文"（`| $A$ …` 这种行内分隔符的留白因此保住）。
+ */
+function markLatinContextPieces(pieces: Piece[]): void {
+	for (let i = 0; i < pieces.length; i++) {
+		const piece = pieces[i];
+		if (!piece || piece.rule?.scope !== 'latin') continue;
+
+		const before = neighbourOf(pieces, i, -1);
+		const after = neighbourOf(pieces, i, 1);
+		const blocked = (side: Piece | null): boolean => side !== null && !isLatinContent(side);
+		if (!blocked(before) && !blocked(after)) continue;
+		piece.rule = { ...piece.rule, left: 'none', right: 'none' };
+	}
+}
+
+/** 符号相关的成串扫描：`...`、`|`、`&&`、半角引号、缩写，最后定"西文语境" */
 function markSymbolPieces(pieces: Piece[]): void {
 	markEllipsisRuns(pieces);
 	markPipePieces(pieces);
 	markSymbolRuns(pieces, '&');
 	markQuotePieces(pieces);
 	markAbbreviationPieces(pieces);
+	markLatinContextPieces(pieces);
 }
 
 // ------------------------------------------------------------------ 间距规则
@@ -904,45 +940,46 @@ function defersToWrapper(piece: Piece): boolean {
 	return piece.kind === 'fpunct' && piece.fp !== 'other';
 }
 
-/** 符号"要一格"的邻居：内容，或另一个认得的符号（`：` `|` `&` `→` `^` `...` 与 `/`） */
-function acceptsSymbolPad(piece: Piece): boolean {
-	if (isContent(piece)) return true;
-	if (piece.rule !== undefined) return true;
-	return piece.kind === 'other' && piece.text === '/';
+/**
+ * 认不出来的邻居：`other` 里没有自己规则的杂项（希腊字母 `ε`、`*`、`%`、`[`、`\` …）。
+ *
+ * 这些既不是中文也不是认得的符号，规则不敢替它们做主 —— 删空格会把
+ * `(ε_r, ε_a)`、`test_XX_<被测函数>. m` 这类写法拆坏，所以遇到它们"不动"。
+ */
+function isUnknownPiece(piece: Piece): boolean {
+	return piece.kind === 'other' && piece.rule === undefined && !isSymbolChar(piece.text);
 }
 
 /**
  * 取一个符号对自己某一侧的要求。
  *
- * 一条规则只回答两件事：**左边要不要一格、右边要不要一格**。"有内容才有一格"是所有
- * 空间的共同前提（行首左边、行尾右边没东西，自然就没有空格 —— `→ ：` 里 `→` 在行首，
- * 它左边不需要谁去"决定不留空格"），所以这里不拿"邻居算不算内容"去卡规则。
+ * `scope: 'latin'` 的符号已经由 `markLatinContextPieces` 定过语境（非西文语境的一律改成贴紧），
+ * 所以这里的判断只是兜底。
  *
- * 唯一的例外是 `：`（contentOnly）：标记命名 4 说的是"**内容**后标注或解释"，
- * 左边是符号时它不作主，让那个符号按自己的规则决定那一格。
- *
- * `space` 还要求邻居是"内容或认得的符号"：后面是 `*` `=` `+` `-` `\` `#` `%` 这些
- * 笔记里"非数学语境不加空格"的运算符 / 标记时不动 —— `1.*`、`x=y`、`ctrl+c` 一拆就错。
+ * - `space`（要一格）：邻居在规则的作用范围里就留一格（`word, word`、`A & B`、
+ *   `1.矩阵指数` → `1. 矩阵指数`）；邻居是中文或认得的符号却不在范围内 → 贴紧
+ *   （`甲 & 乙` → `甲&乙`、`如, ：` → `如,：`）；邻居认不出来 → 不动；
+ * - `none`（不留）：一律生效（`中文 ：内容` → `中文：内容`、`x ^ 2` → `x^2`）；
+ * - 行首左边、行尾右边没有邻居，自然没有空格要判。
  */
 function symbolPadOf(piece: Piece, side: 'left' | 'right', neighbour: Piece): SymbolPad | undefined {
 	const rule = piece.rule;
 	if (!rule) return undefined;
-	if (rule.contentOnly === true && !isContent(neighbour)) return undefined;
 
 	const pad = side === 'left' ? rule.left : rule.right;
 	if (pad !== 'space') return pad;
-	if (!acceptsSymbolPad(neighbour)) return 'keep';
-	return 'space';
+	if (isUnknownPiece(neighbour)) return 'keep';
+
+	const accepts = rule.scope === 'latin' ? isLatinContent(neighbour) : isContent(neighbour);
+	return accepts ? 'space' : 'none';
 }
 
 /**
- * 符号自己的空格规则（标点符号·概论 4「符号与符号之间」）。
+ * 符号自己的空格规则。
  *
- * 两个符号相邻时，**"不留空格"的一方先说话**（标点前不留空格是硬规矩：`syst.,` 里的
- * 缩写点不能被后面那个逗号顶开），没人说不留才看谁要空格 ——
- * 所以 `如, ：`、`| ：`、`→ ：`、`& ：` 都留那一格（`：` 是 contentOnly，遇上符号不作主，
- * 让位给要空格的符号），`7. 并列：&` 也一样（`&` 左边要一格）；
- * 而 `x ^ 2` 收成 `x^2`、`： 内容` 收成 `：内容`。
+ * 两个符号相邻时贴紧 —— `如, ：` → `如,：`、`| ：单独一个` → `|：单独一个`
+ * （符号的"要一格"只朝西文内容生效，所以这种位置上两边都不作主）；
+ * 一边是西文内容时按规则留一格：`$A$ & $B$`、`A & B`、`word, word`。
  *
  * 遇到括号 / 书名号 / 引号这类包裹符号就让位给原有分支（`word (x)`、`如《书》等` 原样保留）。
  */
@@ -1029,14 +1066,14 @@ function decideGap(previous: Piece | null, next: Piece, gap: string, options: Sp
 }
 
 /**
- * 行首标记（列表 `-` `1.`、标题 `#`、引用 `>`）：标记与它后面那一个空格是语法，
- * 交给标记排版（markdown-markers.ts）管，空格规则不许碰 ——
+ * 行首标记（列表 `-` `1.`、标题 `#`、引用 `>`，以及列表项里的任务复选框 `- [x]`）：
+ * 标记与它后面那一个空格是语法，交给标记排版（markdown-markers.ts）管，空格规则不许碰 ——
  * 否则 `1. , /. …` 里的 `,` 会按"标点前不留空格"把列表标记后面那一个空格吃掉。
  *
  * 要求标记后面确实跟着空白：`1.矩阵指数` 不是标记（它的空格该由规则补上），
  * `#标签` 也不是标题。
  */
-const LINE_MARKER_RE = /^(?:[-*+]|\d{1,9}[.)]|#{1,6}|>+)[ \t]+/;
+const LINE_MARKER_RE = /^(?:[-*+]|\d{1,9}[.)]|#{1,6}|>+)[ \t]+(?:\[[ xX]\][ \t]+)?/;
 
 /** 处理一行 */
 function formatLine(line: string, options: SpacingOptions): string {
