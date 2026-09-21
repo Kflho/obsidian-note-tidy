@@ -127,6 +127,16 @@ function pipelineTests(): void {
 	check("空格排版：中文与数字之间不留空格", formatNoteText("第 3 章 的 内容", BASE), "第3章 的 内容");
 	check("空格排版：公式与文字之间补空格", formatNoteText("设$x$为未知数", BASE), "设 $x$ 为未知数");
 	check("空格排版：全角标点两侧不留空格", formatNoteText("中文 ，内容 。", BASE), "中文，内容。");
+	// 跨步骤收敛：`数字 ↔ 单位` 补出的那一格，智能公式在**同一次**排版里就认出来
+	check(
+		"跨步骤：单位空格 → 公式（一次到位）",
+		formatNoteText("- [ ] 目标：把 5/10mm 偏移纳入训练", {
+			...BASE,
+			mathLayout: true,
+			spacing: { ...DEFAULT_SPACING_OPTIONS, digitUnit: true },
+		}),
+		"- [ ] 目标：把 $5/10mm$ 偏移纳入训练"
+	);
 	check(
 		"空格排版：全部规则关闭时不动",
 		formatNoteText(
@@ -292,6 +302,10 @@ function idempotencyTests(): void {
 		["$$a \\\\", "b$$ 后面的正文 #标签"].join("\n"),
 		// 变量表要迭代到不动点才收敛
 		["设 $z$ 为复数。", "", "讨论 z 的模长与 Z 的模长", "", "取 z=0 时成立"].join("\n"),
+		// 跨步骤：`数字 ↔ 单位` 补出的那一格要让智能公式在同一轮里就认得出算式
+		["- [ ] 目标：把 5/10mm 偏移鲁棒性纳入训练", "", "取 0/5/10mm 三档"].join("\n"),
+		// 跨步骤：公式排版改掉的键会让板块排序再动一次
+		["# 指标", "", "- 结论 $w\\approx 0$ 时稳定", "", "- 备注 别的说明"].join("\n"),
 	];
 	const combos: TextPipelineOptions[] = [
 		BASE,

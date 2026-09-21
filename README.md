@@ -348,7 +348,7 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 | Module | Responsibility |
 |--------|----------------|
 | `src/chat-log.ts` | chat log layout (username / date / time toggles, indent, image order, blank lines) |
-| `src/text-pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → plain-text math → formulas → word spacing → tags → block sorting |
+| `src/text-pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → plain-text math → formulas → word spacing → tags → block sorting, and **iterates the whole pipeline to a fixed point** (at most 5 rounds, 1–3 in practice): a later step changes text an earlier step looked at — the space the number↔unit rule adds is what makes plain-text math recognise `5/10mm` as an expression, and normalizing `$w\approx 0$` to `$w \approx 0$` changes the key block sorting uses. Without the loop, "run it twice" would edit more lines than "run it once", so every save would rewrite the file |
 | `src/text-math.ts` | plain-text math detection — `矩阵 A`, `n维`, `V(F)`, `x = 0`, `λ` → `$…$`, plus the variable table that reads variables out of the note's existing formulas |
 | `src/inline-scan.ts` | shared inline protection — code spans, links, URLs, tags, comments, existing `$…$` |
 | `src/text-layout.ts` | general layout fixes — leading indentation (4 spaces = 1 tab) |

@@ -55,16 +55,8 @@ export interface TextPipelineOptions {
 	blockSort: boolean;
 }
 
-/**
- * 修复一篇笔记的排版。
- *
- * @param raw 笔记原文
- * @param options 各步骤的选项（由插件设置转换而来）
- * @returns 排版后的内容；没有任何改动时原样返回（调用方据此避免无谓写盘）
- */
-export function formatNoteText(raw: string, options: TextPipelineOptions): string {
-	if (raw === '') return raw;
-
+/** 按固定顺序跑一遍所有步骤（不做迭代，见 formatNoteText） */
+function runPipelineOnce(raw: string, options: TextPipelineOptions): string {
 	let content = fixLeadingIndent(raw, options.leadingIndent);
 	// 「行首缩进修复」关掉时整块文本排版都停用，用户拿它当总开关
 	if (options.leadingIndent !== 'off') content = fixBlockMarkers(content);
@@ -74,6 +66,45 @@ export function formatNoteText(raw: string, options: TextPipelineOptions): strin
 	content = fixSpacing(content, options.spacing);
 	if (options.tags) content = formatTags(content, options.tags);
 	if (options.blockSort) content = sortContentBlocks(content);
+
+	return content;
+}
+
+/**
+ * 整条流水线的最多轮数（跑一遍不再变化就提前停）。
+ *
+ * 每一轮最多新增一批 `$…$`，而"能包的位置"是有限的，所以轮数有限；实测 1–3 轮。
+ */
+const MAX_PIPELINE_ROUNDS = 5;
+
+/**
+ * 修复一篇笔记的排版。
+ *
+ * ## 为什么要跑不止一遍
+ *
+ * 每个步骤自己是幂等的（同一份输入跑两次结果一样），但**后面的步骤会改前面的步骤看过的文本**，
+ * 于是"跑一遍"与"跑两遍"结果不同 —— 那样用户每次保存都会被再改一次。实测到的两条：
+ *
+ * - 「数字 ↔ 单位」会给 `5/10mm` 补上那一格变成 `5/10 mm`（空格排版，第 6 步），
+ *   而智能公式（第 4 步）要看到 `5/10 mm` 才认得出这是算式 —— 下一轮才包成 `$5/10 mm$`；
+ * - 公式排版把 `$w\\approx 0$` 规范成 `$w \approx 0$`（第 5 步）会改变**板块排序的键**
+ *   （键就是块首那一行，第 8 步），于是排序结果又变一次。
+ *
+ * 所以整条流水线一起迭代到不动点：一次命令 = 一直跑到不再变化。
+ *
+ * @param raw 笔记原文
+ * @param options 各步骤的选项（由插件设置转换而来）
+ * @returns 排版后的内容；没有任何改动时原样返回（调用方据此避免无谓写盘）
+ */
+export function formatNoteText(raw: string, options: TextPipelineOptions): string {
+	if (raw === '') return raw;
+
+	let content = raw;
+	for (let round = 0; round < MAX_PIPELINE_ROUNDS; round++) {
+		const next = runPipelineOnce(content, options);
+		if (next === content) break;
+		content = next;
+	}
 
 	return content;
 }
