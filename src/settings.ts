@@ -1,4 +1,5 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
+import type { SettingDefinitionItem } from "obsidian";
 import ImageTransferPlugin from "./main";
 import type { ChatImageOrder, ChatIndent } from "./chat-log";
 import { DEFAULT_LEADING_INDENT_MODE, resolveLeadingIndentMode } from "./text-layout";
@@ -146,7 +147,18 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 	// display() is the standard PluginSettingTab lifecycle method.
 	// getSettingDefinitions() (since Obsidian 1.13.0) does not support
 	// dynamic conditional UI needed for the attachment folder input.
+	/**
+	 * Obsidian 1.13 以下走这里：手写 DOM。
+	 * 1.13 起只要 getSettingDefinitions() 返回非空数组，Obsidian 就不再调用
+	 * display()（见 obsidian.d.ts 的说明），而是按声明式定义渲染。
+	 * 两边必须一一对应 —— test/settings.test.ts 会检查每个设置项都有定义。
+	 */
 	display(): void {
+		this.renderSettings();
+	}
+
+	/** 1.13 以下的手写渲染。切换某项会改变其它项的可见 / 可用状态，所以整块重画 */
+	private renderSettings(): void {
 		const { containerEl } = this;
 
 		containerEl.empty();
@@ -174,7 +186,7 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 					this.plugin.settings.attachmentLocation = value;
 					await this.plugin.saveSettings();
 					// 重新渲染设置页面，以动态显示或隐藏下方的输入框
-					this.display(); 
+					this.renderSettings(); 
 				}));
 
 		// 只有当用户选择了需要输入文件夹名称的选项时，才显示此输入框
@@ -400,7 +412,7 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 					this.plugin.settings.tagLayout = value;
 					await this.plugin.saveSettings();
 					// 重新渲染，刷新「标签排序」的可用状态
-					this.display();
+					this.renderSettings();
 				}));
 
 		new Setting(containerEl)
@@ -452,7 +464,7 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 					this.plugin.settings.chatShowUsername = value;
 					await this.plugin.saveSettings();
 					// 重新渲染，刷新「消息之间插入空行」的可用状态
-					this.display();
+					this.renderSettings();
 				}));
 
 		new Setting(containerEl)
@@ -463,7 +475,7 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.chatShowDate = value;
 					await this.plugin.saveSettings();
-					this.display();
+					this.renderSettings();
 				}));
 
 		new Setting(containerEl)
@@ -474,7 +486,7 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.chatShowTime = value;
 					await this.plugin.saveSettings();
-					this.display();
+					this.renderSettings();
 				}));
 
 		new Setting(containerEl)
@@ -516,5 +528,432 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 					this.plugin.settings.chatBlankLineBetweenMessages = value;
 					await this.plugin.saveSettings();
 				}));
+	}
+
+	/**
+	 * Obsidian 1.13+ 的声明式设置：面板由这份定义渲染，并据此建立设置搜索索引。
+	 * 定义里的 key 就是 settings 的字段名，读写走下面的 getControlValue /
+	 * setControlValue（默认实现读 this.plugin.settings，这里补上旧数据的收敛）。
+	 */
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		const headerIsEmpty = () => !this.plugin.settings.chatShowUsername
+			&& !this.plugin.settings.chatShowDate
+			&& !this.plugin.settings.chatShowTime;
+
+		return [
+			{
+				type: 'group',
+				heading: '图片导入',
+				items: [
+					{
+						name: '附件存储位置',
+						control: {
+							type: 'dropdown',
+							key: 'attachmentLocation',
+							defaultValue: DEFAULT_SETTINGS.attachmentLocation,
+							options: {
+								system: '跟随系统设置 (默认)',
+								root: '仓库的根目录',
+								current: '当前文件所在的文件夹',
+								subfolder: '当前文件所在文件夹下指定的子文件夹',
+								custom: '指定的附件文件夹',
+							},
+						},
+					},
+					{
+						name: '附件文件夹名称',
+						visible: () => this.plugin.settings.attachmentLocation === 'subfolder'
+							|| this.plugin.settings.attachmentLocation === 'custom',
+						control: {
+							type: 'text',
+							key: 'customAttachmentFolder',
+							placeholder: 'Attachments',
+							defaultValue: DEFAULT_SETTINGS.customAttachmentFolder,
+						},
+					},
+					{
+						name: '图片命名预设',
+						desc: '支持占位符: {YYYY} {MM} {DD} {HH} {mm} {ss}',
+						control: {
+							type: 'text',
+							key: 'imageNamePreset',
+							placeholder: 'Pasted image {YYYY}{MM}{DD}{HH}{mm}{ss}',
+							defaultValue: DEFAULT_SETTINGS.imageNamePreset,
+						},
+					},
+					{
+						name: '重命名后链接格式',
+						desc: '控制图片重命名后，笔记内链接使用完整路径还是仅文件名',
+						control: {
+							type: 'dropdown',
+							key: 'renameLinkFormat',
+							defaultValue: DEFAULT_SETTINGS.renameLinkFormat,
+							options: {
+								full: '完整路径',
+								filename: '仅文件名',
+							},
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: '图片大小',
+				items: [
+					{
+						name: '默认宽度',
+						desc: '打开设置弹窗时的默认宽度，单位为像素。宽度与高度都留空表示移除已有尺寸',
+						control: {
+							type: 'text',
+							key: 'imageSizeWidth',
+							placeholder: '100',
+							defaultValue: DEFAULT_SETTINGS.imageSizeWidth,
+						},
+					},
+					{
+						name: '默认高度',
+						desc: '可留空，此时图片按宽度等比例缩放',
+						control: {
+							type: 'text',
+							key: 'imageSizeHeight',
+							placeholder: '留空',
+							defaultValue: DEFAULT_SETTINGS.imageSizeHeight,
+						},
+					},
+					{
+						name: '覆盖已有尺寸',
+						desc: '关闭后只给还没有尺寸的图片补上，已有尺寸的图片保持不动',
+						control: {
+							type: 'toggle',
+							key: 'imageSizeOverwrite',
+							defaultValue: DEFAULT_SETTINGS.imageSizeOverwrite,
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: '代码格式',
+				items: [
+					{
+						name: '公式排版',
+						desc: '整理数学公式：$$…$$ 区块与行内 $…$（行内只按空格规则整理、绝不换行）。原则是"代码里的空格 = 公式渲染出来的空格"：运算 / 逻辑 / 排版符号（= + - \\le \\to \\in、&、\\\\）左右各空一格；一元正负号与 \\partial \\delta \\sin 这类命令和参数之间贴紧（会吃掉命令名时写成 \\delta{x}）；逗号前不加、后加一个空格；多余的空格与换行删掉。只在 \\\\ 处换行，续行缩进 = 首行缩进 + 1 个 tab；$$ 与内容之间不留空格。间距命令与后面字母粘连（\\quadA 会被 LaTeX 当成未定义命令）会拆开：前面已有逗号等分隔就删掉多余的间距，否则写成 \\quad{A}。frontmatter、代码块、\\text{…} 里的文字都不动',
+						control: {
+							type: 'toggle',
+							key: 'mathLayout',
+							defaultValue: DEFAULT_SETTINGS.mathLayout,
+						},
+					},
+				],
+			},
+			{
+				type: 'page',
+				name: '排版格式',
+				desc: '使用者实际看到的格式：空格、标点、标签、板块与聊天记录',
+				items: [
+					{
+						type: 'group',
+						heading: '数学符号',
+						items: [
+							{
+								name: '正文数学符号自动加公式',
+								desc: '把正文里"一看就是数学符号"的写法包上 `$…$`：`矩阵 A` / `矩阵A` → `矩阵 $A$`；`n维` `n 阶` `n 次` → `$n$ 维` `$n$ 阶` `$n$ 次`；`V(F)` / `a(b)` / `T(x)` → `$V(F)$`；整段算式 `x = 0`、`x = Tz`、`V(x) = 0` 一起包；`λ` `Λ` 这类希腊字母换成 `$\\lambda$` `$\\Lambda$`。判定很保守：只有出现括号 / 运算符、左边的数学语境词（矩阵、向量、数域…）、右边的量词（维、阶、次、行、列…）、希腊字母，或本行已确认过的同名变量才动手 —— 英文句子、长单词（Jordan、latex）、两字母缩写（AI、QQ、pg、tv、xx）、缩写 e.g.、路径 C:\\ 、型号 A4、命名约定 Q_inv、分条标签 (a)、任务复选框 - [x]、书名号引号内部与已有公式一律不碰',
+								control: {
+									type: 'toggle',
+									key: 'textMathWrapSymbols',
+									defaultValue: DEFAULT_SETTINGS.textMathWrapSymbols,
+								},
+							},
+						],
+					},
+					{
+						type: 'group',
+						heading: '文字间距',
+						items: [
+							{
+								name: '中文与英文之间',
+								desc: '中文和英文单词之间空一个字宽：`用anki卡片` → `用 anki 卡片`。行内代码、双链、链接、标签与英文等价，一并留空格（`见[[备注]]` → `见 [[备注]]`）；中英文与标点之间不留空格',
+								control: {
+									type: 'dropdown',
+									key: 'spacingCjkLatin',
+									defaultValue: DEFAULT_SPACING_OPTIONS.cjkLatin,
+									options: {
+										space: '空一个字宽 (推荐)',
+										keep: '保持原样',
+									},
+								},
+							},
+							{
+								name: '中文与数字之间',
+								desc: '按「中文和数字之间都不空一个字宽」：已有空格一并删掉，`第 3 章` → `第3章`。注意这与常见的盘古之白规则相反，改选「空一个字宽」即可切换',
+								control: {
+									type: 'dropdown',
+									key: 'spacingCjkDigit',
+									defaultValue: DEFAULT_SPACING_OPTIONS.cjkDigit,
+									options: {
+										none: '不留空格 (按笔记规则，推荐)',
+										space: '空一个字宽',
+										keep: '保持原样',
+									},
+								},
+							},
+							{
+								name: '英文与数字之间',
+								desc: '笔记规则是"一般要空一个字宽"，但 `GPT4`、`3D`、`v1.2.2` 这类专有名词一拆就错，故默认保持原样（专有名词空格以原有形式为准）',
+								control: {
+									type: 'dropdown',
+									key: 'spacingLatinDigit',
+									defaultValue: DEFAULT_SPACING_OPTIONS.latinDigit,
+									options: {
+										keep: '保持原样 (推荐)',
+										space: '空一个字宽',
+									},
+								},
+							},
+							{
+								name: '公式与文字之间',
+								desc: '行内公式 $…$ 与前后文字之间空一个字宽：`设$x$为` → `设 $x$ 为`。只动 $ 外面 —— $ 内侧永远不空，那是 Obsidian 能否认出公式的前提；公式与标点之间不留空格',
+								control: {
+									type: 'dropdown',
+									key: 'spacingMathText',
+									defaultValue: DEFAULT_SPACING_OPTIONS.mathText,
+									options: {
+										space: '空一个字宽 (推荐)',
+										keep: '保持原样',
+									},
+								},
+							},
+						],
+					},
+					{
+						type: 'group',
+						heading: '标点与符号',
+						items: [
+							{
+								name: '全角标点两侧不留空格',
+								desc: '中文标点（，。、；：！？…）与内容之间不留空格：`中文 ，内容` → `中文，内容`。引号 “”‘’ 两侧、书名号《》内侧例外 —— 那里可能是《新 吊带袜天使》这类故意留空的专有名词',
+								control: {
+									type: 'toggle',
+									key: 'spacingFullPunct',
+									defaultValue: DEFAULT_SETTINGS.spacingFullPunct,
+								},
+							},
+							{
+								name: '半角标点前不留空格、后空一格',
+								desc: '英文符号 , . ! ? : 后面空一格、前面不留空格（`word,word` → `word, word`）。小数点与版本号（1.2.2）、时间（12:30）、省略号（...）不适用',
+								control: {
+									type: 'toggle',
+									key: 'spacingHalfPunct',
+									defaultValue: DEFAULT_SETTINGS.spacingHalfPunct,
+								},
+							},
+							{
+								name: '括号内侧不留空格',
+								desc: '半角括号内侧不留空格：`( x )` → `(x)`；括号外侧不动，`word (x)` 保持原样',
+								control: {
+									type: 'toggle',
+									key: 'spacingBracketInner',
+									defaultValue: DEFAULT_SETTINGS.spacingBracketInner,
+								},
+							},
+							{
+								name: '数字与单位之间空一格',
+								desc: '`100kg` → `100 kg`，单位须落在词表里（kg g m s min h L W V A N J Pa Hz px dpi ℃ …）；`%`、`3D`、`4K`、`5G` 这类不算单位，不会被拆开',
+								control: {
+									type: 'toggle',
+									key: 'spacingDigitUnit',
+									defaultValue: DEFAULT_SETTINGS.spacingDigitUnit,
+								},
+							},
+							{
+								name: '标点全半角按语境',
+								desc: '中文语境用全角、英文语境用半角。中文方向：`元素: 内容` → `元素：内容`，`没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且` —— 左边是中文、右边是中文、或整句以中文为主（公式、代码、链接里的字母不算数）就换。英文方向很保守：只有"整句一个中文字都没有、且至少两个英文单词"才把 `，。、；！？` 换成半角 —— 中文笔记里"参数 gain=50、shift=0"这类半中半英的行太多，按比例判定会把顿号误换。`（）`、`：`、书名号引号、`.`、数字后的标点（1,000、12:30）、`\\,`、半角括号内与 `/` 之间的标点、聊天记录头部 `张三: 2024/…` 一律不动',
+								control: {
+									type: 'toggle',
+									key: 'spacingHalfToFullPunct',
+									defaultValue: DEFAULT_SETTINGS.spacingHalfToFullPunct,
+								},
+							},
+						],
+					},
+					{
+						type: 'group',
+						heading: '标签与板块',
+						items: [
+							{
+								name: '标签排版',
+								desc: '把行内的 #标签 统一移到所在块的句尾，与正文之间空一格；整行只有标签时这一行自成一块，位置不动、也不会被并进相邻的正文行。一个段落算一块，一行列表项、一行标题各自算一块，表格按单元格算块（不会把标签挪到别的列）。frontmatter、代码块（围栏或缩进）、行内代码、%%注释%%、双链与链接里的 # 都不算标签',
+								control: {
+									type: 'toggle',
+									key: 'tagLayout',
+									defaultValue: DEFAULT_SETTINGS.tagLayout,
+								},
+							},
+							{
+								name: '标签排序',
+								desc: '同一处出现的多个标签按首字母排序（中文按拼音、数字按数值）；关闭后保持原有先后顺序',
+								control: {
+									type: 'toggle',
+									key: 'tagSort',
+									defaultValue: DEFAULT_SETTINGS.tagSort,
+									disabled: () => !this.plugin.settings.tagLayout,
+								},
+							},
+							{
+								name: '内容板块排版',
+								desc: '按首字母对笔记各块内容排序（中文按拼音、数字按数值）。连续的列表项之间、连续的段落之间分别排序，列表与段落不会互相穿插；标题把排序范围切成一个个小节，表格、图片、分隔线、聊天记录保持原位。适合词条、清单类笔记，会重排正文',
+								control: {
+									type: 'toggle',
+									key: 'blockSort',
+									defaultValue: DEFAULT_SETTINGS.blockSort,
+								},
+							},
+						],
+					},
+					{
+						type: 'group',
+						heading: '行首与标记',
+						items: [
+							{
+								name: '行首缩进修复',
+								desc: '把行首"用空格写的缩进"改回 tab：4 个空格算一个 tab，混在 tab 之间的零散空格删掉。正文、图片前多打的 1~3 个空格一并删掉；后面跟列表子项 / 标题等块级结构时保留缩进。顺带规范块级标记的空白：注释（引用）行前的零散空格删掉、">"与正文之间补一个空格（">引用" → "> 引用"）、列表符号与标题符号后的多个空格收成一个。frontmatter 与代码块内部不动',
+								control: {
+									type: 'dropdown',
+									key: 'textLeadingIndentFix',
+									defaultValue: DEFAULT_LEADING_INDENT_MODE,
+									options: {
+										smart: '智能：列表子项保留，其余行首空格删掉 (推荐)',
+										strict: '严格：行首只留 tab，空格全删',
+										off: '关闭',
+									},
+								},
+							},
+						],
+					},
+					{
+						type: 'group',
+						heading: '聊天记录',
+						items: [
+							{
+								name: '显示用户名',
+								desc: '关闭后每条消息只保留日期与时间',
+								control: {
+									type: 'toggle',
+									key: 'chatShowUsername',
+									defaultValue: DEFAULT_SETTINGS.chatShowUsername,
+								},
+							},
+							{
+								name: '显示日期',
+								desc: '日期格式为 {YYYY}/{MM}/{DD}',
+								control: {
+									type: 'toggle',
+									key: 'chatShowDate',
+									defaultValue: DEFAULT_SETTINGS.chatShowDate,
+								},
+							},
+							{
+								name: '显示时间',
+								desc: '时间格式为 {HH}:{mm}:{ss}。关闭后排版结果不含时间戳，可避免记录被再次识别为聊天数据',
+								control: {
+									type: 'toggle',
+									key: 'chatShowTime',
+									defaultValue: DEFAULT_SETTINGS.chatShowTime,
+								},
+							},
+							{
+								name: '正文缩进',
+								desc: '控制每条消息正文的缩进方式，可与头部信息区分开',
+								control: {
+									type: 'dropdown',
+									key: 'chatIndent',
+									defaultValue: DEFAULT_SETTINGS.chatIndent,
+									options: {
+										tab: '制表符 (tab)',
+										'2': '2 个空格',
+										'4': '4 个空格',
+										none: '不缩进',
+									},
+								},
+							},
+							{
+								name: '图文消息中图片的位置',
+								desc: '一条消息同时含图片和文字时，图片排在文字上方还是下方。选「保持原顺序」则不调整',
+								control: {
+									type: 'dropdown',
+									key: 'chatImageOrder',
+									defaultValue: DEFAULT_SETTINGS.chatImageOrder,
+									options: {
+										keep: '保持原顺序',
+										above: '图片在上方',
+										below: '图片在下方',
+									},
+								},
+							},
+							{
+								name: '消息之间插入空行',
+								desc: '仅在用户名、日期、时间全部关闭时可用；有头部信息时头部本身已起分隔作用',
+								control: {
+									type: 'toggle',
+									key: 'chatBlankLineBetweenMessages',
+									defaultValue: DEFAULT_SETTINGS.chatBlankLineBetweenMessages,
+									disabled: () => !headerIsEmpty(),
+								},
+							},
+						],
+					},
+				],
+			},
+		];
+	}
+
+	/**
+	 * 读取控件当前值。
+	 * data.json 里可能存着旧版本没有的字段或手工改坏的值，
+	 * 这里按 getSpacingOptions() 的同一套收敛规则返回，免得下拉框显示成空白。
+	 */
+	getControlValue(key: string): unknown {
+		const settings = this.plugin.settings as unknown as Record<string, unknown>;
+		switch (key) {
+			case 'spacingCjkLatin':
+				return resolveSpacingMode(this.plugin.settings.spacingCjkLatin, DEFAULT_SPACING_OPTIONS.cjkLatin);
+			case 'spacingCjkDigit':
+				return resolveCjkDigitMode(this.plugin.settings.spacingCjkDigit);
+			case 'spacingLatinDigit':
+				return resolveSpacingMode(this.plugin.settings.spacingLatinDigit, DEFAULT_SPACING_OPTIONS.latinDigit);
+			case 'spacingMathText':
+				return resolveSpacingMode(this.plugin.settings.spacingMathText, DEFAULT_SPACING_OPTIONS.mathText);
+			case 'textLeadingIndentFix':
+				return resolveLeadingIndentMode(this.plugin.settings.textLeadingIndentFix);
+			default:
+				return settings[key];
+		}
+	}
+
+	/** 写入控件值：先收敛，再存盘，最后让其它设置项的 visible / disabled 重新求值 */
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		const settings = this.plugin.settings as unknown as Record<string, unknown>;
+		switch (key) {
+			case 'spacingCjkLatin':
+				settings[key] = resolveSpacingMode(value, DEFAULT_SPACING_OPTIONS.cjkLatin);
+				break;
+			case 'spacingCjkDigit':
+				settings[key] = resolveCjkDigitMode(value);
+				break;
+			case 'spacingLatinDigit':
+				settings[key] = resolveSpacingMode(value, DEFAULT_SPACING_OPTIONS.latinDigit);
+				break;
+			case 'spacingMathText':
+				settings[key] = resolveSpacingMode(value, DEFAULT_SPACING_OPTIONS.mathText);
+				break;
+			case 'textLeadingIndentFix':
+				settings[key] = resolveLeadingIndentMode(value);
+				break;
+			default:
+				settings[key] = value;
+		}
+		await this.plugin.saveSettings();
+		const tab = this as unknown as { refreshDomState?: () => void };
+		tab.refreshDomState?.();
 	}
 }

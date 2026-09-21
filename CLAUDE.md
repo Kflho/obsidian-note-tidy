@@ -93,9 +93,11 @@ Uses Node.js `fs/promises` and `path` for filesystem access. `isDesktopOnly: tru
 ## Git workflow
 
 - Branch naming: version-based (e.g., `1.0.5`)
-- CI (`.github/workflows/lint.yml`): runs on push/PR, tests Node 20.x and 22.x — `npm ci` → `npm run build` → `npm run lint`
+- CI (`.github/workflows/lint.yml`): runs on push/PR, tests Node 20.x and 22.x — `npm ci` → `npm run build` → `npm test` → `npm run lint`
+- Lint pins `eslint-plugin-obsidianmd` to the version the community-plugin review uses — keep it current, or the review will report findings the local lint misses
 - `version-bump.mjs` reads `npm_package_version`, writes `manifest.json` and `versions.json`
 - Releases: tag must match `manifest.json` version (no leading `v`); attach `main.js`, `manifest.json`, `styles.css`
+- Release automation (`.github/workflows/release.yml`): pushing the version tag runs `npm ci` → `npm test` → `npm run build`, checks the tag against `manifest.json`, generates [artifact attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations) for the three assets, and creates the release. Do not create the release by hand — a hand-made release has no attestations, which the plugin review flags
 
 ## 提交分支到 GitHub 时的自动化流程
 
@@ -111,9 +113,20 @@ Uses Node.js `fs/promises` and `path` for filesystem access. `isDesktopOnly: tru
 3. **构建并提交**（仅在用户明确要求提交时执行）：
    ```bash
    npm run build    # 类型检查 + 打包
+   npm test
+   npm run lint
    git add -A
    git commit -m "版本号: x.y.z"
    git push origin <当前分支名>
    ```
+
+4. **发版**：推送版本号 tag，交给 release 工作流（它会构建、签名、建 release）：
+   ```bash
+   git tag x.y.z
+   git push origin x.y.z
+   gh run watch          # 看工作流跑完
+   gh release view x.y.z --json assets
+   ```
+   手动 `gh release create` 只在工作流不可用时兜底 —— 这样发出来的资产没有 attestation。
 
 版本号应保持一致：`manifest.json` 的 version、`package.json` 的 version、以及 `versions.json` 中最新的 key 三者必须一致。

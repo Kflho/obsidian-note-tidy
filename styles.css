@@ -1,12 +1,18 @@
-/* Note Tidy — notice suppression during batch operations */
+/* Note Tidy — notice suppression during batch operations.
+   用 body 上的 suppress-notices 提高选择器特异性，避免 !important：
+   Obsidian 自身的 .notice / .notice-container 都是单类选择器，这里多一层
+   body 限定即可稳定压过。 */
 body.suppress-notices .notice-container,
-body.suppress-notices > .notice-container,
-body.suppress-notices div.notice {
-	display: none !important;
-	visibility: hidden !important;
+body.suppress-notices .notice,
+body.suppress-notices .note-tidy-suppressed {
+	display: none;
+	visibility: hidden;
+	opacity: 0;
+	pointer-events: none;
 }
 
-/* 设置面板：排版格式下的子分组标题（Obsidian 自带的 setHeading 只有一级） */
+/* 设置面板：排版格式下的子分组标题（Obsidian 自带的 setHeading 只有一级）。
+   Obsidian 1.13+ 走声明式设置（分组自带 heading），这条只在旧版本生效。 */
 .ait-settings-subheading h4 {
 	margin: 1.4em 0 0.2em;
 	color: var(--text-muted);

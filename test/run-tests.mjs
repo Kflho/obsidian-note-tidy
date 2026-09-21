@@ -20,6 +20,7 @@ const entryPoints = [
 	"test/image-size.test.ts",
 	"test/image-organizer.test.ts",
 	"test/commands.test.ts",
+	"test/settings.test.ts",
 ];
 const outdir = path.resolve("test/.build");
 
@@ -41,5 +42,6 @@ await esbuild.build({
 for (const entry of entryPoints) {
 	const outfile = path.join(outdir, path.basename(entry).replace(/\.ts$/, ".mjs"));
 	console.log(`\n──────── ${path.basename(entry)} ────────`);
+	// eslint-disable-next-line no-unsanitized/method -- 路径由本文件的 entryPoints 常量拼出，不来自外部输入
 	await import(pathToFileURL(outfile).href);
 }

@@ -25,12 +25,28 @@ import * as path from 'path';
  */
 type MenuItemWithSubmenu = MenuItem & { setSubmenu?: () => Menu };
 
+/**
+ * 判断一个 DOM 节点是不是元素节点。
+ *
+ * 不用 `node instanceof HTMLElement`：弹出窗口（popout）有自己的一套 DOM
+ * 构造器，跨窗口判断会得到 false。Obsidian 给 Node 打了 `instanceOf()` 补丁，
+ * 就是用来跨窗口安全判定的；老版本 App 没有这个补丁时退回 nodeType 判断。
+ */
+function isElementNode(node: Node): node is HTMLElement {
+    if (typeof node.instanceOf === 'function') {
+        return node.instanceOf(HTMLElement);
+    }
+    return node.nodeType === 1; // Node.ELEMENT_NODE
+}
+
 export default class ImageTransferPlugin extends Plugin {
     settings!: ImageTransferSettings;
     private statusBarItemEl: HTMLElement | null = null;
     private noticeObserver: MutationObserver | null = null;
     private suppressedElements: Set<HTMLElement> = new Set();
     private restoreTimer: number | null = null;
+    /** 批量操作期间临时加到弹窗元素上的类，见 styles.css */
+    private static readonly SUPPRESSED_CLASS = 'note-tidy-suppressed';
     private isRenaming = false;
     /** 批次级的全库文件名索引（见 image-links.ts），用于识别同名图片歧义 */
     private batchIndex: Map<string, TFile[]> | null = null;
@@ -370,13 +386,16 @@ export default class ImageTransferPlugin extends Plugin {
     /**
      * 屏蔽 Obsidian 通知弹窗（批量操作时避免 "已修改 N 条链接" 刷屏）。
      * 双层策略：
-     * 1. body class + styles.css 中的 !important 规则 — 零延迟，无闪烁
-     * 2. MutationObserver 兜底 — 捕获 CSS 遗漏的元素
+     * 1. body 上加 `suppress-notices`，styles.css 里按选择器隐藏 —— 零延迟，无闪烁
+     * 2. MutationObserver 兜底 —— 给 CSS 漏掉的弹窗元素补一个 `note-tidy-suppressed` 类
+     *
+     * 一律用 class 而不是内联样式：内联样式恢复时若没清干净，会永久藏掉
+     * 通知容器，连带其它插件（如 Image Converter）的弹窗一起消失（见 v1.1.4）。
      */
     private suppressNotices() {
         // 取消上一次尚未触发的恢复定时器，避免前后两次操作竞态
         if (this.restoreTimer !== null) {
-            clearTimeout(this.restoreTimer);
+            window.clearTimeout(this.restoreTimer);
             this.restoreTimer = null;
         }
         const hadClass = document.body.classList.contains('suppress-notices');
@@ -389,16 +408,11 @@ export default class ImageTransferPlugin extends Plugin {
                 for (const mutation of mutations) {
                     const nodes = Array.from(mutation.addedNodes);
                     for (const node of nodes) {
-                        if (node instanceof HTMLElement) {
+                        if (isElementNode(node)) {
                             const classes = Array.from(node.classList);
                             if (classes.some(c => c.includes('notice'))) {
                                 console.debug('[ImageTransfer] MutationObserver hiding:', classes.join(' '));
-                                node.setCssProps({
-                                    display: 'none',
-                                    visibility: 'hidden',
-                                    opacity: '0',
-                                    'pointer-events': 'none',
-                                });
+                                node.classList.add(ImageTransferPlugin.SUPPRESSED_CLASS);
                                 this.suppressedElements.add(node);
                             }
                         }
@@ -424,16 +438,11 @@ export default class ImageTransferPlugin extends Plugin {
                 this.noticeObserver.disconnect();
                 console.debug('[ImageTransfer] MutationObserver disconnected');
             }
-            // 恢复所有被 MutationObserver 隐藏的元素的内联样式
+            // 解除 MutationObserver 加上的隐藏类
             // 否则如果 Observer 捕获到了 .notice-container 等持久容器，
-            // 其内联 display:none 会永久生效，导致其他插件（如 Image Converter）的弹窗也消失
+            // 它会一直带着隐藏类，导致其他插件（如 Image Converter）的弹窗也消失
             for (const el of this.suppressedElements) {
-                el.setCssProps({
-                    display: '',
-                    visibility: '',
-                    opacity: '',
-                    'pointer-events': '',
-                });
+                el.classList.remove(ImageTransferPlugin.SUPPRESSED_CLASS);
             }
             this.suppressedElements.clear();
 
