@@ -38,7 +38,8 @@
  *
  * 幂等：每条规则的结果都是"恰好一个空格"或"没有空格"，输出再跑一次不会变。
  */
-import { markProtectedLines, markIndentedCodeLines, inlineCodeRanges } from './line-scan';
+import { markProtectedLines, markIndentedCodeLines } from './line-scan';
+import { collectMaskedRanges, isSpaceChar, mathRanges, readInlineMath } from './inline-scan';
 
 /** 只决定"空一格"还是"不动"的规则 */
 export type SpacingMode = 'space' | 'keep';
@@ -64,6 +65,8 @@ export interface SpacingOptions {
 	bracketInner: boolean;
 	/** 数字 ↔ 单位之间空一格 */
 	digitUnit: boolean;
+	/** 紧跟在中文后面的半角标点换成全角（写中文就是全中文标点） */
+	halfToFullPunct: boolean;
 }
 
 /** 默认值：文字的规则全开、可能误伤的规则先关（英文↔数字、数字↔单位） */
@@ -76,6 +79,7 @@ export const DEFAULT_SPACING_OPTIONS: SpacingOptions = {
 	halfPunct: true,
 	bracketInner: true,
 	digitUnit: false,
+	halfToFullPunct: true,
 };
 
 /** data.json 里被手工改成非法值时收敛回合法取值 */
@@ -97,7 +101,8 @@ export function isSpacingActive(options: SpacingOptions): boolean {
 		|| options.fullPunct
 		|| options.halfPunct
 		|| options.bracketInner
-		|| options.digitUnit;
+		|| options.digitUnit
+		|| options.halfToFullPunct;
 }
 
 // ------------------------------------------------------------------ 字符分类
@@ -131,6 +136,22 @@ const FP_QUOTE = new Set<string>([...'“”‘’']);
 
 /** 半角标点：标点前不留空格、标点后空一格 */
 const HALF_PUNCT = new Set<string>([...',.!?:']);
+
+/** 半角 → 全角（`.` 不在内：省略号、版本号、缩写都靠它） */
+const HALF_TO_FULL_PUNCT: Record<string, string> = {
+	',': '，', ':': '：', ';': '；', '!': '！', '?': '？',
+};
+
+/**
+ * 全角 → 半角：英文语境里这些要写成半角（`什么语境用什么标点`）。
+ *
+ * 只收不会跟中文混用的几个：`（）` 不收 —— 中文行里 `（utils/）`、`（schur 稳定）` 这种
+ * 半中半英的括号很常见，两头分别判定会把括号改得不配对；
+ * `：` 也不收 —— `data：` 这类"英文术语 + 中文解释"的小标题到处都是。
+ */
+const FULL_TO_HALF_PUNCT: Record<string, string> = {
+	'，': ',', '。': '.', '、': ',', '；': ';', '！': '!', '？': '?',
+};
 
 /** 单位词表（数字与单位之间空一格时用）；`%` 故意不收 —— `50%` 是通行写法 */
 const UNITS = new Set<string>([
@@ -197,6 +218,8 @@ interface Piece {
 	title?: boolean;
 	/** 属于"含字母的连写"（GPT4 / 3D / 100kg）：按英文单词处理，不按纯数字的贴紧规则 */
 	inWord?: boolean;
+	/** 落在以英文为主的句子里：全角标点两侧的空格是英文词距，不能当"中文与标点之间"删掉 */
+	en?: boolean;
 }
 
 /**
@@ -230,6 +253,165 @@ function markTitlePieces(pieces: Piece[]): void {
 
 /** 连写 token 的内部连接符：`v1.2.2`、`file_name`、`A-B`、`a/b` */
 const WORD_SEPARATOR_RE = /^[._\-/]$/;
+
+/** 中文标点里能断句的几个：用来把一行切成"句"，判断每句的语言 */
+const SENTENCE_END = new Set<string>([...'。！？；']);
+
+/**
+ * 逐个 piece 标出它所在句子的语言：`zh` 以中文为主、`en` 以英文为主、`null` 拿不准。
+ *
+ * 中文句子里的半角标点要换全角、英文句子里的全角标点要换半角（什么语境用什么标点），
+ * 可只看左邻一个字符不够：`建立子系统后没有 $M_{ij}$, 且 …` 里逗号左边是公式、右边才是中文。
+ * 判定口径（公式、行内代码、链接、标签里的字母不算数 —— 那是数学或代码，不代表语言）：
+ * - `en`：**整句一个中文字都没有**，且至少两个英文单词 —— 全库实测下来只有这样才敢反向换标点：
+ *   中文笔记里"参数 gain=50、shift=0"、"（DARE/Kalman，schur 稳定）"这类半中半英的行太多，
+ *   按比例判定会把顿号、逗号误换成半角；
+ * - `zh`：有中文，且英文单词数不超过中文字数（用**词数**而不是字母数：
+ *   `用 create_controlled_system，calculate_lqr 两个函数` 里英文字母一大把，但那是两个标识符，整句仍是中文）；
+ * - 其余（半中半英、拿不准）都不动。
+ * 句子按 `。！？；` 断开，piece 与原文一一对应（tokenize 不丢字符），所以用下标即可。
+ */
+function sentenceLanguages(pieces: Piece[]): Array<'zh' | 'en' | null> {
+	const flags: Array<'zh' | 'en' | null> = new Array<'zh' | 'en' | null>(pieces.length).fill(null);
+	let from = 0;
+	let cjk = 0;
+	let words = 0;
+
+	const flush = (to: number): void => {
+		const language = cjk === 0 && words >= 2 ? 'en'
+			: cjk > 0 && words <= cjk ? 'zh'
+				: null;
+		for (let i = from; i < to; i++) flags[i] = language;
+		from = to;
+		cjk = 0;
+		words = 0;
+	};
+
+	for (let i = 0; i < pieces.length; i++) {
+		const piece = pieces[i] as Piece;
+		if (piece.kind === 'cjk') cjk += piece.text.length;
+		else if (piece.kind === 'latin') words++;
+		if (piece.kind === 'fpunct' && SENTENCE_END.has(piece.text)) flush(i + 1);
+	}
+	flush(pieces.length);
+
+	return flags;
+}
+
+/** 往后跳过空白，看下一个 piece 是不是中文 */
+function nextIsCjk(pieces: Piece[], from: number): boolean {
+	for (let i = from; i < pieces.length; i++) {
+		const piece = pieces[i];
+		if (!piece) return false;
+		if (piece.kind === 'space') continue;
+		return piece.kind === 'cjk';
+	}
+	return false;
+}
+
+/** 前后（跳过空格）紧贴 `/` 的标点不换：`1. , /. /! /? /:` 这类是在罗列标点本身 */
+function nearSlash(pieces: Piece[], index: number): boolean {
+	const before = pieces[index - 1];
+	if (before && before.kind === 'other' && before.text === '/') return true;
+	for (let i = index + 1; i < pieces.length; i++) {
+		const piece = pieces[i];
+		if (!piece) return false;
+		if (piece.kind === 'space') continue;
+		return piece.kind === 'other' && piece.text === '/';
+	}
+	return false;
+}
+
+/**
+ * 半角标点换成全角（标点符号·概论 1「写中文就是全中文标点」）。
+ *
+ * 判定用"中文语境"而不是"左边必须是中文"：左邻是中文、右邻（跳过空格）是中文、
+ * 或整句以中文为主，任一成立就换 —— `$M_{ij}$, 且` 因此能换成 `$M_{ij}$，且`。
+ * 不动的几种：`.`（省略号 `...`、版本号 `1.2.2`、`e.g.` 都靠它）、`()`（`V(x)` 这类函数写法保持半角）、
+ * 直接跟在数字后面的标点（`1,000`、`12:30`）、反斜杠后面的标点（LaTeX 的 `\,` 空格符号）、
+ * 前后紧贴 `/` 的标点（`1. , /. /! /? /:` 是在罗列标点本身）、聊天记录头部 `张三: 2024/01/05`，
+ * 书名号 / 引号内部（专有名词原样保留，在 `title` 标记上跳过）；公式、行内代码、链接本来就不参与。
+ */
+function convertHalfPunct(pieces: Piece[], languages: Array<'zh' | 'en' | null>): void {
+	let depth = 0;
+
+	for (let i = 1; i < pieces.length; i++) {
+		const piece = pieces[i];
+		const previous = pieces[i - 1];
+		if (!piece || !previous) continue;
+		if (piece.kind === 'open') depth++;
+		else if (piece.kind === 'close') depth = Math.max(0, depth - 1);
+		if (piece.title) continue;
+		// 半角括号里面是代码 / 数学记号（`(mod, k)`、`f(a, b)`），不当中文标点处理
+		if (depth > 0) continue;
+		// `;` 不在"半角标点间距"那张表里（文档只列了 `, . ! ? :`），所以它可能是 other
+		if (piece.kind !== 'hpunct' && piece.kind !== 'other') continue;
+		// `1,000`、`12:30`、`3.14`：直接跟在数字后面的是数字写法，不是中文标点
+		if (previous.kind === 'digit') continue;
+		// `\,`（LaTeX 空格符号）与 `x\\,`：反斜杠后面的标点是代码
+		if (previous.kind === 'other' && previous.text === '\\') continue;
+		const full = HALF_TO_FULL_PUNCT[piece.text];
+		if (!full) continue;
+		if (nearSlash(pieces, i)) continue;
+		if (previous.kind !== 'cjk' && !nextIsCjk(pieces, i + 1) && languages[i] !== 'zh') continue;
+		// `张三: 2024/01/05 14:30:25`（聊天记录头部）与 `时间: 30` 这种"冒号后面是数字"的不换
+		if (piece.text === ':' && nextIsDigit(pieces, i + 1)) continue;
+		piece.kind = 'fpunct';
+		piece.fp = 'other';
+		piece.text = full;
+	}
+}
+
+/** 紧邻（不跳空格）的字符是不是中文 */
+function adjacentCjk(pieces: Piece[], index: number): boolean {
+	const before = pieces[index - 1];
+	const after = pieces[index + 1];
+	return before?.kind === 'cjk' || after?.kind === 'cjk';
+}
+
+/**
+ * 英文语境里的全角标点换成半角（`什么语境用什么标点`）。
+ *
+ * 只在**整句以英文为主**、并且标点两侧紧邻的不是中文时才换 ——
+ * `This is a sentence。Then another，with parens！` → 半角；
+ * 而 `中文说明。Then an English line, here.` 里的 `。` 左边是中文，保持不动。
+ * `（）` 与 `：` 不在可换集合里，见 FULL_TO_HALF_PUNCT 的说明。
+ */
+function convertFullPunct(pieces: Piece[], languages: Array<'zh' | 'en' | null>): void {
+	for (let i = 0; i < pieces.length; i++) {
+		const piece = pieces[i];
+		if (!piece || piece.title) continue;
+		if (piece.kind !== 'fpunct') continue;
+		const half = FULL_TO_HALF_PUNCT[piece.text];
+		// 单个 `…` 换成 `...`；成对的中文省略号 `……` 不动（换出来会变成六个点）
+		const ellipsis = piece.text === '…';
+		if (!half && !ellipsis) continue;
+		if (languages[i] !== 'en') continue;
+		if (adjacentCjk(pieces, i)) continue;
+		if (ellipsis) {
+			const before = pieces[i - 1];
+			const after = pieces[i + 1];
+			if (before?.text === '…' || after?.text === '…') continue;
+			piece.kind = 'hpunct';
+			piece.fp = undefined;
+			piece.text = '...';
+			continue;
+		}
+		piece.kind = 'hpunct';
+		piece.fp = undefined;
+		piece.text = half as string;
+	}
+}
+
+/** 往后跳过空白，看是不是数字开头 */
+function nextIsDigit(pieces: Piece[], from: number): boolean {
+	for (let i = from; i < pieces.length; i++) {
+		const piece = pieces[i];
+		if (!piece || piece.kind === 'space') continue;
+		return piece.kind === 'digit';
+	}
+	return false;
+}
 
 /** 强调标记用到的符号 */
 const EMPHASIS_CHARS = new Set<string>([...'*_=~']);
@@ -364,82 +546,6 @@ function markAlphanumericWords(pieces: Piece[]): void {
 	flush();
 }
 
-// ------------------------------------------------------------------ 掩码区间
-
-/**
- * 一行里"整体看待"的区间（左闭右开）：里面的字符不参与空格规则，
- * 只决定这个整体与左右邻居之间的距离。这也顺带挡住了里面的 `$`、`#`、`(`。
- */
-function collectMaskedRanges(line: string): Array<[number, number]> {
-	const ranges: Array<[number, number]> = inlineCodeRanges(line);
-
-	/** 第二个元素是"前缀组"的长度：区间从 match.index + 前缀 开始，前缀本身不属于整体 */
-	const patterns: Array<[RegExp, number]> = [
-		[/!?\[\[[^\]\n]*\]\]/g, 0],                              // 双链与图片嵌入
-		[/!?\[[^\]\n]*\]\([^()\n]*\)/g, 0],                      // markdown 链接与图片
-		[/\[\^[^\]\n]*\]/g, 0],                                  // 脚注引用
-		[/(?:https?|file|obsidian):\/\/[^\s<>()[\]（）【】]+/g, 0], // 裸 URL
-		[/<[^<>\n]*>/g, 0],                                      // HTML 标签与自动链接
-		[/%%[^%\n]*%%/g, 0],                                     // %%注释%%
-		[/(?:^|[\s(（[【])#[^\s#，。、；：！？（）【】《》“”'"]+/g, 1], // #标签
-	];
-
-	for (const [pattern, prefix] of patterns) {
-		for (const match of line.matchAll(pattern)) {
-			if (match.index === undefined) continue;
-			const start = match.index + prefix;
-			const end = match.index + match[0].length;
-			if (end > start) ranges.push([start, end]);
-		}
-	}
-
-	// 合并重叠区间：`[[a]](b)` 可能被两条规则同时命中
-	ranges.sort((a, b) => a[0] - b[0]);
-	const merged: Array<[number, number]> = [];
-	for (const range of ranges) {
-		const last = merged[merged.length - 1];
-		if (last && range[0] <= last[1]) {
-			last[1] = Math.max(last[1], range[1]);
-			continue;
-		}
-		merged.push([range[0], range[1]]);
-	}
-	return merged;
-}
-
-/**
- * 读一段行内公式。
- *
- * 识别方式与 Obsidian、latex-layout.ts 保持一致：`$` 内侧紧贴内容才算公式，
- * `$ 5 与 $` 这种不会误判；`$$…$$` 整体当一段公式。
- *
- * @returns 公式文本与下一个位置；不是公式时返回 null
- */
-function readMath(line: string, start: number, inCode: (at: number) => boolean): { text: string; next: number } | null {
-	if (line.charAt(start) !== '$') return null;
-	if (inCode(start)) return null;
-
-	// `$$ … $$`（同一行内成对）
-	if (line.charAt(start + 1) === '$') {
-		for (let i = start + 2; i < line.length - 1; i++) {
-			if (line.charAt(i) !== '$' || line.charAt(i + 1) !== '$') continue;
-			return { text: line.substring(start, i + 2), next: i + 2 };
-		}
-		return null;
-	}
-
-	if (/\s/.test(line.charAt(start + 1))) return null;
-
-	for (let i = start + 1; i < line.length; i++) {
-		if (line.charAt(i) !== '$') continue;
-		if (line.charAt(i - 1) === '\\' || line.charAt(i + 1) === '$' || inCode(i)) continue;
-		// 收尾 `$` 前面紧贴内容才算公式
-		if (/\s/.test(line.charAt(i - 1))) return null;
-		return { text: line.substring(start, i + 1), next: i + 1 };
-	}
-	return null;
-}
-
 /** 把一个字符判成标点 / 括号 / 单位等单字符 piece；返回 null 表示交给后面的字母数字扫描 */
 function classifyChar(char: string, line: string, at: number): { piece: Piece; next: number } | null {
 	if (FULL_PUNCT.has(char)) {
@@ -470,7 +576,7 @@ function classifyChar(char: string, line: string, at: number): { piece: Piece; n
 }
 
 /** 把一行切成 piece；空白单独成 piece，输出里的空格全部由规则决定 */
-function tokenizeLine(line: string): Piece[] {
+function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 	const ranges = collectMaskedRanges(line);
 	const inCode = (at: number): boolean => ranges.some(([start, end]) => at >= start && at < end);
 	const pieces: Piece[] = [];
@@ -489,16 +595,16 @@ function tokenizeLine(line: string): Piece[] {
 
 		const char = line.charAt(index);
 
-		if (char === ' ' || char === '\t') {
+		if (isSpaceChar(char)) {
 			let end = index;
-			while (end < line.length && (line.charAt(end) === ' ' || line.charAt(end) === '\t')) end++;
+			while (end < line.length && isSpaceChar(line.charAt(end))) end++;
 			pieces.push({ kind: 'space', text: line.substring(index, end) });
 			index = end;
 			continue;
 		}
 
 		if (char === '$') {
-			const math = readMath(line, index, inCode);
+			const math = readInlineMath(line, index, inCode);
 			if (math) {
 				pieces.push({ kind: 'math', text: math.text });
 				index = math.next;
@@ -536,6 +642,15 @@ function tokenizeLine(line: string): Piece[] {
 
 	markAlphanumericWords(pieces);
 	markTitlePieces(pieces);
+	if (options.halfToFullPunct) {
+		const languages = sentenceLanguages(pieces);
+		for (let i = 0; i < pieces.length; i++) {
+			if (languages[i] === 'en') (pieces[i] as Piece).en = true;
+		}
+		// 先逆向（英文句里的全角 → 半角），再正向（中文句里的半角 → 全角）
+		convertFullPunct(pieces, languages);
+		convertHalfPunct(pieces, languages);
+	}
 	return mergeEmphasisMarkers(pieces);
 }
 
@@ -586,7 +701,8 @@ function decideGap(previous: Piece | null, next: Piece, gap: string, options: Sp
 	}
 
 	// 全角标点：两侧不留空格（引号两侧、书名号内侧除外）
-	if (options.fullPunct) {
+	// 英文句子里的全角标点（`see 《book》 and`）两侧是英文词距，不删
+	if (options.fullPunct && previous.en !== true && next.en !== true) {
 		if (next.kind === 'fpunct' && next.fp !== 'quote') return '';
 		if (previous.kind === 'fpunct') {
 			if (previous.fp === 'quote' || previous.fp === 'angleOpen') return null;
@@ -628,7 +744,7 @@ function decideGap(previous: Piece | null, next: Piece, gap: string, options: Sp
 
 /** 处理一行 */
 function formatLine(line: string, options: SpacingOptions): string {
-	const pieces = tokenizeLine(line);
+	const pieces = tokenizeLine(line, options);
 	let out = '';
 	let previous: Piece | null = null;
 	let gap = '';
@@ -649,55 +765,6 @@ function formatLine(line: string, options: SpacingOptions): string {
 }
 
 /**
- * 标记 `$$ … $$` 公式块**占用的所有行**（含中间那些既没有 `$$` 也没有别的标记的行）。
- *
- * line-scan.ts 里的 markMathLines 只标记"含有 `$$` 的那几行"，
- * 那是给标签排版用的（标签只需要知道自己在不在公式里）。这里要整块跳过，
- * 所以自己配一次对：配对规则与它一致（未闭合的 `$$` 不算公式，免得吃掉后面整篇正文），
- * 但把开闭之间的行一并标上。
- */
-function markDisplayMathLines(lines: string[]): boolean[] {
-	const flags: boolean[] = new Array<boolean>(lines.length).fill(false);
-	const protectedLines = markProtectedLines(lines);
-	let open = -1;
-
-	for (let i = 0; i < lines.length; i++) {
-		if (protectedLines[i]) continue;
-		const line = lines[i] ?? '';
-		const codeRanges = inlineCodeRanges(line);
-
-		let count = 0;
-		let at = line.indexOf('$$');
-		while (at >= 0) {
-			const escaped = at > 0 && line.charAt(at - 1) === '\\';
-			const inCode = codeRanges.some(([start, end]) => at < end && at + 2 > start);
-			if (!escaped && !inCode) count++;
-			at = line.indexOf('$$', at + 2);
-		}
-
-		if (count === 0) continue;
-
-		if (open < 0) {
-			flags[i] = true;
-			if (count % 2 === 1) open = i;
-			continue;
-		}
-		// 收尾行（偶数是"这一行既收尾又重开"）
-		for (let k = open; k <= i; k++) flags[k] = true;
-		open = count % 2 === 1 ? -1 : i;
-	}
-
-	// 没闭合：这一段不算公式，把标记撤掉（否则后面整篇都会被当成公式）
-	if (open >= 0) {
-		for (let i = open; i < lines.length; i++) {
-			if (!protectedLines[i]) flags[i] = false;
-		}
-	}
-
-	return flags;
-}
-
-/**
  * 空格排版：给整篇笔记补 / 删 中文、英文、数字、公式、标点之间的空格。
  *
  * 幂等：输出的每个位置要么恰好一个空格、要么没有空格，再跑一次不会变。
@@ -712,17 +779,29 @@ export function fixSpacing(content: string, options: SpacingOptions): string {
 	const lines = content.split('\n');
 	const protectedLines = markProtectedLines(lines);
 	const codeLines = markIndentedCodeLines(lines);
-	const mathLines = markDisplayMathLines(lines);
+	const ranges = mathRanges(lines, protectedLines);
 	let changed = false;
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
 		if (line === undefined) continue;
-		// frontmatter、代码块、`$$…$$` 公式：整行跳过
-		if (protectedLines[i] || codeLines[i] || mathLines[i]) continue;
-		if (line.trim() === '') continue;
+		// frontmatter、代码块、`$$…$$` 区块内部：整行跳过
+		if (protectedLines[i] || codeLines[i]) continue;
+		const range = ranges[i];
+		if (!range) continue;
+		// 只有空白的行统一成真正的空行：肉眼没区别，但不再留"看不见的缩进 / NBSP"
+		if (line.trim() === '') {
+			if (line !== '') {
+				lines[i] = '';
+				changed = true;
+			}
+			continue;
+		}
 
-		const fixed = formatLine(line, options);
+		const head = line.substring(0, range[0]);
+		const body = line.substring(range[0], range[1]);
+		const tail = line.substring(range[1]);
+		const fixed = head + formatLine(body, options) + tail;
 		if (fixed !== line) {
 			lines[i] = fixed;
 			changed = true;

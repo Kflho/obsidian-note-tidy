@@ -102,6 +102,16 @@ const COMMAND_CASES: Array<[string, string, string]> = [
 	["间距命令不产生操作数：\\quad 后面的一元号", String.raw`$$\quad -x$$`, String.raw`$$\quad-x$$`],
 	["自带参数的关系符命令与参数贴紧", String.raw`$$a\pmod{n}$$`, String.raw`$$a \pmod{n}$$`],
 	["补充的关系符命令（\\Longrightarrow）", String.raw`$$A\Longrightarrow B$$`, String.raw`$$A \Longrightarrow B$$`],
+	// 公式里直接写的中文：包成 \text{…}（文档里就是 `\text{i 为奇数}` 这种写法）
+	["公式里的中文包成文本", String.raw`$$P^{-1}AP = Λ或等价地A = PΛP^{-1}$$`, String.raw`$$P^{-1}AP = Λ\text{或等价地}A = PΛP^{-1}$$`],
+	["已经是 \\text{} 的中文不再包一层", String.raw`$$\Delta_i\begin{cases}\le 0,\text{i 为奇数} \\ > 0,\text{i 为偶数}\end{cases}$$`,
+		["$$" + String.raw`\Delta_i\begin{cases}\le 0, \text{i 为奇数} \\`, `${T}` + String.raw`> 0, \text{i 为偶数}\end{cases}` + "$$"].join("\n")],
+	["行内公式里的中文同样包", String.raw`$x，y$`, String.raw`$x\text{，}y$`],
+	// 上下标永远只吃一个字符：多字符**不**自动补花括号 —— `A^TP`（A 转置 × P）、
+	// `k_mx_m`（k_m × x_m）与 `a_ij`（矩阵元素 a_{ij}）写法完全一样，猜错就改了公式的含义
+	["上标多字符不补花括号（A^T P 不能被并成 A^{TP}）", String.raw`$$A^TP + PA < 0$$`, String.raw`$$A^TP + PA < 0$$`],
+	["下标多字符不补花括号（k_m x_m 不能被并成 k_{mx}）", String.raw`$$k_mx_m$$`, String.raw`$$k_mx_m$$`],
+	["单个字符的上下标照常", String.raw`$$x_1^2$$`, String.raw`$$x_1^2$$`],
 ];
 
 /** 规则 3：`$$` 与里面的内容之间没有空格 */

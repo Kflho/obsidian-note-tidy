@@ -15,14 +15,16 @@ import type { TextPipelineOptions } from "../src/text-pipeline";
 import { DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/chat-log";
 import type { ChatLogOptions } from "../src/chat-log";
 import { DEFAULT_SPACING_OPTIONS } from "../src/spacing";
+import { DEFAULT_TEXT_MATH_OPTIONS } from "../src/text-math";
 
 const T = "\t";
 const sp = (n: number): string => " ".repeat(n);
 
-/** 默认：行首缩进、标记排版与空格排版（都与插件默认设置一致） */
+/** 默认：行首缩进、标记排版、智能公式与空格排版（都与插件默认设置一致） */
 const BASE: TextPipelineOptions = {
 	leadingIndent: "smart",
 	chat: DEFAULT_CHAT_LOG_OPTIONS,
+	textMath: DEFAULT_TEXT_MATH_OPTIONS,
 	mathLayout: false,
 	spacing: DEFAULT_SPACING_OPTIONS,
 	tags: null,

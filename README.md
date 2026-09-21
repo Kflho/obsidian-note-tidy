@@ -158,6 +158,8 @@ Rewrites the LaTeX code of formulas — `$$ … $$` blocks and inline `$…$` �
 | `$$x^-1$$` | `$$x^-1$$` | a sign right after `^` / `_` *is* the script, so it hugs what follows |
 | `$$f'-g$$` | `$$f' - g$$` | a prime does not swallow the next token — that minus is a real subtraction and gets spaces on both sides |
 | `$$a\pmod{n}$$` | `$$a \pmod{n}$$` | a relation command that takes an argument stays tight against it |
+| `$$Λ或等价地A$$` | `$$Λ\text{或等价地}A$$` | Chinese written straight into a formula is wrapped in `\text{…}` (the spec's own formulas do this: `\text{i 为奇数}`); the first element of an environment also stays tight now (`\begin{cases}\le 0`) |
+| `$$a_ij$$` | unchanged | multi-character scripts are **not** auto-braced: `a_ij` (a matrix element), `A^TP` (Aᵀ·P) and `k_mx_m` (k_m·x_m) are written exactly the same way, so guessing would silently change what the formula means |
 | `$$\partial f$$` | `$$\partial{f}$$` | a command stays tight against its argument; braces keep the command name intact (rule 6) |
 | `$$\sin x$$` / `$$\sin 2x$$` | `$$\sin{x}$$` / `$$\sin2x$$` | braces only where joining would swallow the name (`\sinx` is invalid, `\sin2x` is fine) |
 | `$$A_{i}, \quadA_{j}$$` | `$$A_{i}, A_{j}$$` | a spacing command glued to a letter (`\quadA` — LaTeX reads it as an undefined command and the formula errors out) is split: when a comma or another separator is already there, the redundant spacing is dropped; otherwise it becomes `\quad{A}` |
@@ -192,12 +194,42 @@ Where the LaTeX layout owns the code **inside** `$…$`, this one owns the space
 | `word,word` | `word, word` | half-width `, . ! ? :` get no space before and one after (decimals `1.2.2`, times `12:30` and `...` are exempt) |
 | `( x )` | `(x)` | no space just inside ASCII brackets |
 | `100kg` (optional, off by default) | `100 kg` | one space between a number and a unit from the built-in list |
+| `元素: $A$` | `元素：$A$` | half-width `, : ; ! ?` in Chinese context become full-width, and full-width `，。、；！？` in a **pure-English** line become half-width (`什么语境用什么标点`). The Chinese direction is judged per sentence, not per neighbouring character: the mark changes when the text before it is Chinese, the text after it is Chinese, or the sentence is Chinese-dominant (letters inside formulas, code and links do not count as English, and word count is used rather than letter count) — so `没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且`. The English direction only fires when the line has **no Chinese at all and at least two English words**; half-and-half lines such as `参数 gain=50、shift=0` are left alone. `.` is never converted (ellipsis, version numbers, `e.g.`), and neither are `（）`, `：`, `《》`, marks after digits (`1,000`, `12:30`), after a backslash (`\,`), inside half-width brackets (`(mod, k)`), next to `/`, in the chat-log header (`张三: 2024/…`) or inside `《…》` / `“…”` |
 
 Rule sources are the note-taking spec this plugin was built for: languages are separated by one character width, punctuation stays tight, and Chinese↔numbers stay tight. Two rules that would break proper nouns are off by default: English↔numbers (`GPT4`, `3D`, `v1.2.2`) and number↔unit.
 
 Untouched: frontmatter, fenced and indented code blocks, `$$ … $$` blocks (including every line in between), inline code, wikilinks and markdown links, URLs, HTML tags, `%%comments%%`, `#tags`, the inside of `《…》` / `〈…〉` / `“…”` (so 《新 吊带袜天使》 and 《a子计划》 keep their original form), Chinese-to-Chinese spaces, and math operators (`ctrl+c` is never split).
 
 Emphasis markers are transparent: the rules see the content they wrap, so `**可逆矩阵**$P$` becomes `**可逆矩阵** $P$` and `中文**English**中文` becomes `中文 **English** 中文`. Spaces are only ever added *outside* the markers — never between `**` and the text, which would stop the emphasis from rendering. A star that has no pair (`2*3`, `a*b`) is left alone.
+
+Three details that matter on real notes:
+
+- **A line that merely contains `$$…$$` is still formatted.** `1.矩阵指数$e^{At}$是$$…$$` used to be skipped as a whole (the line "is a formula"), so nothing on it was ever repaired. Now a same-line `$$…$$` pair is treated as one inline formula and the text around it is formatted; only the lines *between* a multi-line `$$ … $$` block are skipped, and the text before the opening `$$` / after the closing `$$` on those boundary lines is still formatted.
+- **NBSP (`U+00A0`) counts as a space.** Text pasted from Word or a PDF often uses non-breaking spaces, which look identical to spaces but were invisible to the rules (`矩阵 A` would never be touched). Wherever a rule applies, the NBSP is normalized to a regular space; where no rule applies it is left as it is.
+- **Whitespace-only lines become truly empty.** A line holding just tabs or spaces renders the same but leaves invisible indentation behind.
+
+### 9. Plain-text math becomes formulas
+
+Math symbols typed as plain text get wrapped in `$…$`, so they render as formulas and the formula layout can format them:
+
+| Before | After | Rule |
+|--------|-------|------|
+| `矩阵 A` / `矩阵A` | `矩阵 $A$` | a single Latin letter next to Chinese is a variable |
+| `n维` / `n 阶` / `n 次` | `$n$ 维` / `$n$ 阶` / `$n$ 次` | measure words count as the Chinese anchor too |
+| `V(F)` / `a(b)` / `T(x)` | `$V(F)$` / `$a(b)$` / `$T(x)$` | a single letter plus a parenthesised argument |
+| `x = 0` / `x = Tz` / `Ax = λx` | `$x = 0$` / `$x = Tz$` / `$Ax = \lambda x$` | the **whole expression** is wrapped — never just the letters, which would leave `= 0` outside the formula |
+| `a, b ∈ F` | `$a, b \in F$` | commas, numbers and operators join the run |
+| `特征值 λ` | `特征值 $\lambda$` | Greek letters (and `∈ ≤ ≥ × → …`) become LaTeX commands; a space is inserted when the command would swallow the next letter (`\lambdax` is invalid) |
+
+Deliberately conservative — it rewrites prose, so "not sure" means "don't touch". A run is only wrapped when there is real evidence that it is math:
+
+- the run contains parentheses or an operator (`V(F)`, `x = 0`, `a, b ∈ F`);
+- a math noun sits right before it (`矩阵 A`, `向量 x`, `数域 F`, `特征值 λ` …);
+- a measure word sits right after it (`n维`, `n 阶`, `k 行`);
+- it contains a Greek letter (never anything else), or
+- the same variable was already recognized earlier in the line (`矩阵 A …… 称为 A 的秩`).
+
+Everything else is left alone: frontmatter, fenced/indented code, inline code, wikilinks, links, URLs, HTML tags, tags, comments, existing formulas, the inside of `《…》` / `〈…〉` / `“…”` (so 《a子计划》 keeps its form), English prose, words of three letters or more (`Jordan`, `latex`, `Steinitz`), two-letter abbreviations with no expression around them (`AI`, `QQ`, `pg`, `tv`, `xx`), the two-letter function words (`is`, `to`), abbreviations (`e.g.`, `i.e.`), paths and extensions (`C:\data`, `main.ts`), model numbers (`A4`, `B5`), `_`/`^` naming conventions (`Q_inv`, `x^2`, `a_ij`), list labels (`(a)`, `(b)`), task checkboxes (`- [x]`) and letter-plus-proper-noun pairs (`C 语言`, `D 盘`, `A 股`). Turn the setting off to keep symbols as plain text.
 
 ## How to use
 
@@ -241,6 +273,10 @@ Blank lines already present in the source text are always preserved.
 
 **排版格式 (layout format)** — what the reader actually sees. All of it is applied by the same "fix layout" command:
 
+Math symbols:
+
+- **Plain-text math becomes formulas** — on by default; `矩阵 A` → `矩阵 $A$`, `n维` → `$n$ 维`, `V(F)` → `$V(F)$`, `x = 0` → `$x = 0$`, `λ` → `$\lambda$`. See section 9 for what is deliberately left alone
+
 Word spacing:
 
 - **Chinese ↔ English** — one character width (`space`, default) or keep as is. Inline code, wikilinks, links and tags count as English
@@ -254,6 +290,7 @@ Punctuation and symbols:
 - **Half-width punctuation** `, . ! ? :` — no space before, one space after; on by default
 - **No space inside parentheses** `( x )` → `(x)`; on by default
 - **One space between numbers and units** — off by default; units must be in the built-in list (`%`, `3D`, `4K`, `5G` are not units)
+- **Half-width punctuation becomes full-width after Chinese** — on by default; `元素: $A$` → `元素：$A$`. Applies to `, : ; ! ?` only
 
 Tags and blocks:
 
@@ -298,7 +335,9 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 | Module | Responsibility |
 |--------|----------------|
 | `src/chat-log.ts` | chat log layout (username / date / time toggles, indent, image order, blank lines) |
-| `src/text-pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → formulas → tags → block sorting |
+| `src/text-pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → plain-text math → formulas → word spacing → tags → block sorting |
+| `src/text-math.ts` | plain-text math detection — `矩阵 A`, `n维`, `V(F)`, `x = 0`, `λ` → `$…$` |
+| `src/inline-scan.ts` | shared inline protection — code spans, links, URLs, tags, comments, existing `$…$` |
 | `src/text-layout.ts` | general layout fixes — leading indentation (4 spaces = 1 tab) |
 | `src/markdown-markers.ts` | block marker spacing — blockquotes, lists, headings |
 | `src/tags.ts` | tag layout — moving tags to the end of a block, per-cell tables, tag sorting |
@@ -322,6 +361,17 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 3. Enable the plugin in Settings → Community Plugins
 
 ## Changelog
+
+### v1.2.3
+- New: **plain-text math becomes formulas** (on by default) — `矩阵 A` / `矩阵A` → `矩阵 $A$`, `n维` / `n 阶` → `$n$ 维` / `$n$ 阶`, `V(F)` / `a(b)` → `$V(F)$` / `$a(b)$`, whole expressions (`x = 0`, `x = Tz`, `Ax = λx`, `a, b ∈ F`) are wrapped as one run, and Greek letters become LaTeX commands (`λ` → `$\lambda$`). It needs evidence before touching prose (brackets or operators, a math noun before, a measure word after, a Greek letter, or the same variable already seen on the line) and leaves English sentences, words of three letters or more, two-letter abbreviations (`AI`, `QQ`, `pg`, `tv`, `xx`), `e.g.`, `C:\path`, `A4`, `Q_inv`, list labels `(a)`, task checkboxes `- [x]`, `《…》` / `“…”` and existing formulas alone. See section 9
+- New: **punctuation follows the language** — half-width `, : ; ! ?` become full-width in Chinese context (`没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且`; the sentence as a whole is judged, not just the left neighbour, and letters inside formulas/code/links do not count as English), and full-width `，。、；！？` become half-width in pure-English lines (only when the line has no Chinese at all and at least two English words, so `参数 gain=50、shift=0` stays untouched). `（）`, `：`, `《》`, `.`, digits (`1,000`, `12:30`), `\,`, half-width brackets and the chat-log header are never converted
+- Fixed: a line that merely **contains** `$$…$$` is no longer skipped as a whole — `1.矩阵指数$e^{At}$是…$$…$$` used to come out completely unrepaired. A same-line `$$…$$` pair now counts as one inline formula and the text around it is formatted; only the lines between a multi-line `$$ … $$` block are skipped, and the text before the opening `$$` or after the closing `$$` on those boundary lines still is
+- Fixed: **NBSP** (`U+00A0`, what pasting from Word or a PDF produces) now counts as a space, so `矩阵 A` is finally repaired; whitespace-only lines become truly empty
+- Fixed: **emphasis markers are transparent** — `**可逆矩阵**$P$` → `**可逆矩阵** $P$`, `中文**English**中文` → `中文 **English** 中文`. Spaces are only ever added outside the markers (never between `**` and the text, which would stop the emphasis from rendering), and unpaired stars (`2*3`, `a*b`) are left alone
+- Fixed: unary vs binary `+` / `-` inside formulas. A sign at the start of an environment (`\begin{cases}-1`, `\begin{bmatrix}-1`), right after `^` / `_` (`x^-1`) and after a prime (`f'-g`) is now decided by "is an operand missing here?"; `\pmod{n}` no longer becomes `\pmod {n}`; `\Longrightarrow`, `\hookrightarrow`, `\nleq`, `\setminus`, `\uplus`, `\dagger` and more joined the relation table
+- Fixed: Chinese written straight into a formula is wrapped in `\text{…}` (`Λ或等价地A` → `Λ\text{或等价地}A`), and an environment stays tight against its first element (`\begin{cases}\le 0`)
+- New setting: **正文数学符号自动加公式**; the punctuation setting is now **标点全半角按语境** (both on by default)
+- Tests: new `test/text-math.test.ts`; `spacing` grew to 396 checks; all layout steps verified idempotent against a 322-note vault
 
 ### v1.2.2
 - New: **spacing layout** (typesetting) — it owns the spaces **outside** `$…$`, i.e. between Chinese, English, numbers, formulas and punctuation. One character width between Chinese and English (inline code, wikilinks, links and tags count as English), **no** space between Chinese and numbers (existing spaces are removed: `第 3 章` → `第3章`), one space around inline formulas, none on either side of full-width punctuation, half-width `, . ! ? :` get no space before and one after, no space inside brackets, and (off by default) one space between a number and a unit. Runs that contain letters (`GPT4`, `3D`, `v1.2.2`, `100kg`) count as one English word, so model numbers are never split; the inside of `《…》` / `〈…〉` / `“…”` is kept verbatim (《新 吊带袜天使》, 《a子计划》)
@@ -609,6 +659,8 @@ frontmatter 与代码块（``` / ~~~）内部的缩进属于语法或内容，�
 | `$$x^-1$$` | `$$x^-1$$` | 紧跟在 `^` / `_` 后面的符号就是上标/下标本身，与内容贴紧 |
 | `$$f'-g$$` | `$$f' - g$$` | 撇号不吃后面的符号：那个减号是真的减法，左右都要空格 |
 | `$$a\pmod{n}$$` | `$$a \pmod{n}$$` | 自带花括号参数的关系符命令与参数贴紧 |
+| `$$Λ或等价地A$$` | `$$Λ\text{或等价地}A$$` | 公式里直接写的中文包成 `\text{…}`（规范里就是这么写的：`\text{i 为奇数}`）；环境开头与第一个元素保持连写（`\begin{cases}\le 0`） |
+| `$$a_ij$$` | 不动 | 多字符上下标**不**自动补花括号：`a_ij`（矩阵元素）、`A^TP`（Aᵀ·P）、`k_mx_m`（k_m·x_m）三种写法完全一样，猜错就改了公式的含义 |
 | `$$\partial f$$` | `$$\partial{f}$$` | 修饰符与参数贴紧；花括号保证命令名不被吃掉（规则 6） |
 | `$$\sin x$$` / `$$\sin 2x$$` | `$$\sin{x}$$` / `$$\sin2x$$` | 只在"连起来会出错"时加花括号（`\sinx` 非法、`\sin2x` 合法） |
 | `$$A_{i}, \quadA_{j}$$` | `$$A_{i}, A_{j}$$` | 间距命令与后面字母粘连（`\quadA` 会被 LaTeX 当成未定义命令，公式直接报错）会拆开：前面已有逗号等分隔就删掉多余的间距，否则写成 `\quad{A}` |
@@ -643,6 +695,7 @@ frontmatter 与代码块（``` / ~~~）内部的缩进属于语法或内容，�
 | `word,word` | `word, word` | 半角标点 `, . ! ? :` 前不留空格、后空一格（小数点 `1.2.2`、时间 `12:30`、省略号 `...` 除外） |
 | `( x )` | `(x)` | 半角括号内侧不留空格 |
 | `100kg`（可选，默认关闭） | `100 kg` | 数字与单位之间空一格，单位须落在内置词表里 |
+| `元素: $A$` | `元素：$A$` | 中文语境里的半角 `, : ; ! ?` 换全角，**纯英文**行里的 `，。、；！？` 换半角（什么语境用什么标点）。中文方向按**句**判定而不是只看左邻一个字符：左边是中文、右边是中文、或整句以中文为主（公式、代码、链接里的字母不算英文，且用**词数**而不是字母数）就换 —— `没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且`。英文方向只在**整句一个中文字都没有、且至少两个英文单词**时生效，`参数 gain=50、shift=0` 这类半中半英的行不动。`.` 不换（省略号、版本号、`e.g.`），`（）`、`：`、`《》`、数字后面的标点（`1,000`、`12:30`）、反斜杠后面的 `\,`、半角括号里（`(mod, k)`）与 `/` 之间的标点、聊天记录头部 `张三: 2024/…`、书名号引号内部也都不动 |
 
 规则全部来自本插件配套的笔记规范：不同语言之间空一个字宽、与标点之间不空、中文与数字之间不空。两条会误伤专有名词的规则默认关闭：英文↔数字（`GPT4`、`3D`、`v1.2.2`）与数字↔单位。
 
@@ -650,8 +703,13 @@ frontmatter 与代码块（``` / ~~~）内部的缩进属于语法或内容，�
 
 强调标记不参与规则本身，规则看的是它包住的内容：`**可逆矩阵**$P$` → `**可逆矩阵** $P$`、`中文**English**中文` → `中文 **English** 中文`。空格只加在标记**外面** —— 插进 `**` 与文字之间会让粗体失效（渲染成两个星号）。配不成对的星号（`2*3`、`a*b`）原样留着，不当强调处理。
 
-设置面板按"代码格式 / 排版格式"分区，八条规则各有一项开关：
+实测里踩到的三个坑，都已修掉：
 
+- **同一行里带 `$$…$$` 的行照样排版**：`1.矩阵指数$e^{At}$是$$…$$` 以前整行被当成公式跳过，于是这一行一个字符都修不了。现在同一行成对的 `$$…$$` 按"行内公式"整体处理，行内其余文字正常排版；只有**跨行**公式块中间的行才整行跳过，且首行 `$$` 之前、末行 `$$` 之后的正文仍会排。
+- **NBSP（U+00A0）算空格**：从 Word / PDF 粘进来的不换行空格看着和空格一样，规则却看不见它（`矩阵\u00A0A` 永远修不到）。现在规则生效的位置一律统一成普通空格，规则管不到的位置原样保留。
+- **只有空白的行清成真正的空行**：只装 Tab 或空格的行渲染没区别，但会留下看不见的缩进。
+
+设置面板按"代码格式 / 排版格式"分区，八条规则各有一项开关：
 | 设置项 | 默认 | 说明 |
 |--------|------|------|
 | 中文与英文之间 | 空一个字宽 | 也可选"保持原样" |
@@ -662,6 +720,31 @@ frontmatter 与代码块（``` / ~~~）内部的缩进属于语法或内容，�
 | 半角标点前不留空格、后空一格 | 开 | 小数点、时间、省略号除外 |
 | 括号内侧不留空格 | 开 | 只作用于半角 `()` |
 | 数字与单位之间空一格 | 关 | 单位须在词表内，`%`、`3D`、`4K`、`5G` 不算 |
+| 半角标点转全角 | 开 | 紧跟在中文后面的 `, : ; ! ?` 换全角；`.` 与 `()` 不换 |
+| 正文数学符号自动加公式 | 开 | `矩阵 A` → `矩阵 $A$`、`n维` → `$n$ 维`、`V(F)` → `$V(F)$`、`x = 0` → `$x = 0$`、`λ` → `$\lambda$`；详见第 9 节 |
+
+### 9. 智能公式：正文里的数学符号自动套公式
+
+正文里按普通文字敲的数学符号会自动包上 `$…$`，渲染成公式，并接着被「公式排版」整理：
+
+| 排版前 | 排版后 | 规则 |
+|--------|--------|------|
+| `矩阵 A` / `矩阵A` | `矩阵 $A$` | 紧挨中文的单个拉丁字母视为变量 |
+| `n维` / `n 阶` / `n 次` | `$n$ 维` / `$n$ 阶` / `$n$ 次` | 量词也算中文锚点 |
+| `V(F)` / `a(b)` / `T(x)` | `$V(F)$` / `$a(b)$` / `$T(x)$` | 单字母 + 括号参数 |
+| `x = 0` / `x = Tz` / `Ax = λx` | `$x = 0$` / `$x = Tz$` / `$Ax = \lambda x$` | **整段算式**一起包 —— 不能只包字母，否则 `= 0` 会落在公式外面 |
+| `a, b ∈ F` | `$a, b \in F$` | 逗号、数字、运算符都算同一段 |
+| `特征值 λ` | `特征值 $\lambda$` | 希腊字母与 `∈ ≤ ≥ × →` 等换成 LaTeX 命令；命令后面紧跟字母时补一个空格（`\lambdax` 是未定义命令） |
+
+刻意保守 —— 它改的是正文，所以"拿不准就不动"。只有拿到"这确实是数学"的证据才包：
+
+- 这一段里有括号或运算符（`V(F)`、`x = 0`、`a, b ∈ F`）；
+- 左边紧挨数学语境词（`矩阵 A`、`向量 x`、`数域 F`、`特征值 λ` …）；
+- 右边紧挨量词（`n维`、`n 阶`、`k 行`）；
+- 这一段里有希腊字母（希腊字母在正文里只可能是数学）；
+- 同一行前面已经确认过同名变量（`矩阵 A …… 称为 A 的秩`）。
+
+其余一律不动：frontmatter、围栏/缩进代码块、行内代码、双链与链接、URL、HTML 标签、标签、注释、已有公式、`《…》` `〈…〉` `“…”` 内部（《a子计划》保持原形）、英文散文、三个字母以上的单词（`Jordan`、`latex`、`Steinitz`）、没有算式的两字母缩写（`AI`、`QQ`、`pg`、`tv`、`xx`）、两字母虚词（`is`、`to`）、缩写（`e.g.`、`i.e.`）、路径与扩展名（`C:\data`、`main.ts`）、型号（`A4`、`B5`）、带 `_` `^` 的命名约定（`Q_inv`、`x^2`、`a_ij`）、分条标签（`(a)`、`(b)`）、任务复选框（`- [x]`）、字母 + 专有名词后缀（`C 语言`、`D 盘`、`A 股`）。不想要就在设置里关掉。
 
 ## 使用方式
 
@@ -687,7 +770,9 @@ npm run lint
 | 模块 | 职责 |
 |------|------|
 | `src/chat-log.ts` | 聊天记录排版（用户名/日期/时间开关、缩进、图文顺序、空行） |
-| `src/text-pipeline.ts` | 按固定顺序串起各排版步骤：缩进 → 标记 → 聊天记录 → 公式 → 空格 → 标签 → 板块排序 |
+| `src/text-pipeline.ts` | 按固定顺序串起各排版步骤：缩进 → 标记 → 聊天记录 → 智能公式 → 公式 → 空格 → 标签 → 板块排序 |
+| `src/text-math.ts` | 智能公式：正文里的 `矩阵 A`、`n维`、`V(F)`、`x = 0`、`λ` → `$…$` |
+| `src/inline-scan.ts` | 行内共用保护区判定：行内代码、链接、URL、标签、注释、已有公式 |
 | `src/text-layout.ts` | 行首缩进归一（4 空格 = 1 个 tab） |
 | `src/markdown-markers.ts` | 块级标记空白：注释（引用）、列表、标题 |
 | `src/tags.ts` | 标签排版：标签归位到块尾、表格按单元格、标签排序 |
@@ -722,6 +807,17 @@ npm run lint
 批量操作前建议备份仓库。
 
 ## 更新日志
+
+### v1.2.3
+- 新增：**智能公式**（默认开）—— 正文里按普通文字敲的数学符号自动套公式：`矩阵 A` / `矩阵A` → `矩阵 $A$`；`n维` / `n 阶` → `$n$ 维` / `$n$ 阶`；`V(F)` / `a(b)` → `$V(F)$` / `$a(b)$`；整段算式（`x = 0`、`x = Tz`、`Ax = λx`、`a, b ∈ F`）一起包；希腊字母换成 LaTeX 命令（`λ` → `$\lambda$`）。判定很保守，必须有"这是数学"的证据（括号 / 运算符、左边的数学语境词、右边的量词、希腊字母、或本行已确认过的同名变量）才动手；英文句子、三个字母以上的单词、两字母缩写（`AI`、`QQ`、`pg`、`tv`、`xx`）、`e.g.`、`C:\路径`、`A4`、`Q_inv`、分条标签 `(a)`、任务复选框 `- [x]`、`《…》` `“…”` 与已有公式一律不碰。详见第 9 节
+- 新增：**标点跟着语境走** —— 中文语境里的半角 `, : ; ! ?` 换全角（`没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且`；按**句**判定而不是只看左邻一个字符，公式 / 代码 / 链接里的字母不算英文），纯英文行里的 `，。、；！？` 换半角（只在"整句一个中文字都没有、且至少两个英文单词"时生效，所以 `参数 gain=50、shift=0` 不会被误换）。`（）`、`：`、`《》`、`.`、数字后的标点（`1,000`、`12:30`）、`\,`、半角括号内、聊天记录头部一律不动
+- 修复：**只要一行里出现 `$$` 就整行跳过** —— `1.矩阵指数$e^{At}$是…$$…$$` 以前一个字符都修不了。现在同一行成对的 `$$…$$` 按"行内公式"处理，行内其余文字照常排版；只有**跨行**公式块中间的行才跳过，首行 `$$` 之前、末行 `$$` 之后的正文仍会排
+- 修复：**NBSP（U+00A0）算空格** —— 从 Word / PDF 粘进来的不换行空格以前完全看不见，`矩阵 A` 永远修不到；只有空白的行现在清成真正的空行
+- 修复：**强调标记透明** —— `**可逆矩阵**$P$` → `**可逆矩阵** $P$`，`中文**English**中文` → `中文 **English** 中文`。空格只加在标记外面（插进 `**` 与文字之间会让粗体失效），配不成对的星号（`2*3`、`a*b`）不动
+- 修复：公式里 `+` `-` 的一元与二元判定 —— 环境开头（`\begin{cases}-1`、`\begin{bmatrix}-1`）、`^` `_` 之后（`x^-1`）、撇号之后（`f'-g`）都按"这个位置缺不缺操作数"判定；`\pmod{n}` 不再被写成 `\pmod {n}`；关系符表补上 `\Longrightarrow`、`\hookrightarrow`、`\nleq`、`\setminus`、`\uplus`、`\dagger` 等
+- 修复：公式里直接写的中文包成 `\text{…}`（`Λ或等价地A` → `Λ\text{或等价地}A`）；环境开头与第一个元素保持连写（`\begin{cases}\le 0`）
+- 新增设置项：**正文数学符号自动加公式**；标点设置更名为 **标点全半角按语境**（都默认开）
+- 测试：新增 `test/text-math.test.ts`；`spacing` 增到 396 项检查；所有排版步骤在 322 篇笔记的仓库上验证幂等
 
 ### v1.2.2
 - 新增：**空格排版**（排版格式）—— 管 `$…$` **外面**、也就是使用者实际看到的那层格式：中文与英文之间空一个字宽（行内代码、双链、链接、标签与英文等价）；中文与数字之间**不留空格**（已有空格一并删掉，`第 3 章` → `第3章`）；行内公式与前后文字空一格；全角标点两侧不留空格（引号与书名号内侧除外）；半角标点 `, . ! ? :` 前不留空格、后空一格；括号内侧不留空格；数字与单位之间空一格（默认关闭）。含字母的连写（`GPT4`、`3D`、`v1.2.2`、`100kg`）整体算一个英文单词，型号不会被拆开；《新 吊带袜天使》《a子计划》这类书名号、引号内部原样保留

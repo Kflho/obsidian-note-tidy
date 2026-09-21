@@ -1025,6 +1025,8 @@ export default class ImageTransferPlugin extends Plugin {
         return {
             leadingIndent: resolveLeadingIndentMode(this.settings.textLeadingIndentFix),
             chat: this.getChatLogOptions(),
+            // 智能公式：正文里的 `矩阵 A`、`n维`、`V(F)`、`x = 0` 自动套 `$…$`
+            textMath: { wrapSymbols: this.settings.textMathWrapSymbols },
             mathLayout: this.settings.mathLayout,
             // 空格排版（排版格式）：中文 / 英文 / 数字 / 公式 / 标点之间的距离
             spacing: getSpacingOptions(this.settings),

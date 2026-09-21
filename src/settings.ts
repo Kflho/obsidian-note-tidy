@@ -44,6 +44,9 @@ export interface ImageTransferSettings {
 	// ---- 代码格式：公式排版 ----
 	/** 公式排版：整理 $$…$$ 里的 LaTeX 代码（空格、换行、缩进） */
 	mathLayout: boolean;
+	// ---- 排版格式：智能公式 ----
+	/** 智能公式：把正文里的数学符号包成 `$…$` */
+	textMathWrapSymbols: boolean;
 	// ---- 排版格式：空格排版 ----
 	/** 中文 ↔ 英文之间空一个字宽 */
 	spacingCjkLatin: string;
@@ -61,6 +64,8 @@ export interface ImageTransferSettings {
 	spacingBracketInner: boolean;
 	/** 数字 ↔ 单位之间空一格 */
 	spacingDigitUnit: boolean;
+	/** 紧跟在中文后面的半角标点换成全角 */
+	spacingHalfToFullPunct: boolean;
 }
 
 export const DEFAULT_SETTINGS: ImageTransferSettings = {
@@ -86,6 +91,8 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	blockSort: false,
 	// 公式排版会重写 $$…$$ 里的代码，默认关闭
 	mathLayout: false,
+	// 智能公式：正文里的 `矩阵 A`、`n维`、`V(F)`、`x = 0` 自动套 `$…$`
+	textMathWrapSymbols: true,
 	// 空格排版：文字的规则默认生效；可能误伤专有名词的两条（英文↔数字、数字↔单位）默认关
 	spacingCjkLatin: DEFAULT_SPACING_OPTIONS.cjkLatin,
 	spacingCjkDigit: DEFAULT_SPACING_OPTIONS.cjkDigit,
@@ -95,6 +102,7 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	spacingHalfPunct: DEFAULT_SPACING_OPTIONS.halfPunct,
 	spacingBracketInner: DEFAULT_SPACING_OPTIONS.bracketInner,
 	spacingDigitUnit: DEFAULT_SPACING_OPTIONS.digitUnit,
+	spacingHalfToFullPunct: DEFAULT_SPACING_OPTIONS.halfToFullPunct,
 }
 
 /**
@@ -111,6 +119,7 @@ export function getSpacingOptions(settings: ImageTransferSettings): SpacingOptio
 		halfPunct: settings.spacingHalfPunct !== false,
 		bracketInner: settings.spacingBracketInner !== false,
 		digitUnit: settings.spacingDigitUnit === true,
+		halfToFullPunct: settings.spacingHalfToFullPunct !== false,
 	};
 }
 
@@ -261,6 +270,19 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 		// ========================================================
 		new Setting(containerEl).setName('排版格式').setHeading();
 
+		// ---- 数学符号 ----
+		addSubHeading(containerEl, '数学符号');
+
+		new Setting(containerEl)
+			.setName('正文数学符号自动加公式')
+			.setDesc('把正文里"一看就是数学符号"的写法包上 `$…$`：`矩阵 A` / `矩阵A` → `矩阵 $A$`；`n维` `n 阶` `n 次` → `$n$ 维` `$n$ 阶` `$n$ 次`；`V(F)` / `a(b)` / `T(x)` → `$V(F)$`；整段算式 `x = 0`、`x = Tz`、`V(x) = 0` 一起包；`λ` `Λ` 这类希腊字母换成 `$\\lambda$` `$\\Lambda$`。判定很保守：只有出现括号 / 运算符、左边的数学语境词（矩阵、向量、数域…）、右边的量词（维、阶、次、行、列…）、希腊字母，或本行已确认过的同名变量才动手 —— 英文句子、长单词（Jordan、latex）、两字母缩写（AI、QQ、pg、tv、xx）、缩写 e.g.、路径 C:\\ 、型号 A4、命名约定 Q_inv、分条标签 (a)、任务复选框 - [x]、书名号引号内部与已有公式一律不碰')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.textMathWrapSymbols)
+				.onChange(async (value) => {
+					this.plugin.settings.textMathWrapSymbols = value;
+					await this.plugin.saveSettings();
+				}));
+
 		// ---- 文字间距 ----
 		addSubHeading(containerEl, '文字间距');
 
@@ -353,6 +375,16 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.spacingDigitUnit)
 				.onChange(async (value) => {
 					this.plugin.settings.spacingDigitUnit = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('标点全半角按语境')
+			.setDesc('中文语境用全角、英文语境用半角。中文方向：`元素: 内容` → `元素：内容`，`没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且` —— 左边是中文、右边是中文、或整句以中文为主（公式、代码、链接里的字母不算数）就换。英文方向很保守：只有"整句一个中文字都没有、且至少两个英文单词"才把 `，。、；！？` 换成半角 —— 中文笔记里"参数 gain=50、shift=0"这类半中半英的行太多，按比例判定会把顿号误换。`（）`、`：`、书名号引号、`.`、数字后的标点（1,000、12:30）、`\\,`、半角括号内与 `/` 之间的标点、聊天记录头部 `张三: 2024/…` 一律不动')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.spacingHalfToFullPunct)
+				.onChange(async (value) => {
+					this.plugin.settings.spacingHalfToFullPunct = value;
 					await this.plugin.saveSettings();
 				}));
 

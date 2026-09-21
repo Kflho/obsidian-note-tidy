@@ -14,6 +14,7 @@ const entryPoints = [
 	"test/tags.test.ts",
 	"test/block-sort.test.ts",
 	"test/latex-layout.test.ts",
+	"test/text-math.test.ts",
 	"test/spacing.test.ts",
 	"test/text-pipeline.test.ts",
 	"test/image-size.test.ts",

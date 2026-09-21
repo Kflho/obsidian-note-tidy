@@ -308,7 +308,41 @@ function tokenize(body: string): Token[] {
 		index++;
 	}
 
-	return tokens;
+	return wrapMathText(tokens);
+}
+
+/** 全角字符（中文、假名、谚文、全角标点与字母数字）：公式里出现时应包进 `\text{…}` */
+const FULL_WIDTH_RE = /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\uff00-\uffef]/;
+
+/**
+ * 公式里直接写的中文包成 `\text{…}`。
+ *
+ * 文档里的公式就是这么写的（`\text{i 为奇数}`），而 `Λ或等价地A` 这种裸写会让中文落在数学模式里，
+ * 字形与间距都跟正文不一致，也不算"公式和符号都用 latex 语法打"（代码格式 4）。
+ * 已经写在 `\text{…}` / `\operatorname{…}` 里的中文不会被再包一层（它们是 verbatim token）。
+ */
+function wrapMathText(tokens: Token[]): Token[] {
+	const out: Token[] = [];
+	let run = '';
+
+	const flush = (): void => {
+		if (run === '') return;
+		out.push({ kind: 'verbatim', text: `\\text{${run}}`, command: 'text' });
+		run = '';
+	};
+
+	for (const token of tokens) {
+		// 只认"光秃秃的字符"：命令（`\alpha`）与文本参数都已经有自己的写法
+		if (token.kind === 'word' && token.command === undefined && FULL_WIDTH_RE.test(token.text)) {
+			run += token.text;
+			continue;
+		}
+		flush();
+		out.push(token);
+	}
+	flush();
+
+	return out;
 }
 
 /** 已定型的 token：一元加减号在这里已经变成 `unary` */
@@ -357,6 +391,8 @@ function separator(previous: Item | null, next: Item): string {
 	if (!previous) return '';
 	if (previous.kind === 'open') return '';
 	if (next.kind === 'close') return '';
+	// 环境开头与第一个元素连写：`\begin{cases}\le 0`、`\begin{bmatrix}1`（渲染里就连在一起）
+	if (previous.command === 'begin') return '';
 
 	// 上下标与前后内容贴紧：`x_1`、`a^{2}`、`f'`
 	if (previous.kind === 'script') {

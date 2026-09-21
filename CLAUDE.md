@@ -26,10 +26,12 @@ The esbuild config (`esbuild.config.mjs`) bundles `src/main.ts` into `main.js` (
 src/
   main.ts               # Plugin entry point, commands, right-click menus, file I/O
   settings.ts           # ImageTransferSettings + SettingTab (分区：图片导入 / 图片大小 / 代码格式 / 排版格式)
-  text-pipeline.ts      # 纯函数排版流水线：缩进 → 标记 → 聊天记录 → 公式 → 空格 → 标签 → 板块排序
+  text-pipeline.ts      # 纯函数排版流水线：缩进 → 标记 → 聊天记录 → 智能公式 → 公式 → 空格 → 标签 → 板块排序
   text-layout.ts        # 行首缩进归一（4 空格 = 1 tab）
   markdown-markers.ts   # 引用 / 列表 / 标题标记的空白规范化
   chat-log.ts           # QQ/微信聊天记录排版
+  text-math.ts          # 智能公式：正文里的 `矩阵 A`、`n维`、`V(F)`、`x = 0`、`λ` 自动包 `$…$`
+  inline-scan.ts        # 行内共用保护区：行内代码、双链链接、URL、标签、注释、已有 $…$
   latex-layout.ts       # 代码格式：$$…$$ 与行内 $…$ 的 LaTeX 代码
   spacing.ts            # 排版格式：中文 / 英文 / 数字 / 公式 / 标点之间的空格（八条规则）
   tags.ts               # 标签归位到块尾 + 标签排序

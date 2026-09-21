@@ -231,8 +231,135 @@ function safetyTests(): void {
 		halfPunct: false,
 		bracketInner: false,
 		digitUnit: false,
+		halfToFullPunct: false,
 	};
 	caseCheck("全部关闭时不动", "用anki卡片 ，( x ) 的 3 章", "用anki卡片 ，( x ) 的 3 章", allOff);
+}
+
+// -------------------------------------------- 2.5 半角标点、NBSP、空白行
+function punctuationTests(): void {
+	// 半角标点转全角：紧跟在中文后面才换
+	caseCheck("全角化：冒号", "对角矩阵主对角线上的元素: $A$ 的**特征值**", "对角矩阵主对角线上的元素：$A$ 的**特征值**");
+	caseCheck("全角化：逗号", "中文,中文", "中文，中文");
+	caseCheck("全角化：分号与感叹号与问号", "中文;中文!中文?中文", "中文；中文！中文？中文");
+	caseCheck("全角化：英文语境不动", "word:word, word! yes?", "word: word, word! yes?");
+	caseCheck("全角化：数字语境不动", "时间 12:30 的记录", "时间12:30的记录");
+	caseCheck("全角化：小数点不动", "圆周率 3.14 的值", "圆周率3.14的值");
+	caseCheck("全角化：函数括号不动", "设 V(x) 为 n 维矢量", "设 V(x) 为 n 维矢量");
+	caseCheck("全角化：书名号引号内部不动", "《书名, 副标题》与“引用: 内容”", "《书名, 副标题》与“引用: 内容”");
+	caseCheck("全角化：行内代码与链接内部不动", "见 `a,b:c` 与 [标题](https://a.com/b,c)", "见 `a,b:c` 与 [标题](https://a.com/b,c)");
+	caseCheck(
+		"全角化：关闭后不动",
+		"元素: $A$",
+		"元素: $A$",
+		{ ...DEFAULT_SPACING_OPTIONS, halfToFullPunct: false }
+	);
+
+	// 句级判定：标点左边的公式 / 字母不算数，得看整句语言（用户实测报的那句）
+	caseCheck(
+		"全角化：公式后面的逗号（右邻是中文）",
+		"由于四容水箱结构特殊，建立子系统后没有 $M_{ij}$, 且 $H_i = 0$ 故粗定位和精定位均无法实现。",
+		"由于四容水箱结构特殊，建立子系统后没有 $M_{ij}$，且 $H_i = 0$ 故粗定位和精定位均无法实现。"
+	);
+	caseCheck("全角化：公式之间的逗号（整句以中文为主）", "即 $A$, $B$ 与 $C$ 三个", "即 $A$，$B$ 与 $C$ 三个");
+	caseCheck("全角化：分号与感叹号紧跟公式", "$A$; 说明!真的?", "$A$；说明！真的？");
+	caseCheck("全角化：字母后面的冒号", "参数 A: 说明", "参数 A：说明");
+	caseCheck("全角化：公式后直接接中文", "$A$,且$B$", "$A$，且 $B$");
+	caseCheck(
+		"全角化：英文句子不动",
+		"in the equation $A$, and $B$, see also the appendix",
+		"in the equation $A$, and $B$, see also the appendix"
+	);
+	caseCheck(
+		"全角化：数字后面的标点不动（空格按中文↔数字规则收紧）",
+		"数值 1,000 与时间 12:30 都要保留",
+		"数值1,000与时间12:30都要保留"
+	);
+	caseCheck(
+		"全角化：聊天记录头部不动",
+		"张三: 2024/01/05 14:30:25",
+		"张三: 2024/01/05 14:30:25"
+	);
+	caseCheck("全角化：LaTeX 空格符号里的逗号不动", "写作 x\\, dr 与 $a\\,b$ 的形式", "写作 x\\, dr 与 $a\\,b$ 的形式");
+	caseCheck(
+		"全角化：半角括号里的逗号不动",
+		"输入：`ablate_subsets`（(mod, k) 列表）",
+		"输入：`ablate_subsets`（(mod, k) 列表）"
+	);
+	caseCheck(
+		"全角化：罗列标点自身时不换",
+		"1. , /. /! /? /:：后面有空格",
+		"1. , /. /! /? /:：后面有空格"
+	);
+
+	// 反向：英文语境里的全角标点换半角（什么语境用什么标点）
+	caseCheck(
+		"半角化：英文句子里的全角标点（括号与冒号不收）",
+		"This is a sentence。Then another，with（parens）！And a colon：yes？",
+		"This is a sentence. Then another, with（parens）! And a colon：yes?"
+	);
+	caseCheck("半角化：公式之间的全角逗号", "the values are $A$，$B$ and $C$。", "the values are $A$, $B$ and $C$.");
+	caseCheck(
+		"半角化：中文句里的全角标点不动",
+		"中文说明。Then an English line, here. 中文继续。",
+		"中文说明。Then an English line, here. 中文继续。"
+	);
+	caseCheck(
+		"半角化：半中半英的行不动（拿不准就不换）",
+		"An English line with 中文 words，and，punctuation。",
+		"An English line with 中文 words，and，punctuation。"
+	);
+	caseCheck("半角化：英文句里全角标点两侧的空格保留", "see 《book title》 and end", "see 《book title》 and end");
+	caseCheck(
+		"半角化：书名号本身不换",
+		"- [ ] strang《introduction to linear algebra》",
+		"- [ ] strang《introduction to linear algebra》"
+	);
+	// 判定用"词数"而不是字母数：标识符一大把的中文行仍是中文
+	caseCheck(
+		"半角化：标识符很多的中文行不动",
+		"依赖：create_controlled_system，calculate_lqr，create_noise_v2（utils/）",
+		"依赖：create_controlled_system，calculate_lqr，create_noise_v2（utils/）"
+	);
+	caseCheck(
+		"半角化：中文行里的英文术语小标题不动",
+		"2. data：",
+		"2. data："
+	);
+
+	// NBSP（U+00A0）：看起来像空格，规则必须看得见它
+	caseCheck("NBSP：公式两侧统一成普通空格", "设\u00A0$A$\u00A0是一个\u00A0$n$\u00A0阶方阵", "设 $A$ 是一个 $n$ 阶方阵");
+	caseCheck("NBSP：中英文之间统一成普通空格", "用\u00A0anki\u00A0卡片", "用 anki 卡片");
+	caseCheck("NBSP：规则不管的位置原样保留", "新\u00A0吊带袜天使", "新\u00A0吊带袜天使");
+
+	// 只有空白的行：统一成真正的空行
+	caseCheck("空白行：Tab 清掉", ["香蕉", "\t\t", "苹果"].join("\n"), ["香蕉", "", "苹果"].join("\n"));
+	caseCheck("空白行：NBSP 也清掉", ["香蕉", "\u00a0", "苹果"].join("\n"), ["香蕉", "", "苹果"].join("\n"));
+	caseCheck("空白行：代码块里不动", ["```", "\t", "```"].join("\n"), ["```", "\t", "```"].join("\n"));
+}
+
+// -------------------------------------------- 2.6 同一行里的 `$$…$$`
+function displayMathLineTests(): void {
+	// 成对的 `$$…$$` 不是区块：整行照常排版，公式整体跳过
+	caseCheck(
+		"行内 $$：列表标记与公式两侧都补空格",
+		"1.矩阵指数$e^{At}$是一个无穷级数：$$e^{At} = I + At$$",
+		"1. 矩阵指数 $e^{At}$ 是一个无穷级数：$$e^{At} = I + At$$"
+	);
+	caseCheck("行内 $$：前后补空格", "在n维空间中有：$$\\lVert{x}\\rVert = 1$$后面", "在 n 维空间中有：$$\\lVert{x}\\rVert = 1$$ 后面");
+	caseCheck("行内 $$：公式内部一个字符都不动", "$$a_{n-1}=b ,c$$", "$$a_{n-1}=b ,c$$");
+
+	// 跨行区块：起始行 `$$` 之前的正文要排，中间行整行是代码，结束行 `$$` 之后要排
+	caseCheck(
+		"跨行 $$：首行前缀照排、中间行不动、末行后缀照排",
+		["设n个变量：$$V(x) = {x^T}Px \\\\", "\tp_{11} & p_{12} ,x \\\\", "\t\\end{bmatrix}$$若$p_{ij} = p_{ji}$则对称"].join("\n"),
+		["设 n 个变量：$$V(x) = {x^T}Px \\\\", "\tp_{11} & p_{12} ,x \\\\", "\t\\end{bmatrix}$$若 $p_{ij} = p_{ji}$ 则对称"].join("\n")
+	);
+	caseCheck(
+		"跨行 $$：未闭合时不当作区块",
+		["落单的 $$ 后面照排：中文English", "下一行中文English"].join("\n"),
+		["落单的 $$ 后面照排：中文 English", "下一行中文 English"].join("\n")
+	);
 }
 
 // ------------------------------------------------------------ 3. 幂等
@@ -250,6 +377,10 @@ function idempotencyTests(): void {
 		"设$A$是一个$n$阶方阵。如果存在一个**可逆矩阵**$P$和一个**对角矩阵**$Λ$（主对角线外全为0）",
 		"**粗体**$x$与$y$**粗体** 与 ==高亮==$z$ 与 ~~删除~~$w$ 与 *斜体*$v$",
 		"中文**English**中文 与 2*3 与 a*b*c 与 snake_case_name$P$",
+		"1.矩阵指数$e^{At}$是：$$e^{At} = I + At$$",
+		["设n个变量：$$V(x) = {x^T}Px \\\\", "\tp_{11} & p_{12} ,x \\\\", "\t\\end{bmatrix}$$若$p_{ij} = p_{ji}$则对称"].join("\n"),
+		"设\u00A0$A$\u00A0是一个\u00A0$n$\u00A0阶方阵 与 元素: $A$ 的 3.14 与 12:30",
+		["香蕉", "\t\t", "苹果", "\u00a0"].join("\n"),
 	];
 
 	const combos: SpacingOptions[] = [
@@ -290,7 +421,13 @@ ruleTests();
 console.log("=== 2. 安全边界 ===");
 safetyTests();
 
-console.log("=== 3. 幂等 ===");
+console.log("=== 3. 半角标点 / NBSP / 空白行 ===");
+punctuationTests();
+
+console.log("=== 4. 同一行里的 $$…$$ ===");
+displayMathLineTests();
+
+console.log("=== 5. 幂等 ===");
 idempotencyTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
