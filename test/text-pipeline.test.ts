@@ -109,6 +109,19 @@ function pipelineTests(): void {
 		["正文 $a_{n - 1} = b$ 与公式：$$x = 1 \\le y$$"].join("\n")
 	);
 
+	// 智能公式的变量表：笔记里已经写好的 `$z$` 让全篇同名变量都跟上
+	check(
+		"智能公式：已有 $z$ 让后文单写的 z 也跟着包",
+		formatNoteText(["设 $z$ 为复数。", "", "讨论 z 的模长与 Z 的模长"].join("\n"), BASE),
+		["设 $z$ 为复数。", "", "讨论 $z$ 的模长与 Z 的模长"].join("\n")
+	);
+	// 变量表 → 新包出来的公式 → 公式排版，一条链走完
+	check(
+		"智能公式：包出来的公式接着被公式排版整理",
+		formatNoteText(["$z$ 为参数", "取 z=0 时成立"].join("\n"), { ...BASE, mathLayout: true }),
+		["$z$ 为参数", "取 $z = 0$ 时成立"].join("\n")
+	);
+
 	// 空格排版（排版格式）：与插件默认设置一致，文字规则全开
 	check("空格排版：中文与英文之间补空格", formatNoteText("用anki卡片记笔记", BASE), "用 anki 卡片记笔记");
 	check("空格排版：中文与数字之间不留空格", formatNoteText("第 3 章 的 内容", BASE), "第3章 的 内容");
@@ -277,6 +290,8 @@ function idempotencyTests(): void {
 		["- 香蕉", `${sp(2)}- 子项`, "- 苹果", "", "#标签 段落", "", "香蕉段"].join("\n"),
 		["说明 $a_{n-1}=b$：$$", `${T}${T}x=1\\le y$$`, "", "香蕉", "", "苹果"].join("\n"),
 		["$$a \\\\", "b$$ 后面的正文 #标签"].join("\n"),
+		// 变量表要迭代到不动点才收敛
+		["设 $z$ 为复数。", "", "讨论 z 的模长与 Z 的模长", "", "取 z=0 时成立"].join("\n"),
 	];
 	const combos: TextPipelineOptions[] = [
 		BASE,

@@ -14,7 +14,11 @@
  * ```
  *
  * 判定顺序（保守优先，"不确定就不动"）：
- * 1. 先划保护区：frontmatter、围栏 / 缩进代码块（整行跳过），行内代码、双链与链接、URL、
+ * 0. 先扫一遍**已经写好的公式**（行内 `$…$`、`$$…$$`，代码块与行内代码里的不算），
+ *    把里面出现过的字母收成一张**变量表**：你在笔记里把 `z` 写成 `$z$`，就等于声明
+ *    "z 是变量"，正文后面再单写 `z` 时照旧包上，不用再靠语境词猜一遍。
+ *    `$e^{At}$` 这种复合公式里的字母（e / A / t）一样算数。
+ * 1. 再划保护区：frontmatter、围栏 / 缩进代码块（整行跳过），行内代码、双链与链接、URL、
  *    HTML、`%%注释%%`、`#标签`，以及已经写好的行内公式 `$…$` 与 `$$…$$`
  *    —— 跨行区块中间的行整行跳过，首行 `$$` 之前、末行 `$$` 之后的正文照常识别。
  * 2. 剩下的正文切成 atom，再取**算式段**：只由字母 / 数字 / 希腊字母 / 运算符 / 括号逗号 / 空格
@@ -26,13 +30,17 @@
  *    - 字母与数字之间不能紧贴（`A4` `x2` 是型号 / 编号，不是变量）；
  *    - 不能紧贴 `_ ^ \ . / :` 这类连接符（`Q_inv` `x^2` `a_ij` `main.ts` `C:\` 交给公式排版与命名约定）；
  *    - **必须紧挨中文或中文标点**（英文句子里的 `the value x is` 因此不会中招）；
- *    - `C 语言` `D 盘` `A 股` 这类"字母 + 专有名词后缀"跳过。
+ *    - `C 语言` `D 盘` `A 股` 这类"字母 + 专有名词后缀"跳过；
+ *    - 有"数学的样子"：变量表里的同名变量、本行前面确认过的变量、运算符 / 括号、
+ *      左边的数学语境词、右边的量词，至少占一样。
  * 4. 包的时候顺手把希腊字母与常用数学符号换成 LaTeX 命令（`λ` → `\lambda`、`∈` → `\in`），
  *    命令后面紧跟字母时补一个空格，免得连成 `\lambdax` 这种未定义命令。
  *
- * 幂等：包好的 `$…$` 下一轮属于保护区，不会被再包一层。
+ * 幂等：包好的 `$…$` 下一轮属于保护区，不会被再包一层；而变量表来自"已经写好的公式"、
+ * 新包出来的公式下一轮又成了变量来源，所以整篇要迭代到不动点（见 wrapPlainMath），
+ * 否则"排版两次"会比"排版一次"多包几个字母。
  */
-import { markProtectedLines, markIndentedCodeLines } from './line-scan';
+import { markProtectedLines, markIndentedCodeLines, inlineCodeRanges } from './line-scan';
 import { collectMaskedRanges, isSpaceChar, mathRanges, readInlineMath } from './inline-scan';
 
 export interface TextMathOptions {
@@ -79,6 +87,9 @@ const CJK_RE = /[\u3005-\u3007\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufa
 /** 全角标点 */
 const FULL_PUNCT_RE = /[\u3001-\u303f\u2018\u2019\u201c\u201d\u2014\u2026\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]/;
 
+/** 拉丁字母（含带变音符号的），与 atom 分词用的是同一个范围 */
+const LETTER_RE = /[A-Za-z\u00c0-\u024f]/;
+
 /** 紧贴这些字符就不算数学符号：`Q_inv` `x^2` `main.ts` `C:\` `e.g.` */
 const GLUE_CHARS = new Set<string>([...'._/\\:^`\'"@#$%&~']);
 
@@ -110,6 +121,13 @@ const MATH_CONTEXT_WORDS = [
 
 /** 量词：出现在字母**右边**时算数学（`n维`、`n 阶`、`m 个向量`） */
 const MEASURE_CHARS = new Set<string>([...'维阶次重倍行列个']);
+
+/** LaTeX 命令名：`\lambda` `\sin` `\begin` 里的字母是命令，不是变量 */
+const LATEX_COMMAND_RE = /\\[A-Za-z]+/g;
+
+/** 参数当文字排的命令：`\text{max}` `\mathrm{d}` 花括号里的字母不是变量 */
+const TEXT_COMMAND_RE =
+	/\\(?:text|textrm|textnormal|textit|textbf|textsf|texttt|mathrm|mathbf|mathit|mathsf|mathtt|operatorname|mbox|hbox)\s*\{[^{}]*\}/g;
 
 /** 书名号与引号：里面是专有名词或引文，原样保留（`《a子计划》` 不能被拆成 `《$a$子计划》`） */
 const TITLE_PAIRS: Record<string, string> = {
@@ -196,9 +214,9 @@ function scanAtoms(line: string): Atom[] {
 			index++;
 			continue;
 		}
-		if (/[A-Za-z\u00c0-\u024f]/.test(char)) {
+		if (LETTER_RE.test(char)) {
 			let end = index;
-			while (end < line.length && /[A-Za-z\u00c0-\u024f]/.test(line.charAt(end))) end++;
+			while (end < line.length && LETTER_RE.test(line.charAt(end))) end++;
 			push('latin', index, end);
 			index = end;
 			continue;
@@ -388,7 +406,7 @@ function isMathContext(atoms: Atom[], from: number, to: number, known: Set<strin
 		if ((atoms[i] as Atom).kind === 'greek') return true;
 	}
 
-	// 同一行里确认过的变量，后面再出现就照旧（`矩阵 A …… 称为 A 的秩`）
+	// 变量表里的字母再单写就照旧：`$z$` 写过一次（或本行前面刚确认过），后面的 `z` 就跟着包
 	if (to - from === 1) {
 		const atom = atoms[from] as Atom;
 		if (atom.kind === 'latin' && known.has(atom.text)) return true;
@@ -419,11 +437,82 @@ function isProperNoun(atoms: Atom[], from: number, to: number): boolean {
 	return anchorBefore(atoms, from - 1) === null;
 }
 
+/**
+ * 公式里出现过的字母都算变量：`$z$` → `z`，`$e^{At}$` → `e` / `A` / `t`。
+ *
+ * 先把 `\sin` 这类命令名、`\text{…}` 这类"参数当文字排"的内容剔掉，
+ * 剩下的字母按单个收 —— `At` 是 A 与 t 的乘积，拆开；`\sin` 被剔掉，
+ * 不会把 s / i / n 学成变量。希腊字母不用收：正文里的 `λ` 本身就认得出。
+ */
+function collectFormulaLetters(body: string, into: Set<string>): void {
+	const text = body.replace(TEXT_COMMAND_RE, ' ').replace(LATEX_COMMAND_RE, ' ');
+
+	for (const char of text) {
+		if (LETTER_RE.test(char)) into.add(char);
+	}
+}
+
+/** 一行里所有行内公式的正文（`$…$` 与同一行成对的 `$$…$$`，含定界符，字母不受影响） */
+function inlineMathBodies(line: string): string[] {
+	const codeRanges = inlineCodeRanges(line);
+	const inCode = (at: number): boolean => codeRanges.some(([from, to]) => at >= from && at < to);
+	const bodies: string[] = [];
+	let index = 0;
+
+	while (index < line.length) {
+		if (line.charAt(index) !== '$') {
+			index++;
+			continue;
+		}
+		const math = readInlineMath(line, index, inCode);
+		if (!math) {
+			index++;
+			continue;
+		}
+		bodies.push(math.text);
+		index = math.next;
+	}
+
+	return bodies;
+}
+
+/**
+ * 整篇笔记里"已经写好的公式"的正文：行内 `$…$`、同一行的 `$$…$$`、跨行的 `$$…$$` 区块。
+ *
+ * 区块判定直接复用 mathRanges（调用方已经算好传进来）：它给的是"这一行能排版的那一段"，
+ * 取补集正好是公式 —— 区块内部整行是公式，起始行 `$$` 之后、收尾行 `$$` 之前是公式，
+ * 普通行的公式只在行内。代码块、frontmatter、行内代码里的 `$` 不算。
+ */
+function formulaBodies(
+	lines: string[],
+	protectedLines: boolean[],
+	codeLines: boolean[],
+	ranges: Array<[number, number] | null>
+): string[] {
+	const bodies: string[] = [];
+
+	for (let i = 0; i < lines.length; i++) {
+		if (protectedLines[i] || codeLines[i]) continue;
+		const line = lines[i] ?? '';
+		if (line.trim() === '') continue;
+		const range = ranges[i];
+		if (range === undefined) continue;
+		// 跨行公式块内部：整行都是 LaTeX 代码
+		if (range === null) {
+			bodies.push(line);
+			continue;
+		}
+		if (range[0] > 0) bodies.push(line.substring(0, range[0]));   // 收尾行：`$$` 之前
+		if (range[1] < line.length) bodies.push(line.substring(range[1]));   // 起始行：`$$` 之后
+		if (range[0] === 0 && range[1] === line.length) bodies.push(...inlineMathBodies(line));
+	}
+
+	return bodies;
+}
+
 /** 找出这一行里该包成 `$…$` 的算式段 */
-function mathStretches(atoms: Atom[]): Array<[number, number]> {
+function mathStretches(atoms: Atom[], known: Set<string>): Array<[number, number]> {
 	const stretches: Array<[number, number]> = [];
-	/** 这一行里已经确认是变量的字母：后面再出现同名就照旧 */
-	const known = new Set<string>();
 	let index = 0;
 
 	while (index < atoms.length) {
@@ -476,10 +565,10 @@ function renderStretch(atoms: Atom[], from: number, to: number): string {
 	return `$${body}$`;
 }
 
-/** 处理一行 */
-function formatLine(line: string): string {
+/** 处理一行；`known` 是整篇共用的变量表，行内新确认的变量会加进去给后面的行用 */
+function formatLine(line: string, known: Set<string>): string {
 	const atoms = scanAtoms(line);
-	const stretches = mathStretches(atoms);
+	const stretches = mathStretches(atoms, known);
 	if (stretches.length === 0) return line;
 
 	let out = '';
@@ -492,22 +581,20 @@ function formatLine(line: string): string {
 }
 
 /**
- * 智能公式：给整篇笔记里"一看就是数学符号"的写法套上 `$…$`。
+ * 一轮：用**当前内容里已有的公式**建变量表，再逐行包 `$…$`。
  *
- * 幂等：包好的公式下一轮落在保护区里，不会被再包一层。
- *
- * @param content 笔记原文
- * @param options 开关
- * @returns 处理后的内容；没有任何改动时原样返回（调用方据此避免无谓写盘）
+ * 变量表整篇共用：某一行里确认过的变量（无论是已有公式里的，还是本轮刚包出来的），
+ * 后面的行直接照旧包，不用再猜一遍语境。
  */
-export function wrapPlainMath(content: string, options: TextMathOptions): string {
-	if (content === '' || !options.wrapSymbols) return content;
-
+function wrapOnce(content: string): string {
 	const lines = content.split('\n');
 	const protectedLines = markProtectedLines(lines);
 	const codeLines = markIndentedCodeLines(lines);
 	const ranges = mathRanges(lines, protectedLines);
+	const known = new Set<string>();
 	let changed = false;
+
+	for (const body of formulaBodies(lines, protectedLines, codeLines, ranges)) collectFormulaLetters(body, known);
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
@@ -519,7 +606,7 @@ export function wrapPlainMath(content: string, options: TextMathOptions): string
 
 		// 跨行公式块的首行 `$$` 之前、末行 `$$` 之后的正文仍要识别
 		const fixed = line.substring(0, range[0])
-			+ formatLine(line.substring(range[0], range[1]))
+			+ formatLine(line.substring(range[0], range[1]), known)
 			+ line.substring(range[1]);
 		if (fixed !== line) {
 			lines[i] = fixed;
@@ -528,4 +615,33 @@ export function wrapPlainMath(content: string, options: TextMathOptions): string
 	}
 
 	return changed ? lines.join('\n') : content;
+}
+
+/** 迭代上限：每一轮只会新增 `$…$`、不会删除，可包的位置有限，所以一定收敛；实际最多两三轮 */
+const MAX_ROUNDS = 8;
+
+/**
+ * 智能公式：给整篇笔记里"一看就是数学符号"的写法套上 `$…$`。
+ *
+ * 变量表来自"已经写好的公式"（`$z$` 写过一次，正文里再单写 `z` 就跟着包），
+ * 而这一轮新包出来的公式，下一轮又成了变量来源 —— 所以迭代到不动点：
+ * `1. x = Tz：x 为原状态，z 为新状态` 要先包出 `$x = Tz$`，下一轮才能从中学到 `z`，
+ * 让后面单写的 `z` 也跟上。不迭代的话，「排版两次」会比「排版一次」多包几个字母，
+ * 整条流水线的幂等承诺就破了。
+ *
+ * @param content 笔记原文
+ * @param options 开关
+ * @returns 处理后的内容；没有任何改动时原样返回（调用方据此避免无谓写盘）
+ */
+export function wrapPlainMath(content: string, options: TextMathOptions): string {
+	if (content === '' || !options.wrapSymbols) return content;
+
+	let current = content;
+	for (let round = 0; round < MAX_ROUNDS; round++) {
+		const next = wrapOnce(current);
+		if (next === current) break;
+		current = next;
+	}
+
+	return current;
 }

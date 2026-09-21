@@ -222,6 +222,9 @@ Math symbols typed as plain text get wrapped in `$…$`, so they render as formu
 | `x = 0` / `x = Tz` / `Ax = λx` | `$x = 0$` / `$x = Tz$` / `$Ax = \lambda x$` | the **whole expression** is wrapped — never just the letters, which would leave `= 0` outside the formula |
 | `a, b ∈ F` | `$a, b \in F$` | commas, numbers and operators join the run |
 | `特征值 λ` | `特征值 $\lambda$` | Greek letters (and `∈ ≤ ≥ × → …`) become LaTeX commands; a space is inserted when the command would swallow the next letter (`\lambdax` is invalid) |
+| `$z$` written earlier, then `讨论 z 的模长` | `讨论 $z$ 的模长` | **variable table**: writing `z` as a formula declares "z is a variable", so every later plain `z` in the note is wrapped too — no context word needed |
+| `$$z = a + bi$$` written earlier, then `因此 z 的实部` | `因此 $z$ 的实部` | variables inside a `$$…$$` block count as well (including multi-line blocks) |
+| `$e^{At}$` written earlier, then `其中 A 是矩阵，t 是时间` | `其中 $A$ 是矩阵，$t$ 是时间` | letters inside a compound formula join the table; command names (`\sin`, `\mathrm`) and text-style arguments (`\text{max}`) do not |
 
 Deliberately conservative — it rewrites prose, so "not sure" means "don't touch". A run is only wrapped when there is real evidence that it is math:
 
@@ -229,9 +232,11 @@ Deliberately conservative — it rewrites prose, so "not sure" means "don't touc
 - a math noun sits right before it (`矩阵 A`, `向量 x`, `数域 F`, `特征值 λ` …);
 - a measure word sits right after it (`n维`, `n 阶`, `k 行`);
 - it contains a Greek letter (never anything else), or
-- the same variable was already recognized earlier in the line (`矩阵 A …… 称为 A 的秩`).
+- the same variable was already recognized earlier — earlier in the line (`矩阵 A …… 称为 A 的秩`), or anywhere in the note via the variable table.
 
-Everything else is left alone: frontmatter, fenced/indented code, inline code, wikilinks, links, URLs, HTML tags, tags, comments, existing formulas, the inside of `《…》` / `〈…〉` / `“…”` (so 《a子计划》 keeps its form), English prose, words of three letters or more (`Jordan`, `latex`, `Steinitz`), two-letter abbreviations with no expression around them (`AI`, `QQ`, `pg`, `tv`, `xx`), the two-letter function words (`is`, `to`), abbreviations (`e.g.`, `i.e.`), paths and extensions (`C:\data`, `main.ts`), model numbers (`A4`, `B5`), `_`/`^` naming conventions (`Q_inv`, `x^2`, `a_ij`), list labels (`(a)`, `(b)`), task checkboxes (`- [x]`) and letter-plus-proper-noun pairs (`C 语言`, `D 盘`, `A 股`). Turn the setting off to keep symbols as plain text.
+The variable table has a few limits: it only reads formulas already present in **the same note** (`$…$` and `$$…$$`, multi-line blocks included) and never spans notes; `$z$` inside code blocks, inline code or frontmatter does not count; letters are case-sensitive (writing `$z$` does not make `Z` follow); the Chinese-anchor rule still applies, so English prose such as `the value z is` is untouched; and `_`/`^` names (`Q_inv`, `z^2`, `z_1`) stay untouched. Wrapped formulas become "existing formulas", so running the layout twice gives the same result.
+
+Everything else is left alone: frontmatter, fenced/indented code, inline code, wikilinks, links, URLs, HTML tags, tags, comments, existing formulas (kept verbatim — they are only read into the variable table), the inside of `《…》` / `〈…〉` / `“…”` (so 《a子计划》 keeps its form), English prose, words of three letters or more (`Jordan`, `latex`, `Steinitz`), two-letter abbreviations with no expression around them (`AI`, `QQ`, `pg`, `tv`, `xx`), the two-letter function words (`is`, `to`), abbreviations (`e.g.`, `i.e.`), paths and extensions (`C:\data`, `main.ts`), model numbers (`A4`, `B5`), `_`/`^` naming conventions (`Q_inv`, `x^2`, `a_ij`), list labels (`(a)`, `(b)`), task checkboxes (`- [x]`) and letter-plus-proper-noun pairs (`C 语言`, `D 盘`, `A 股`). Turn the setting off to keep symbols as plain text.
 
 ## How to use
 
@@ -277,7 +282,7 @@ Blank lines already present in the source text are always preserved.
 
 Math symbols:
 
-- **Plain-text math becomes formulas** — on by default; `矩阵 A` → `矩阵 $A$`, `n维` → `$n$ 维`, `V(F)` → `$V(F)$`, `x = 0` → `$x = 0$`, `λ` → `$\lambda$`. See section 9 for what is deliberately left alone
+- **Plain-text math becomes formulas** — on by default; `矩阵 A` → `矩阵 $A$`, `n维` → `$n$ 维`, `V(F)` → `$V(F)$`, `x = 0` → `$x = 0$`, `λ` → `$\lambda$`. A variable you already wrote as a formula (`$z$`) is remembered for the whole note. See section 9 for what is deliberately left alone
 
 Word spacing:
 
@@ -338,7 +343,7 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 |--------|----------------|
 | `src/chat-log.ts` | chat log layout (username / date / time toggles, indent, image order, blank lines) |
 | `src/text-pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → plain-text math → formulas → word spacing → tags → block sorting |
-| `src/text-math.ts` | plain-text math detection — `矩阵 A`, `n维`, `V(F)`, `x = 0`, `λ` → `$…$` |
+| `src/text-math.ts` | plain-text math detection — `矩阵 A`, `n维`, `V(F)`, `x = 0`, `λ` → `$…$`, plus the variable table that reads variables out of the note's existing formulas |
 | `src/inline-scan.ts` | shared inline protection — code spans, links, URLs, tags, comments, existing `$…$` |
 | `src/text-layout.ts` | general layout fixes — leading indentation (4 spaces = 1 tab) |
 | `src/markdown-markers.ts` | block marker spacing — blockquotes, lists, headings |
@@ -371,6 +376,11 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 3. Reload Obsidian and enable **Note Tidy** (the old entry can be removed)
 
 ## Changelog
+
+### v1.3.2
+- New: **a variable table for plain-text math** — formulas already written in a note now back every occurrence of the same variable: once `$z$` is there, a later plain `z` is wrapped too (`设 $z$ 为复数。` followed by `讨论 z 的模长` → `讨论 $z$ 的模长`), with no context word needed. Variables inside `$$z = a + bi$$` blocks and compound formulas such as `$e^{At}$` (`e` / `A` / `t`) join the table as well. Only formulas in the same note are read — `$z$` inside code blocks, inline code or frontmatter does not count; letters are case-sensitive (writing `$z$` does not make `Z` follow); the Chinese-anchor rule still applies, and `_`/`^` names (`Q_inv`, `z^2`, `z_1`) stay untouched. See section 9
+- Changed: the second `z` in `1. x = Tz：x 为原状态，z 为新状态` is now wrapped as well — `$x = Tz$` already declared z a variable
+- Internal: because a freshly wrapped formula becomes a variable source for the next pass, plain-text math iterates to a fixed point (two or three passes in practice), so running the layout twice gives the same result; `test/text-math.test.ts` grew to 146 checks and `test/text-pipeline.test.ts` gained an end-to-end case
 
 ### v1.3.1
 - Fixed: batch-operation notice suppression no longer writes inline styles — it toggles a CSS class instead. A suppressed notice container can no longer keep a stale inline `display: none` that hides other plugins' popups (as Image Converter's did)
