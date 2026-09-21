@@ -711,11 +711,13 @@ function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 			if (piece.rule !== undefined && HALF_PUNCT.has(piece.text)) piece.rule = undefined;
 		}
 	}
+	// 句子语言：标点全半角要用（halfToFullPunct），括号外侧的"英文句里保留词距"也要用，
+	// 所以一律算出来
+	const languages = sentenceLanguages(pieces);
+	for (let i = 0; i < pieces.length; i++) {
+		if (languages[i] === 'en') (pieces[i] as Piece).en = true;
+	}
 	if (options.halfToFullPunct) {
-		const languages = sentenceLanguages(pieces);
-		for (let i = 0; i < pieces.length; i++) {
-			if (languages[i] === 'en') (pieces[i] as Piece).en = true;
-		}
 		// 先逆向（英文句里的全角 → 半角），再正向（中文句里的半角 → 全角）
 		convertFullPunct(pieces, languages);
 		convertHalfPunct(pieces, languages);
@@ -842,10 +844,14 @@ function markAbbreviationPieces(pieces: Piece[]): void {
 }
 
 /**
- * 半角引号：成对时才认，两个半边都按包裹符号处理 —— **内侧不留空格**、外侧不动。
+ * 半角引号：成对时才认，两个半边都按包裹符号处理 —— **内侧不留空格**、外侧照"分隔语言"办。
  *
  * 包裹符号是"突出里面内容"的（标点符号·概论 4），所以 `" + "` → `"+"`、
  * `" 引文 "` → `"引文"`；落单的引号（`2" 的管子`）不成对，一个字符都不动。
+ *
+ * 引号**里面**和 `《》` `“”` 一样按"引文原样保留"处理（打上 title 标记）：
+ * 引文可能是整句英文（`"Cancel the interactions … (such as …)"`），里面的空格与括号
+ * 都不该被排版规则改掉；两个半边本身照旧只管"贴紧"自己那一侧。
  */
 function markQuotePieces(pieces: Piece[]): void {
 	let count = 0;
@@ -854,11 +860,14 @@ function markQuotePieces(pieces: Piece[]): void {
 	}
 	if (count === 0 || count % 2 !== 0) return;
 
-	let seen = 0;
+	let inside = false;
 	for (const piece of pieces) {
-		if (piece.kind !== 'other' || piece.text !== '"') continue;
-		piece.rule = seen % 2 === 0 ? OPEN_QUOTE_RULE : CLOSE_QUOTE_RULE;
-		seen++;
+		if (piece.kind === 'other' && piece.text === '"') {
+			piece.rule = inside ? CLOSE_QUOTE_RULE : OPEN_QUOTE_RULE;
+			inside = !inside;
+			continue;
+		}
+		if (inside && piece.kind !== 'space') piece.title = true;
 	}
 }
 
@@ -1013,10 +1022,13 @@ function decideGap(previous: Piece | null, next: Piece, gap: string, options: Sp
 		if (pad !== null) return pad;
 	}
 
-	// 括号内侧：`( x )` → `(x)`
+	// 括号：内侧不留空格；外侧也贴紧 —— 英文符号 3「括号前后都没有空格」，
+	// 也就是 `f(x)` 那种函数写法（`中文 (说明)` → `中文(说明)`）。
+	// 英文句子里括号两侧是英文词距，外侧保留（与全角标点同一条规矩）
 	if (options.bracketInner) {
-		if (previous.kind === 'open') return '';
-		if (next.kind === 'close') return '';
+		if (previous.kind === 'open' || next.kind === 'close') return '';
+		const english = previous.en === true || next.en === true;
+		if (!english && (next.kind === 'open' || previous.kind === 'close')) return '';
 	}
 
 	// 全角标点：两侧不留空格（引号两侧、书名号内侧除外）

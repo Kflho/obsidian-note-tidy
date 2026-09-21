@@ -199,7 +199,7 @@ Where the LaTeX layout owns the code **inside** `$…$`, this one owns the space
 | `A & B`, `$A$ & $B$`, `word, word` | unchanged | the space is only ever called for between Chinese and **Western words / numbers / formulas** (W3C [clreq](https://www.w3.org/TR/clreq/): up to a quarter of a Han character wide; Han characters and punctuation are 1:1 squares set seamlessly) |
 | `（ + ）`, `" + "`, `《 书名 》` | `（+）`, `"+"`, `《书名》` | a wrapper symbol (`（）` `《》` `“”` `""`) is **not content itself**: its inside is always tight, a symbol inside it is only *mentioned* and never asks for that space, while text inside keeps its own spacing (`《新 吊带袜天使》`) |
 | `x ^ 2`, `等等 ... 内容` | `x^2`, `等等...内容` | the modifier `^` and the ellipsis `...` stay tight |
-| `( x )` | `(x)` | no space just inside ASCII brackets |
+| `( x )`, `中文 (说明)`, `f (x)` | `(x)`, `中文(说明)`, `f(x)` | no space on either side of an ASCII bracket (rule 3) — the `f(x)` function style; in an English sentence the outside keeps its word spacing |
 | `100kg` (optional, off by default) | `100 kg` | one space between a number and a unit from the built-in list |
 | `元素: $A$` | `元素：$A$` | half-width `, : ; ! ?` in Chinese context become full-width, and full-width `，。、；！？` in a **pure-English** line become half-width (`什么语境用什么标点`). The Chinese direction is judged per sentence, not per neighbouring character: the mark changes when the text before it is Chinese, the text after it is Chinese, or the sentence is Chinese-dominant (letters inside formulas, code and links do not count as English, and word count is used rather than letter count) — so `没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且`. The English direction only fires when the line has **no Chinese at all and at least two English words**; half-and-half lines such as `参数 gain=50、shift=0` are left alone. `.` is never converted (ellipsis, version numbers, `e.g.`), and neither are `（）`, `：`, `《》`, marks after digits (`1,000`, `12:30`), after a backslash (`\,`), inside half-width brackets (`(mod, k)`), next to `/`, in the chat-log header (`张三: 2024/…`) or inside `《…》` / `“…”` |
 
@@ -301,7 +301,7 @@ Punctuation and symbols:
 - **No space next to full-width punctuation** — on by default; quotes and the inside of `《…》` are exempt
 - **Half-width punctuation** `, . ! ? :` — no space before, one space after; on by default
 - **Per-symbol spacing rules** — on by default. **A space only ever separates content of different languages**: a symbol stays tight against Chinese and against other symbols (`甲 & 乙` → `甲&乙`, `如, ：` → `如,：`), while `A & B`, `$A$ & $B$` and `word, word` keep their space. `^` and `...` stay tight, `||` and paired pipes stay tight, wrapper symbols are tight inside, and GFM table rows are skipped entirely
-- **No space inside parentheses** `( x )` → `(x)`; on by default
+- **No space around parentheses** — `( x )` → `(x)`, `中文 (说明)` → `中文(说明)`, `f (x)` → `f(x)`, the `f(x)` function style; in an English sentence the outside keeps its word spacing
 - **One space between numbers and units** — off by default; units must be in the built-in list (`%`, `3D`, `4K`, `5G` are not units)
 - **Half-width punctuation becomes full-width after Chinese** — on by default; `元素: $A$` → `元素：$A$`. Applies to `, : ; ! ?` only
 

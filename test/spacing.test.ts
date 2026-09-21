@@ -150,7 +150,12 @@ function ruleTests(): void {
 
 	// 规则 7：括号内侧不留空格
 	caseCheck("括号：内侧删空格", "( x )", "(x)");
-	caseCheck("括号：外侧不动", "word ( x )", "word (x)");
+	// 括号外侧也不留空格（英文符号 3「括号前后都没有空格」，就是 `f(x)` 那种函数写法）
+	caseCheck("括号：外侧也贴紧", "中文 ( x )", "中文(x)");
+	caseCheck("括号：中文与括号之间贴紧", "中文 (说明) 与 中文 （说明）", "中文(说明)与 中文（说明）");
+	caseCheck("括号：函数写法", "f (x) 与 g( x )", "f(x)与 g(x)");
+	// 英文句子里括号两侧是英文词距，外侧保留
+	caseCheck("括号：英文句的外侧保留", "See the appendix (page 3).", "See the appendix (page 3).");
 	caseCheck("括号：本来就没有空格", "f(x)", "f(x)");
 	caseCheck(
 		"括号：关闭后不动",
@@ -254,7 +259,8 @@ function punctuationTests(): void {
 	caseCheck("全角化：英文语境不动", "word:word, word! yes?", "word: word, word! yes?");
 	caseCheck("全角化：数字语境不动", "时间 12:30 的记录", "时间12:30的记录");
 	caseCheck("全角化：小数点不动", "圆周率 3.14 的值", "圆周率3.14的值");
-	caseCheck("全角化：函数括号不动", "设 V(x) 为 n 维矢量", "设 V(x) 为 n 维矢量");
+	// 括号外侧本来就贴紧（`V(x)` 这种函数写法），所以这里的 `)` 也不跟中文留空
+	caseCheck("全角化：函数括号贴紧", "设 V(x) 为 n 维矢量", "设 V(x)为 n 维矢量");
 	caseCheck("全角化：书名号引号内部不动", "《书名, 副标题》与“引用: 内容”", "《书名, 副标题》与“引用: 内容”");
 	caseCheck("全角化：行内代码与链接内部不动", "见 `a,b:c` 与 [标题](https://a.com/b,c)", "见 `a,b:c` 与 [标题](https://a.com/b,c)");
 	caseCheck(
@@ -293,7 +299,7 @@ function punctuationTests(): void {
 	caseCheck(
 		"全角化：半角括号里的逗号不动",
 		"输入：`ablate_subsets`（(mod, k) 列表）",
-		"输入：`ablate_subsets`（(mod, k) 列表）"
+		"输入：`ablate_subsets`（(mod, k)列表）"
 	);
 	// 罗列标点自身：`/` 只是分隔符（标记命名 5 的"或、别名"本来就不加空格），
 	// 标点与标点之间也贴紧 —— 空格只用来分隔不同语言的内容（英文符号 1 的"后空一格"
@@ -480,7 +486,7 @@ function symbolTests(): void {
 
 	// 数学记号里的竖线一个字符都不动（`|` 的"单独一个"不包括它们）
 	caseCheck("符号：绝对值贴紧", "函数 |x| 的值", "函数 |x| 的值");
-	caseCheck("符号：条件记号贴紧", "P(A|B) 与 x̂_{k|k}", "P(A|B) 与 x̂_{k|k}");
+	caseCheck("符号：条件记号贴紧", "P(A|B) 与 x̂_{k|k}", "P(A|B)与 x̂_{k|k}");
 	caseCheck("符号：行内公式里的竖线不动", "范数 $\\lVert x\\rVert$ 与 $|f_y|$", "范数 $\\lVert x\\rVert$ 与 $|f_y|$");
 
 	// latex 符号格式 2：修饰符号前后不加空格

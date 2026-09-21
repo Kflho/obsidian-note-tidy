@@ -375,8 +375,8 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName('括号内侧不留空格')
-			.setDesc('半角括号内侧不留空格：`( x )` → `(x)`；括号外侧不动，`word (x)` 保持原样')
+			.setName('括号前后都没有空格')
+			.setDesc('半角括号内侧不留空格（`( x )` → `(x)`），外侧也贴紧（`中文 (说明)` → `中文(说明)`、`f (x)` → `f(x)`）—— 就是函数 `f(x)` 那种写法。英文句子里括号两侧是英文词距，外侧保留（`See the appendix (page 3).`）')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.spacingBracketInner)
 				.onChange(async (value) => {
@@ -762,8 +762,8 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 								},
 							},
 							{
-								name: '括号内侧不留空格',
-								desc: '半角括号内侧不留空格：`( x )` → `(x)`；括号外侧不动，`word (x)` 保持原样',
+								name: '括号前后都没有空格',
+								desc: '半角括号内侧不留空格（`( x )` → `(x)`），外侧也贴紧（`中文 (说明)` → `中文(说明)`、`f (x)` → `f(x)`）—— 就是函数 `f(x)` 那种写法。英文句子里括号两侧是英文词距，外侧保留（`See the appendix (page 3).`）',
 								control: {
 									type: 'toggle',
 									key: 'spacingBracketInner',
