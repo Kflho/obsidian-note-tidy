@@ -194,13 +194,16 @@ Where the LaTeX layout owns the code **inside** `$…$`, this one owns the space
 | `设$x$为未知数` | `设 $x$ 为未知数` | one space between an inline formula and the text around it; never inside the `$…$` |
 | `中文 ，内容 。` | `中文，内容。` | no space on either side of a full-width punctuation mark |
 | `word,word` | `word, word` | half-width `, . ! ? :` get no space before and one after (decimals `1.2.2`, times `12:30` and `...` are exempt) |
+| `如, ：` | `如, ：` (space kept) | a symbol's own rule is mandatory: `：` annotates the **content** it follows and yields when a symbol wants a space on its left — `\|：单独一个` → `\| ：单独一个`, `→：` → `→ ：`, `&：` → `& ：`, `:：` → `: ：` |
+| `（ + ）`, `" + "`, `《 书名 》` | `（+）`, `"+"`, `《书名》` | a wrapper symbol (`（）` `《》` `“”` `""`) is **not content itself**: its inside is always tight, a symbol inside it is only *mentioned* and never asks for that space, while text inside keeps its own spacing (`《新 吊带袜天使》`) |
+| `x ^ 2`, `等等 ... 内容` | `x^2`, `等等...内容` | the modifier `^` and the ellipsis `...` stay tight |
 | `( x )` | `(x)` | no space just inside ASCII brackets |
 | `100kg` (optional, off by default) | `100 kg` | one space between a number and a unit from the built-in list |
 | `元素: $A$` | `元素：$A$` | half-width `, : ; ! ?` in Chinese context become full-width, and full-width `，。、；！？` in a **pure-English** line become half-width (`什么语境用什么标点`). The Chinese direction is judged per sentence, not per neighbouring character: the mark changes when the text before it is Chinese, the text after it is Chinese, or the sentence is Chinese-dominant (letters inside formulas, code and links do not count as English, and word count is used rather than letter count) — so `没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且`. The English direction only fires when the line has **no Chinese at all and at least two English words**; half-and-half lines such as `参数 gain=50、shift=0` are left alone. `.` is never converted (ellipsis, version numbers, `e.g.`), and neither are `（）`, `：`, `《》`, marks after digits (`1,000`, `12:30`), after a backslash (`\,`), inside half-width brackets (`(mod, k)`), next to `/`, in the chat-log header (`张三: 2024/…`) or inside `《…》` / `“…”` |
 
 Rule sources are the note-taking spec this plugin was built for: languages are separated by one character width, punctuation stays tight, and Chinese↔numbers stay tight. Two rules that would break proper nouns are off by default: English↔numbers (`GPT4`, `3D`, `v1.2.2`) and number↔unit.
 
-Untouched: frontmatter, fenced and indented code blocks, `$$ … $$` blocks (including every line in between), inline code, wikilinks and markdown links, URLs, HTML tags, `%%comments%%`, `#tags`, the inside of `《…》` / `〈…〉` / `“…”` (so 《新 吊带袜天使》 and 《a子计划》 keep their original form), Chinese-to-Chinese spaces, and math operators (`ctrl+c` is never split).
+Untouched: frontmatter, fenced and indented code blocks, `$$ … $$` blocks (including every line in between), **GFM table rows** (their spaces are alignment, and `|` is a cell separator), inline code, wikilinks and markdown links, URLs, HTML tags, `%%comments%%`, `#tags`, the inside of `《…》` / `〈…〉` / `“…”` (so 《新 吊带袜天使》 and 《a子计划》 keep their original form), Chinese-to-Chinese spaces, math operators (`ctrl+c` is never split), a pipe glued to letters or digits (`|x|`, `P(A|B)`, `x̂_{k|k}` — that is math notation) and the dot/ampersand inside single-letter abbreviations (`e.g.`, `i.e.`, `Q&A`, `R&D`).
 
 Emphasis markers are transparent: the rules see the content they wrap, so `**可逆矩阵**$P$` becomes `**可逆矩阵** $P$` and `中文**English**中文` becomes `中文 **English** 中文`. Spaces are only ever added *outside* the markers — never between `**` and the text, which would stop the emphasis from rendering. A star that has no pair (`2*3`, `a*b`) is left alone.
 
@@ -295,6 +298,7 @@ Punctuation and symbols:
 
 - **No space next to full-width punctuation** — on by default; quotes and the inside of `《…》` are exempt
 - **Half-width punctuation** `, . ! ? :` — no space before, one space after; on by default
+- **Per-symbol spacing rules** — on by default. Every rule answers two questions only: one space on the left, one on the right? (`有内容才有一格` is the shared premise of every space — at the start of a line there is nothing on the left, so no one has to decide "no space"). A lone `|`, `&` and `→` get one space on each side, `^` and `...` stay tight, `||` and paired pipes stay tight, wrapper symbols are tight inside, and GFM table rows are skipped entirely
 - **No space inside parentheses** `( x )` → `(x)`; on by default
 - **One space between numbers and units** — off by default; units must be in the built-in list (`%`, `3D`, `4K`, `5G` are not units)
 - **Half-width punctuation becomes full-width after Chinese** — on by default; `元素: $A$` → `元素：$A$`. Applies to `, : ; ! ?` only
@@ -350,7 +354,8 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 | `src/tags.ts` | tag layout — moving tags to the end of a block, per-cell tables, tag sorting |
 | `src/block-sort.ts` | content block sorting — sections, anchors, ordered-list renumbering |
 | `src/latex-layout.ts` | formula layout — spacing rules, `$$` delimiters, `\\` line breaks, continuation indent |
-| `src/line-scan.ts` | shared protection rules — frontmatter, fenced code, indented code, `$$` formulas |
+| `src/symbols.ts` | the per-symbol spacing table — the left/right requirement of `, . ! ? :`, `\|`, `&`, `→`, `^`, `...` and the wrapper symbols, each entry citing its rule in the note spec |
+| `src/line-scan.ts` | shared protection rules — frontmatter, fenced code, indented code, `$$` formulas, GFM table rows |
 | `src/collate.ts` | "first letter" comparison (Chinese by pinyin, numbers numerically) |
 | `src/image-size.ts` | rewriting `\|100` / `\|100x200` sizes, caption-safe |
 | `src/image-links.ts` | link resolution, same-name ambiguity detection, link form choice |
@@ -376,6 +381,16 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 3. Reload Obsidian and enable **Note Tidy** (the old entry can be removed)
 
 ## Changelog
+
+### v1.3.3
+- New: **per-symbol spacing rules** (typesetting, on by default) — "spaces around symbols" is no longer limited to content neighbours; every rule answers two questions only: one space on the left, one on the right? (`有内容才有一格` is the shared premise of every space, not a special condition of one rule — at the start of a line there is nothing on the left, so nobody has to decide "no space" there)
+  - `, . ! ? :` get one space after and none before (`word,word` → `word, word`); `：` annotates the **content** it follows and **yields when a symbol wants a space on its left**, so `如, ：` keeps its space instead of being eaten by "no space next to full-width punctuation" (`1. , /. /! /? /:：` → `1. , /. /! /? /: ：`)
+  - a lone `|`, `&` and `→` get one space on each side (`|：单独一个` → `| ：单独一个`, `→：` → `→ ：`, `&：` → `& ：`); `^` and `...` stay tight (`x ^ 2` → `x^2`); `/` and `+ - = < > *` are left alone in prose (`a/b`, `ctrl+c`, `gain=50`, `nnunet==1.*` stay in one piece)
+  - **wrapper symbols** (`（）`, `《》`, `“”`, a paired `"`) are **not content themselves**: their inside is always tight (`（ + ）` → `（+）`, `" + "` → `"+"`, `《 书名 》` → `《书名》`), a symbol inside one is only *mentioned* and never asks for that space, text inside keeps its own spacing (`《新 吊带袜天使》`), and the outside of half-width quotes is untouched
+  - a pipe glued to letters or digits (`|x|`, `P(A|B)`, `x̂_{k|k}`) belongs to the math notation and is never touched; dots and ampersands inside single-letter abbreviations (`e.g.`, `i.e.`, `Q&A`, `R&D`) are exempt — this also fixes `e.g.` being split into `e. g.`; `||` (norm) and paired pipes stay tight
+  - **GFM table rows are skipped entirely** — their spaces are alignment and `|` is a cell separator, not a symbol of the prose
+  - the half/full-width conversion no longer touches a symbol that is being mentioned (`如, ：` keeps its `,`, `: ：` keeps its half-width colon). The old behaviour is what you get with the switch off: `如, ：` collapses to `如,：`
+- Tests: `spacing` grew to 488 checks (new symbol, wrapper, abbreviation and table cases); new source file `src/symbols.ts` (the per-symbol table, each entry citing its rule in the note spec)
 
 ### v1.3.2
 - New: **a variable table for plain-text math** — formulas already written in a note now back every occurrence of the same variable: once `$z$` is there, a later plain `z` is wrapped too (`设 $z$ 为复数。` followed by `讨论 z 的模长` → `讨论 $z$ 的模长`), with no context word needed. Variables inside `$$z = a + bi$$` blocks and compound formulas such as `$e^{At}$` (`e` / `A` / `t`) join the table as well. Only formulas in the same note are read — `$z$` inside code blocks, inline code or frontmatter does not count; letters are case-sensitive (writing `$z$` does not make `Z` follow); the Chinese-anchor rule still applies, and `_`/`^` names (`Q_inv`, `z^2`, `z_1`) stay untouched. See section 9

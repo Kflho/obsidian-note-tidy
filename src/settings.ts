@@ -67,6 +67,8 @@ export interface ImageTransferSettings {
 	spacingDigitUnit: boolean;
 	/** 紧跟在中文后面的半角标点换成全角 */
 	spacingHalfToFullPunct: boolean;
+	/** 符号自己的空格规则（逐符号：`,` `.` 后空一格、`| & →` 左右空一格、`^` 不空…） */
+	spacingSymbolPad: boolean;
 }
 
 export const DEFAULT_SETTINGS: ImageTransferSettings = {
@@ -104,6 +106,7 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	spacingBracketInner: DEFAULT_SPACING_OPTIONS.bracketInner,
 	spacingDigitUnit: DEFAULT_SPACING_OPTIONS.digitUnit,
 	spacingHalfToFullPunct: DEFAULT_SPACING_OPTIONS.halfToFullPunct,
+	spacingSymbolPad: DEFAULT_SPACING_OPTIONS.symbolPad,
 }
 
 /**
@@ -121,6 +124,7 @@ export function getSpacingOptions(settings: ImageTransferSettings): SpacingOptio
 		bracketInner: settings.spacingBracketInner !== false,
 		digitUnit: settings.spacingDigitUnit === true,
 		halfToFullPunct: settings.spacingHalfToFullPunct !== false,
+		symbolPad: settings.spacingSymbolPad !== false,
 	};
 }
 
@@ -397,6 +401,16 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.spacingHalfToFullPunct)
 				.onChange(async (value) => {
 					this.plugin.settings.spacingHalfToFullPunct = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('符号自己的空格规则')
+			.setDesc('规则是逐符号定的，不是一个"符号周围一律加空格"：`, . ! ? :` 后面空一格（`word,word` → `word, word`）；`|`（单独一个）`&` `→` 左右各空一格（`如, ：`、`| ：`）；`^` 前后不空（`x ^ 2` → `x^2`）；`...` 前后不空；`||`（包裹符号）与成对竖线贴紧。符号自己的要求是强制的 —— `：` 的"前不留空格"在左边是要求空格的符号时让位，所以 `如, ：`、`| ：` 保留那一格。`|x|`、`P(A|B)`、`x̂_{k|k}` 这类紧贴字母数字的竖线属于数学记号，一个字符都不动；表格行、`$…$` 与代码块整块跳过')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.spacingSymbolPad)
+				.onChange(async (value) => {
+					this.plugin.settings.spacingSymbolPad = value;
 					await this.plugin.saveSettings();
 				}));
 
@@ -772,6 +786,15 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 									type: 'toggle',
 									key: 'spacingHalfToFullPunct',
 									defaultValue: DEFAULT_SETTINGS.spacingHalfToFullPunct,
+								},
+							},
+							{
+								name: '符号自己的空格规则',
+								desc: '规则是逐符号定的，不是一个"符号周围一律加空格"：`, . ! ? :` 后面空一格（`word,word` → `word, word`）；`|`（单独一个）`&` `→` 左右各空一格（`如, ：`、`| ：`）；`^` 前后不空（`x ^ 2` → `x^2`）；`...` 前后不空；`||`（包裹符号）与成对竖线贴紧。符号自己的要求是强制的 —— `：` 的"前不留空格"在左边是要求空格的符号时让位，所以 `如, ：`、`| ：` 保留那一格。包裹符号（`（）` `《》` `“”`）**本身不算内容**：内侧永远贴紧（`（ + ）` → `（+）`、`《 书名 》` → `《书名》`），里面的符号是"被提到的符号"，不朝它要那一格。`|x|`、`P(A|B)`、`x̂_{k|k}` 这类紧贴字母数字的竖线属于数学记号，一个字符都不动；表格行、`$…$` 与代码块整块跳过',
+								control: {
+									type: 'toggle',
+									key: 'spacingSymbolPad',
+									defaultValue: DEFAULT_SETTINGS.spacingSymbolPad,
 								},
 							},
 						],

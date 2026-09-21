@@ -162,6 +162,41 @@ function isIndentedCodeStart(lines: string[], index: number): boolean {
 	return true;
 }
 
+/** GFM 表格的分隔行：`| --- | :--: |`（单元格里只有 `-` 与可选的 `:`） */
+const TABLE_DELIMITER_RE = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+
+/** 表格行（GFM）：行首一个 `|` */
+const TABLE_ROW_RE = /^[ \t]*\|/;
+
+/**
+ * 标记 GFM 表格占用的行（表头行、分隔行、数据行）。
+ *
+ * 表格里的空格是对齐用的（`| 日期  | 规划  |`），排版规则一碰就把每列的留白压成一个空格，
+ * 表也就没法看了；`|` 本身是单元格分隔符，不是正文里的排版符号，同样不该按符号规则处理。
+ *
+ * 判定按 GFM：一张表必须有**分隔行**（`| --- | --- |`），它上面一行是表头，下面连续的、
+ * 以 `|` 开头的行是数据行。单看一行有几个 `|` 分不出表格与正文 ——
+ * `|：单独一个 | 左右要加空格` 也以 `|` 开头，但那是在讲符号本身。
+ */
+export function markTableLines(lines: string[]): boolean[] {
+	const flags: boolean[] = new Array<boolean>(lines.length).fill(false);
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i] ?? '';
+		if (!line.includes('|') || !TABLE_DELIMITER_RE.test(line)) continue;
+
+		flags[i] = true;
+		if (i > 0 && TABLE_ROW_RE.test(lines[i - 1] ?? '')) flags[i - 1] = true;
+		for (let j = i + 1; j < lines.length; j++) {
+			const row = lines[j] ?? '';
+			if (!TABLE_ROW_RE.test(row)) break;
+			flags[j] = true;
+		}
+	}
+
+	return flags;
+}
+
 /**
  * 标记整篇笔记里属于缩进代码块的行。
  *
