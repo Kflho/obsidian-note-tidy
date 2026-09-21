@@ -1,6 +1,8 @@
-# Absolute Image Transfer
+# Note Tidy
 
-Obsidian desktop plugin that transfers externally-linked images into your vault and renames garbled image files — all through right-click or command palette.
+Obsidian desktop plugin that tidies a vault: it brings externally-linked images into your vault, renames garbled image files, and typesets note text — spacing between Chinese / English / formulas, punctuation width, LaTeX layout, tags, block order and chat logs. Everything is available from the right-click menu or the command palette, for one note or the whole vault.
+
+> Previously released as **Absolute Image Transfer** (`absolute-image-transfer`). The plugin id changed with v1.3.0 — see [Renaming](#renaming) if you are upgrading.
 
 ## What this plugin does
 
@@ -356,11 +358,23 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 
 ## Installation
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from [Releases](https://github.com/Kflho/obsidian-absolute-image-transfer/releases)
-2. Place them in `.obsidian/plugins/obsidian-absolute-image-transfer/`
+1. Download `main.js`, `manifest.json`, and `styles.css` from [Releases](https://github.com/Kflho/obsidian-note-tidy/releases)
+2. Place them in `.obsidian/plugins/note-tidy/`
 3. Enable the plugin in Settings → Community Plugins
 
+### Renaming
+
+v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidian keeps settings per plugin id, so:
+
+1. Rename the folder `.obsidian/plugins/absolute-image-transfer/` to `.obsidian/plugins/note-tidy/`
+2. Copy `data.json` along with it (the settings schema is unchanged, so the file can simply be moved)
+3. Reload Obsidian and enable **Note Tidy** (the old entry can be removed)
+
 ## Changelog
+
+### v1.3.0
+- **Renamed**: the plugin is now **Note Tidy** with the id `note-tidy` (it outgrew "Absolute Image Transfer" — it has been doing full note typesetting for a while). To keep your settings, rename the plugin folder to `note-tidy` and move `data.json` with it; see [Renaming](#renaming)
+- New: everything from v1.2.3 — **plain-text math becomes formulas** and **punctuation follows the language**; see below
 
 ### v1.2.3
 - New: **plain-text math becomes formulas** (on by default) — `矩阵 A` / `矩阵A` → `矩阵 $A$`, `n维` / `n 阶` → `$n$ 维` / `$n$ 阶`, `V(F)` / `a(b)` → `$V(F)$` / `$a(b)$`, whole expressions (`x = 0`, `x = Tz`, `Ax = λx`, `a, b ∈ F`) are wrapped as one run, and Greek letters become LaTeX commands (`λ` → `$\lambda$`). It needs evidence before touching prose (brackets or operators, a math noun before, a measure word after, a Greek letter, or the same variable already seen on the line) and leaves English sentences, words of three letters or more, two-letter abbreviations (`AI`, `QQ`, `pg`, `tv`, `xx`), `e.g.`, `C:\path`, `A4`, `Q_inv`, list labels `(a)`, task checkboxes `- [x]`, `《…》` / `“…”` and existing formulas alone. See section 9
@@ -496,7 +510,9 @@ MIT
 
 # 中文说明
 
-将笔记中的外部绝对路径图片搬运到 Obsidian 仓库内，并转换为 `![[...]]` 双链。同时提供乱码图片重命名、QQ/微信聊天记录排版修复功能。
+**Note Tidy（笔记整理）**：把仓库收拾干净 —— 外部绝对路径图片搬进仓库并转成 `![[...]]` 双链、乱码图片重命名、图片大小与位置整理，以及正文排版：中英文 / 数字 / 公式 / 标点之间的空格、标点全半角、LaTeX 公式代码、标签归位与排序、板块排序、聊天记录重排、智能公式。单篇或整个仓库，右键菜单与命令面板都能用。
+
+> v1.3.0 起由 **Absolute Image Transfer**（id `absolute-image-transfer`）改名而来。升级做法见上面的 [Renaming](#renaming)：把 `.obsidian/plugins/absolute-image-transfer/` 文件夹改名成 `note-tidy`，`data.json` 一起带过去即可，设置不会丢。
 
 ## 功能
 
@@ -808,6 +824,10 @@ npm run lint
 
 ## 更新日志
 
+### v1.3.0
+- **改名**：插件现在叫 **Note Tidy（笔记整理）**，id 为 `note-tidy`（"Absolute Image Transfer" 这名早就不够用了 —— 它做全文排版已经很久了）。想保留设置：把插件文件夹改名成 `note-tidy`，`data.json` 一起搬过去即可，详见 [Renaming](#renaming)
+- 包含 v1.2.3 的全部内容 —— **智能公式**与**标点跟着语境走**，见下
+
 ### v1.2.3
 - 新增：**智能公式**（默认开）—— 正文里按普通文字敲的数学符号自动套公式：`矩阵 A` / `矩阵A` → `矩阵 $A$`；`n维` / `n 阶` → `$n$ 维` / `$n$ 阶`；`V(F)` / `a(b)` → `$V(F)$` / `$a(b)$`；整段算式（`x = 0`、`x = Tz`、`Ax = λx`、`a, b ∈ F`）一起包；希腊字母换成 LaTeX 命令（`λ` → `$\lambda$`）。判定很保守，必须有"这是数学"的证据（括号 / 运算符、左边的数学语境词、右边的量词、希腊字母、或本行已确认过的同名变量）才动手；英文句子、三个字母以上的单词、两字母缩写（`AI`、`QQ`、`pg`、`tv`、`xx`）、`e.g.`、`C:\路径`、`A4`、`Q_inv`、分条标签 `(a)`、任务复选框 `- [x]`、`《…》` `“…”` 与已有公式一律不碰。详见第 9 节
 - 新增：**标点跟着语境走** —— 中文语境里的半角 `, : ; ! ?` 换全角（`没有 $M_{ij}$, 且` → `没有 $M_{ij}$，且`；按**句**判定而不是只看左邻一个字符，公式 / 代码 / 链接里的字母不算英文），纯英文行里的 `，。、；！？` 换半角（只在"整句一个中文字都没有、且至少两个英文单词"时生效，所以 `参数 gain=50、shift=0` 不会被误换）。`（）`、`：`、`《》`、`.`、数字后的标点（`1,000`、`12:30`）、`\,`、半角括号内、聊天记录头部一律不动
@@ -936,6 +956,6 @@ npm run lint
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Kflho/obsidian-absolute-image-transfer/releases) 下载 `main.js`、`manifest.json`、`styles.css`
-2. 放入 `.obsidian/plugins/obsidian-absolute-image-transfer/`
+1. 从 [Releases](https://github.com/Kflho/obsidian-note-tidy/releases) 下载 `main.js`、`manifest.json`、`styles.css`
+2. 放入 `.obsidian/plugins/note-tidy/`
 3. 在设置 → 第三方插件中启用

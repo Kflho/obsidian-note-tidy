@@ -322,7 +322,7 @@ export default class ImageTransferPlugin extends Plugin {
 
         this.addSettingTab(new ImageTransferSettingTab(this.app, this));
 
-        new Notice(`Image transfer v${this.manifest.version} reloaded`);
+        new Notice(`Note Tidy v${this.manifest.version} reloaded`);
     }
 
     async loadSettings() {

@@ -158,7 +158,7 @@ function createApp(options?: { contents?: Map<string, string>; failOn?: string }
 
 async function loadPlugin(): Promise<{ plugin: RecordedPlugin; handlers: Map<string, FileMenuHandler[]> }> {
 	const { app, handlers } = createApp();
-	const manifest = { id: "absolute-image-transfer", name: "test", version: "0.0.0" } as PluginManifest;
+	const manifest = { id: "note-tidy", name: "test", version: "0.0.0" } as PluginManifest;
 	const plugin = new ImageTransferPlugin(app, manifest);
 	await plugin.onload();
 	return { plugin: plugin as unknown as RecordedPlugin, handlers };
@@ -302,7 +302,7 @@ async function batchTests(): Promise<void> {
 		["c.md", " >引用C"],
 	]);
 	const { app, contents: store, files } = createApp({ contents, failOn: "坏掉的笔记.md" });
-	const manifest = { id: "absolute-image-transfer", name: "test", version: "0.0.0" } as PluginManifest;
+	const manifest = { id: "note-tidy", name: "test", version: "0.0.0" } as PluginManifest;
 	const plugin = new ImageTransferPlugin(app, manifest);
 	await plugin.onload();
 

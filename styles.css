@@ -1,4 +1,4 @@
-/* Absolute Image Transfer — notice suppression during batch operations */
+/* Note Tidy — notice suppression during batch operations */
 body.suppress-notices .notice-container,
 body.suppress-notices > .notice-container,
 body.suppress-notices div.notice {

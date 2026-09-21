@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Obsidian desktop-only plugin that transfers images with absolute paths (e.g., `file:///D:\...`) into the vault and converts them to internal `![[...]]` links. Also handles garbled-image renaming and QQ/WeChat chat log reformatting.
+**Note Tidy** (`note-tidy`, formerly `absolute-image-transfer`) — Obsidian desktop-only plugin that tidies a vault:
+
+- **Images**: transfers external-path images (e.g. `file:///D:\...`) into the vault as internal `![[...]]` links, renames garbled image files, sets image sizes, and re-links images copied across folders.
+- **Text**: typesets notes — plain-text math → `$…$`, LaTeX code layout, CJK/English/formula spacing, punctuation width by language, leading indentation, block markers, tag placement and sorting, content block sorting, and QQ/WeChat chat log reformatting.
 
 ## Commands
 
