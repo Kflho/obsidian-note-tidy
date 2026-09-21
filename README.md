@@ -197,6 +197,8 @@ Rule sources are the note-taking spec this plugin was built for: languages are s
 
 Untouched: frontmatter, fenced and indented code blocks, `$$ … $$` blocks (including every line in between), inline code, wikilinks and markdown links, URLs, HTML tags, `%%comments%%`, `#tags`, the inside of `《…》` / `〈…〉` / `“…”` (so 《新 吊带袜天使》 and 《a子计划》 keep their original form), Chinese-to-Chinese spaces, and math operators (`ctrl+c` is never split).
 
+Emphasis markers are transparent: the rules see the content they wrap, so `**可逆矩阵**$P$` becomes `**可逆矩阵** $P$` and `中文**English**中文` becomes `中文 **English** 中文`. Spaces are only ever added *outside* the markers — never between `**` and the text, which would stop the emphasis from rendering. A star that has no pair (`2*3`, `a*b`) is left alone.
+
 ## How to use
 
 The right-click menu is grouped into two submenus so it stays short: **图片功能** (image tools) and **文本排版** (text layout). Both carry a `›` chevron at the right edge and open on hover or click — they use Obsidian's own submenu, so the parent menu stays open.
@@ -645,6 +647,8 @@ frontmatter 与代码块（``` / ~~~）内部的缩进属于语法或内容，�
 规则全部来自本插件配套的笔记规范：不同语言之间空一个字宽、与标点之间不空、中文与数字之间不空。两条会误伤专有名词的规则默认关闭：英文↔数字（`GPT4`、`3D`、`v1.2.2`）与数字↔单位。
 
 不碰的地方：frontmatter、围栏代码块与缩进代码块、`$$ … $$` 公式块（含中间所有行）、行内代码、双链与 markdown 链接、URL、HTML 标签、`%%注释%%`、`#标签`，以及 `《…》` `〈…〉` `“…”` 内部（《新 吊带袜天使》《a子计划》原样保留）、中文与中文之间的空格、数学运算符（`ctrl+c` 不会被拆）。
+
+强调标记不参与规则本身，规则看的是它包住的内容：`**可逆矩阵**$P$` → `**可逆矩阵** $P$`、`中文**English**中文` → `中文 **English** 中文`。空格只加在标记**外面** —— 插进 `**` 与文字之间会让粗体失效（渲染成两个星号）。配不成对的星号（`2*3`、`a*b`）原样留着，不当强调处理。
 
 设置面板按"代码格式 / 排版格式"分区，八条规则各有一项开关：
 

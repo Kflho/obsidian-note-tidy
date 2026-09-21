@@ -27,6 +27,10 @@
  * 不管的地方（不碰就是最安全的排版）：
  * - frontmatter、围栏代码块、缩进代码块、`$$…$$` 公式块（含中间那些行，整块跳过）；
  * - 书名号与引号内部（《新 吊带袜天使》《a子计划》：专有名词原样保留）；
+ * - 强调标记本身（`**粗体**`、`*斜体*`、`==高亮==`、`~~删除~~`）：它并进所包裹的内容里，
+ *   规则看到的是内容 —— `**可逆矩阵**$P$` 因此会补成 `**可逆矩阵** $P$`，
+ *   而空格只会加在标记**外面**（插进 `** English**` 会让粗体失效）；配不成对的
+ *   星号（`2*3`、`a*b`）原样留着，不当强调处理；
  * - 行内代码、双链 `[[…]]`、markdown 链接、URL、HTML 标签、`%%注释%%`、`#标签`
  *   的内部（当成一个"英文单词"整体看，只决定它与左右邻居之间的空格）；
  * - 中文与中文之间的空格（可能是《新 吊带袜天使》这类故意留的，标点概论 3 也要求别乱删）；
@@ -226,6 +230,87 @@ function markTitlePieces(pieces: Piece[]): void {
 
 /** 连写 token 的内部连接符：`v1.2.2`、`file_name`、`A-B`、`a/b` */
 const WORD_SEPARATOR_RE = /^[._\-/]$/;
+
+/** 强调标记用到的符号 */
+const EMPHASIS_CHARS = new Set<string>([...'*_=~']);
+
+/**
+ * 一段标记算不算强调标记：`*` `**` `***`、`_` `__` `___`、`==`、`~~`。
+ * 单个 `=` 与单个 `~` 不算 —— `a=b`、`x~y` 里它们是普通符号。
+ */
+function emphasisMarker(text: string): string | null {
+	if (/^\*{1,3}$/.test(text) || /^_{1,3}$/.test(text) || text === '==' || text === '~~') return text;
+	return null;
+}
+
+/**
+ * 把强调标记并进它包住的那段内容里，让排版规则只看得到"内容"。
+ *
+ * 标记本身不显示，却会挡住规则：`**可逆矩阵**$P$` 里公式左边其实是中文，紧邻的却是 `*`，
+ * 于是"公式与文字之间空一格"落空（`**可逆矩阵**$P$` 一动不动），
+ * 反过来 `$P$**粗体**` 也一样。
+ *
+ * 开标记并给后面那段内容、闭标记并给前面那段内容 —— 空格只会落在标记**外面**，
+ * 不会插进 `**` 与文字之间（`** English**` 会让粗体标记失效，渲染成两个星号）。
+ * 配不上对的标记（`a*b`、`2*3` 里的 `*`）原样留着，不参与规则。
+ */
+function mergeEmphasisMarkers(pieces: Piece[]): Piece[] {
+	// 1. 相邻的同类标记字符合成一段：`*` + `*` → `**`
+	const runs: Piece[] = [];
+	for (const piece of pieces) {
+		const last = runs[runs.length - 1];
+		if (last && last.kind === 'other' && piece.kind === 'other'
+			&& last.text === piece.text && EMPHASIS_CHARS.has(piece.text)) {
+			last.text += piece.text;
+			continue;
+		}
+		runs.push({ ...piece });
+	}
+
+	// 2. 配对：同一个标记（字符与长度都一致）左开右闭；开标记后面、闭标记前面都要紧贴内容
+	const pending = new Map<string, number>();
+	const pairs: Array<[number, number]> = [];
+	for (let i = 0; i < runs.length; i++) {
+		const piece = runs[i];
+		if (!piece || piece.kind !== 'other') continue;
+		const marker = emphasisMarker(piece.text);
+		if (!marker) continue;
+
+		const attachedBefore = runs[i - 1] !== undefined && (runs[i - 1] as Piece).kind !== 'space';
+		const attachedAfter = runs[i + 1] !== undefined && (runs[i + 1] as Piece).kind !== 'space';
+		const open = pending.get(marker);
+
+		if (open !== undefined && attachedBefore) {
+			pairs.push([open, i]);
+			pending.delete(marker);
+			continue;
+		}
+		if (attachedAfter) pending.set(marker, i);
+	}
+
+	// 3. 并进去：开标记 → 后面那段内容，闭标记 → 前面那段内容
+	const content = (from: number, step: 1 | -1): Piece | null => {
+		for (let i = from; i >= 0 && i < runs.length; i += step) {
+			const piece = runs[i];
+			if (!piece || piece.kind === 'space') continue;
+			if (piece.kind === 'other' && emphasisMarker(piece.text)) continue;
+			return piece;
+		}
+		return null;
+	};
+
+	const removed = new Set<number>();
+	for (const [open, close] of pairs) {
+		const first = content(open + 1, 1);
+		const last = content(close - 1, -1);
+		if (first) first.text = (runs[open] as Piece).text + first.text;
+		if (last) last.text += (runs[close] as Piece).text;
+		removed.add(open);
+		removed.add(close);
+	}
+
+	return runs.filter((_, index) => !removed.has(index));
+}
 
 /**
  * 标记"含字母的连写"里的数字（GPT4、3D、v1.2.2、100kg）。
@@ -451,7 +536,7 @@ function tokenizeLine(line: string): Piece[] {
 
 	markAlphanumericWords(pieces);
 	markTitlePieces(pieces);
-	return pieces;
+	return mergeEmphasisMarkers(pieces);
 }
 
 // ------------------------------------------------------------------ 间距规则
