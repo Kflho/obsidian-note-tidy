@@ -12,6 +12,7 @@ Obsidian desktop-only plugin that transfers images with absolute paths (e.g., `f
 npm install              # Install dependencies
 npm run dev              # Watch mode (esbuild --watch)
 npm run build            # Type-check then bundle for production (tsc --noEmit + esbuild minified)
+npm test                 # Run test/*.test.ts through test/run-tests.mjs (no framework needed)
 npm run lint             # ESLint
 npm run version          # Bump manifest.json version + update versions.json (reads from npm_package_version env var)
 ```
@@ -23,14 +24,27 @@ The esbuild config (`esbuild.config.mjs`) bundles `src/main.ts` into `main.js` (
 ### Source layout
 ```
 src/
-  main.ts        # Plugin entry point + ALL feature logic (~605 lines)
-  settings.ts    # ImageTransferSettings interface + SettingTab
-main.js          # Bundled output (committed — Obsidian plugins require it at root)
-manifest.json    # Plugin metadata
-styles.css       # Plugin CSS (minimal, 3 rules)
+  main.ts               # Plugin entry point, commands, right-click menus, file I/O
+  settings.ts           # ImageTransferSettings + SettingTab (分区：图片导入 / 图片大小 / 代码格式 / 排版格式)
+  text-pipeline.ts      # 纯函数排版流水线：缩进 → 标记 → 聊天记录 → 公式 → 空格 → 标签 → 板块排序
+  text-layout.ts        # 行首缩进归一（4 空格 = 1 tab）
+  markdown-markers.ts   # 引用 / 列表 / 标题标记的空白规范化
+  chat-log.ts           # QQ/微信聊天记录排版
+  latex-layout.ts       # 代码格式：$$…$$ 与行内 $…$ 的 LaTeX 代码
+  spacing.ts            # 排版格式：中文 / 英文 / 数字 / 公式 / 标点之间的空格（八条规则）
+  tags.ts               # 标签归位到块尾 + 标签排序
+  block-sort.ts         # 内容板块排序
+  line-scan.ts          # 共用保护区判定：frontmatter、围栏/缩进代码块、公式行
+  collate.ts            # "首字母"比较（中文按拼音）
+  image-*.ts            # 图片链接 / 尺寸 / 位置整理 / 附件夹
+  ui/                   # 弹窗
+test/*.test.ts          # 每个纯函数模块一份测试（含幂等）
+main.js                 # Bundled output (committed — Obsidian plugins require it at root)
+manifest.json           # Plugin metadata
+styles.css              # Plugin CSS (notice suppression, size dialog, settings sub-headings)
 ```
 
-**Note:** Despite the AGENTS.md recommending code splitting, all three core features currently live in `main.ts`. A future refactor could extract each feature into its own module (`src/features/image-transfer.ts`, `src/features/garbled-rename.ts`, `src/features/chat-log.ts`).
+**Note:** feature logic lives in the modules above; `main.ts` keeps only plugin lifecycle, commands, menus and vault I/O. Every pipeline step is a pure, idempotent function so it can be tested without Obsidian.
 
 ### Three core features
 

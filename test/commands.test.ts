@@ -102,7 +102,7 @@ const OPERATIONS: Array<{ menu: RegExp; commands: string[] }> = [
 		commands: ["set-image-size-current-note", "set-image-size-entire-vault"],
 	},
 	{
-		menu: /^修复.*的排版（聊天记录 \/ 缩进 \/ 标签 \/ 公式）$/,
+		menu: /^修复.*的排版（空格 \/ 缩进 \/ 聊天记录 \/ 标签 \/ 公式）$/,
 		commands: ["format-chat-log-current-note", "format-chat-log-entire-vault"],
 	},
 ];
@@ -326,9 +326,9 @@ async function batchTests(): Promise<void> {
 		console.debug = consoleDebug;
 	}
 
-	check("整库批处理：第一遍修好", store.get("a.md") ?? "", "> 引用A");
+	check("整库批处理：第一遍修好", store.get("a.md") ?? "", "> 引用 A");
 	check("整库批处理：出错的那篇保持原样", store.get("坏掉的笔记.md") ?? "", " >引用B");
-	check("整库批处理：出错之后的笔记照样修好", store.get("c.md") ?? "", "> 引用C");
+	check("整库批处理：出错之后的笔记照样修好", store.get("c.md") ?? "", "> 引用 C");
 	checkTrue("出错的文件被写进日志", logged.some(line => line.includes("坏掉的笔记.md")), `日志：${logged.join(" | ")}`);
 
 	const failureNotice = noticeLog.messages.find((message: string) => message.includes("处理失败"));

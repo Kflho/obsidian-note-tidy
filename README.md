@@ -154,6 +154,10 @@ Rewrites the LaTeX code of formulas — `$$ … $$` blocks and inline `$…$` �
 | `$$a&b&c$$` | `$$a & b & c$$` | `&` and `\\` are layout symbols: one space on each side |
 | `$$(-x)$$` | `$$(-x)$$` | a sign (`+x`, `-Q`) stays tight against its argument (rule 2) |
 | `$$(x-x_e)$$` | `$$(x - x_e)$$` | …while a real subtraction gets spaces |
+| `$$\begin{cases}-1 & x<0\\ 1 & x\ge0\end{cases}$$` | `-1` stays tight | the first element of an environment (`\begin{cases}`, `\begin{bmatrix}`) is also an "operand expected" position; so is every cell after `&` or `\\` |
+| `$$x^-1$$` | `$$x^-1$$` | a sign right after `^` / `_` *is* the script, so it hugs what follows |
+| `$$f'-g$$` | `$$f' - g$$` | a prime does not swallow the next token — that minus is a real subtraction and gets spaces on both sides |
+| `$$a\pmod{n}$$` | `$$a \pmod{n}$$` | a relation command that takes an argument stays tight against it |
 | `$$\partial f$$` | `$$\partial{f}$$` | a command stays tight against its argument; braces keep the command name intact (rule 6) |
 | `$$\sin x$$` / `$$\sin 2x$$` | `$$\sin{x}$$` / `$$\sin2x$$` | braces only where joining would swallow the name (`\sinx` is invalid, `\sin2x` is fine) |
 | `$$A_{i}, \quadA_{j}$$` | `$$A_{i}, A_{j}$$` | a spacing command glued to a letter (`\quadA` — LaTeX reads it as an undefined command and the formula errors out) is split: when a comma or another separator is already there, the redundant spacing is dropped; otherwise it becomes `\quad{A}` |
@@ -174,17 +178,38 @@ Example — a matrix inside a list item:
 
 Untouched: frontmatter, fenced and indented code blocks, inline code, `\text{…}` / `\operatorname{…}` arguments (Chinese text and spaces inside are kept verbatim), formulas containing a `%` comment, and inline formulas containing `\\`. A stray `$$` no longer disables the whole note: a region that looks like prose (blank line, heading, fence, rule, or hundreds of lines) is skipped and the real formulas after it are still formatted.
 
+### 8. Spacing layout (typesetting)
+
+Where the LaTeX layout owns the code **inside** `$…$`, this one owns the spaces **between** Chinese, English, numbers, formulas and punctuation — the format the reader actually sees.
+
+| Before | After | Rule |
+|--------|-------|------|
+| `用anki卡片记笔记` | `用 anki 卡片记笔记` | one space between Chinese and English (inline code, wikilinks, links and `#tags` count as English) |
+| `第 3 章` | `第3章` | Chinese and numbers get **no** space (note rule), existing spaces are removed |
+| `用GPT4写代码` | `用 GPT4 写代码` | runs that contain letters (`GPT4`, `3D`, `v1.2.2`, `100kg`) count as one English word, so model numbers stay in one piece |
+| `设$x$为未知数` | `设 $x$ 为未知数` | one space between an inline formula and the text around it; never inside the `$…$` |
+| `中文 ，内容 。` | `中文，内容。` | no space on either side of a full-width punctuation mark |
+| `word,word` | `word, word` | half-width `, . ! ? :` get no space before and one after (decimals `1.2.2`, times `12:30` and `...` are exempt) |
+| `( x )` | `(x)` | no space just inside ASCII brackets |
+| `100kg` (optional, off by default) | `100 kg` | one space between a number and a unit from the built-in list |
+
+Rule sources are the note-taking spec this plugin was built for: languages are separated by one character width, punctuation stays tight, and Chinese↔numbers stay tight. Two rules that would break proper nouns are off by default: English↔numbers (`GPT4`, `3D`, `v1.2.2`) and number↔unit.
+
+Untouched: frontmatter, fenced and indented code blocks, `$$ … $$` blocks (including every line in between), inline code, wikilinks and markdown links, URLs, HTML tags, `%%comments%%`, `#tags`, the inside of `《…》` / `〈…〉` / `“…”` (so 《新 吊带袜天使》 and 《a子计划》 keep their original form), Chinese-to-Chinese spaces, and math operators (`ctrl+c` is never split).
+
 ## How to use
 
 The right-click menu is grouped into two submenus so it stays short: **图片功能** (image tools) and **文本排版** (text layout). Both carry a `›` chevron at the right edge and open on hover or click — they use Obsidian's own submenu, so the parent menu stays open.
 
 | Method | Action |
 |--------|--------|
-| Right-click a `.md` file | **图片功能**: convert / rename / organize locations / set size · **文本排版**: fix layout (chat log / indent / tags / formulas) |
+| Right-click a `.md` file | **图片功能**: convert / rename / organize locations / set size · **文本排版**: fix layout (spaces / indent / chat log / tags / formulas) |
 | Right-click a folder | The same two submenus, applied to every note in that folder |
-| Command palette (`Ctrl+P`) | Every menu action is also a command: convert images (current note / entire vault), rename garbled images (current note / entire vault), rename all images vault-wide (normal or forced), organize image locations (current note / entire vault), set image size (current note / entire vault), fix layout — chat log, indent, tags and formulas (current note / entire vault) |
+| Command palette (`Ctrl+P`) | Every menu action is also a command: convert images (current note / entire vault), rename garbled images (current note / entire vault), rename all images vault-wide (normal or forced), organize image locations (current note / entire vault), set image size (current note / entire vault), fix layout — spaces, indent, chat log, tags and formulas (current note / entire vault) |
 
 ### Settings
+
+The settings tab follows the same split as the spec: **图片导入** / **图片大小** for images, **代码格式** for how source code (LaTeX) is written, **排版格式** for what the reader sees.
 
 - **Attachment location** — where transferred images are stored (system default, vault root, current folder, subfolder, or custom path)
 - **Image naming preset** — format for renamed images, supports `{YYYY}` `{MM}` `{DD}` `{HH}` `{mm}` `{ss}`
@@ -208,16 +233,43 @@ All defaults reproduce the previous layout exactly, so existing notes are not re
 
 Blank lines already present in the source text are always preserved.
 
-Text layout fixes (applied by the same command, to the whole note):
+**代码格式 (code format)** — how the source code is written:
 
-- **Leading indent fix** — smart (default: 4 spaces = 1 tab, tab/space mixes normalized, 1–3 stray spaces before plain text or images dropped, while list-item indentation and paragraphs inside list items are kept), strict (tabs only, every leading space dropped), or off. Smart/strict also normalize block markers: `" >quote"` → `"> quote"`, multiple spaces after a list or heading marker collapse to one. Turning it off switches all of these fixes off
+- **Formula layout** — rewrite the LaTeX code inside `$$ … $$` (spacing, line breaks, indentation). Off by default; inline `$…$` is never touched
+
+**排版格式 (layout format)** — what the reader actually sees. All of it is applied by the same "fix layout" command:
+
+Word spacing:
+
+- **Chinese ↔ English** — one character width (`space`, default) or keep as is. Inline code, wikilinks, links and tags count as English
+- **Chinese ↔ numbers** — no space (`none`, default, removes existing spaces), one space (`space`), or keep as is
+- **English ↔ numbers** — keep as is (default) or one space. Keeping it avoids splitting `GPT4`, `3D`, `v1.2.2`
+- **Formula ↔ text** — one space (default) or keep as is; the space goes outside the `$…$` only
+
+Punctuation and symbols:
+
+- **No space next to full-width punctuation** — on by default; quotes and the inside of `《…》` are exempt
+- **Half-width punctuation** `, . ! ? :` — no space before, one space after; on by default
+- **No space inside parentheses** `( x )` → `(x)`; on by default
+- **One space between numbers and units** — off by default; units must be in the built-in list (`%`, `3D`, `4K`, `5G` are not units)
+
+Tags and blocks:
+
 - **Tag layout** — move inline `#tags` to the end of their block, one space away from the text. Off by default
 - **Tag sorting** — order the tags of one block by first letter (Chinese by pinyin, numbers numerically). Keeps the original order when off
 - **Content block sorting** — sort a note's blocks by first letter, section by section. Off by default
 
-Formula layout:
+Indentation and markers:
 
-- **Formula layout** — rewrite the LaTeX code inside `$$ … $$` (spacing, line breaks, indentation). Off by default; inline `$…$` is never touched
+- **Leading indent fix** — smart (default: 4 spaces = 1 tab, tab/space mixes normalized, 1–3 stray spaces before plain text or images dropped, while list-item indentation and paragraphs inside list items are kept), strict (tabs only, every leading space dropped), or off. Smart/strict also normalize block markers: `" >quote"` → `"> quote"`, multiple spaces after a list or heading marker collapse to one. Turning it off switches all of these fixes off
+
+Chat log:
+
+- **Show username** — keep or drop the sender name
+- **Show date** / **Show time** — keep or drop the date (`{YYYY}/{MM}/{DD}`) and time (`{HH}:{mm}:{ss}`)
+- **Body indent** — tab, 2 spaces, 4 spaces, or none
+- **Image position in mixed messages** — image above the text, below the text, or keep the original order
+- **Blank line between messages** — only available when username, date and time are all turned off; inserts an empty line between adjacent messages so they stay visually distinct
 
 ## Supported formats
 
@@ -268,6 +320,13 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 3. Enable the plugin in Settings → Community Plugins
 
 ## Changelog
+
+### v1.2.2
+- New: **spacing layout** (typesetting) — it owns the spaces **outside** `$…$`, i.e. between Chinese, English, numbers, formulas and punctuation. One character width between Chinese and English (inline code, wikilinks, links and tags count as English), **no** space between Chinese and numbers (existing spaces are removed: `第 3 章` → `第3章`), one space around inline formulas, none on either side of full-width punctuation, half-width `, . ! ? :` get no space before and one after, no space inside brackets, and (off by default) one space between a number and a unit. Runs that contain letters (`GPT4`, `3D`, `v1.2.2`, `100kg`) count as one English word, so model numbers are never split; the inside of `《…》` / `〈…〉` / `“…”` is kept verbatim (《新 吊带袜天使》, 《a子计划》)
+- New: the settings tab is grouped by feature — 图片导入 / 图片大小 / **代码格式** (formula code) / **排版格式** (word spacing, punctuation, tags & blocks, indentation, chat log)
+- Fixed: unary vs binary `+` / `-` inside formulas. A sign at the start of an environment (`\begin{cases}-1`, `\begin{bmatrix}-1`) was spaced like a binary operator (`- 1`); `x^-1` became `x^- 1`; `f'-g` only received the right-hand space. All three now follow the same question — is an operand missing at this position?
+- Fixed: `\pmod{n}` was rewritten as `\pmod {n}` (a relation command that takes an argument now stays tight against it), and `\Longrightarrow`, `\hookrightarrow`, `\nleq`, `\setminus`, `\uplus`, `\dagger` and more were added to the relation table
+- Tests: new `test/spacing.test.ts` (8 rules, safety boundaries, 9 settings combinations × idempotency); 8 unary/binary regression cases for formulas
 
 ### v1.2.1
 - Fixed: **a tag-only line had its tags moved away** — when such a line sat at the start or in the middle of a paragraph it was dropped entirely and its tags were appended to a neighbouring text line (`"first line"` / `"#tag"` / `"third line"` → `"first line"` / `"third line #tag"`), and two consecutive tag-only lines were merged into one. A tags-only line is now a block of its own: it keeps its position, its tags neither leak out nor receive tags from elsewhere, and the paragraph breaks there. Its own tags are still sorted
@@ -544,6 +603,10 @@ frontmatter 与代码块（``` / ~~~）内部的缩进属于语法或内容，�
 | `$$a&b&c$$` | `$$a & b & c$$` | `&`、`\\` 是排版符号，左右各一个空格 |
 | `$$(-x)$$` | `$$(-x)$$` | 标正负的加减号与参数贴紧（规则 2） |
 | `$$(x-x_e)$$` | `$$(x - x_e)$$` | 真正的减法照旧左右加空格 |
+| `$$\begin{cases}-1 & x<0\\ 1 & x\ge0\end{cases}$$` | `-1` 保持贴紧 | 环境开头（`\begin{cases}`、`\begin{bmatrix}`）同样是"缺操作数"的位置；`&`、`\\` 之后也一样 |
+| `$$x^-1$$` | `$$x^-1$$` | 紧跟在 `^` / `_` 后面的符号就是上标/下标本身，与内容贴紧 |
+| `$$f'-g$$` | `$$f' - g$$` | 撇号不吃后面的符号：那个减号是真的减法，左右都要空格 |
+| `$$a\pmod{n}$$` | `$$a \pmod{n}$$` | 自带花括号参数的关系符命令与参数贴紧 |
 | `$$\partial f$$` | `$$\partial{f}$$` | 修饰符与参数贴紧；花括号保证命令名不被吃掉（规则 6） |
 | `$$\sin x$$` / `$$\sin 2x$$` | `$$\sin{x}$$` / `$$\sin2x$$` | 只在"连起来会出错"时加花括号（`\sinx` 非法、`\sin2x` 合法） |
 | `$$A_{i}, \quadA_{j}$$` | `$$A_{i}, A_{j}$$` | 间距命令与后面字母粘连（`\quadA` 会被 LaTeX 当成未定义命令，公式直接报错）会拆开：前面已有逗号等分隔就删掉多余的间距，否则写成 `\quad{A}` |
@@ -564,15 +627,47 @@ frontmatter 与代码块（``` / ~~~）内部的缩进属于语法或内容，�
 
 不碰的地方：frontmatter、围栏代码块与缩进代码块、行内代码、`\text{…}` / `\operatorname{…}` 参数里的文字与空格、含 `%` 注释的公式、带 `\\` 的行内公式。**落单的 `$$` 不再让整篇失效** —— 配起来不像公式的区域（含空行 / 标题 / 围栏 / 分隔线）自动跳过，后面的真公式照排。
 
+### 8. 空格排版（排版格式）
+
+公式排版管的是 `$…$` **里面**的 LaTeX 代码，这一项管 `$…$` **外面** —— 中文、英文、数字、公式、标点之间该不该空一个字宽，也就是使用者实际看到的格式。
+
+| 排版前 | 排版后 | 规则 |
+|--------|--------|------|
+| `用anki卡片记笔记` | `用 anki 卡片记笔记` | 中英文之间空一个字宽（行内代码、双链、链接、标签与英文等价） |
+| `第 3 章` | `第3章` | 中文和数字之间**不留空格**（笔记规则），已有空格一并删掉 |
+| `用GPT4写代码` | `用 GPT4 写代码` | 含字母的连写（`GPT4`、`3D`、`v1.2.2`、`100kg`）整体算一个英文单词，型号不会被拆开 |
+| `设$x$为未知数` | `设 $x$ 为未知数` | 行内公式与前后文字之间空一格；`$` 内侧一个字符都不动 |
+| `中文 ，内容 。` | `中文，内容。` | 全角标点两侧不留空格 |
+| `word,word` | `word, word` | 半角标点 `, . ! ? :` 前不留空格、后空一格（小数点 `1.2.2`、时间 `12:30`、省略号 `...` 除外） |
+| `( x )` | `(x)` | 半角括号内侧不留空格 |
+| `100kg`（可选，默认关闭） | `100 kg` | 数字与单位之间空一格，单位须落在内置词表里 |
+
+规则全部来自本插件配套的笔记规范：不同语言之间空一个字宽、与标点之间不空、中文与数字之间不空。两条会误伤专有名词的规则默认关闭：英文↔数字（`GPT4`、`3D`、`v1.2.2`）与数字↔单位。
+
+不碰的地方：frontmatter、围栏代码块与缩进代码块、`$$ … $$` 公式块（含中间所有行）、行内代码、双链与 markdown 链接、URL、HTML 标签、`%%注释%%`、`#标签`，以及 `《…》` `〈…〉` `“…”` 内部（《新 吊带袜天使》《a子计划》原样保留）、中文与中文之间的空格、数学运算符（`ctrl+c` 不会被拆）。
+
+设置面板按"代码格式 / 排版格式"分区，八条规则各有一项开关：
+
+| 设置项 | 默认 | 说明 |
+|--------|------|------|
+| 中文与英文之间 | 空一个字宽 | 也可选"保持原样" |
+| 中文与数字之间 | 不留空格 | 可选"空一个字宽"（盘古之白写法）或"保持原样" |
+| 英文与数字之间 | 保持原样 | 可选"空一个字宽"；保持原样可避免拆开 `GPT4` `3D` `v1.2.2` |
+| 公式与文字之间 | 空一个字宽 | 也可选"保持原样"；只动 `$` 外面 |
+| 全角标点两侧不留空格 | 开 | 引号与书名号内侧除外 |
+| 半角标点前不留空格、后空一格 | 开 | 小数点、时间、省略号除外 |
+| 括号内侧不留空格 | 开 | 只作用于半角 `()` |
+| 数字与单位之间空一格 | 关 | 单位须在词表内，`%`、`3D`、`4K`、`5G` 不算 |
+
 ## 使用方式
 
 右键菜单收进了两个二级栏，顶层不再一长串：**图片功能** 与 **文本排版**。两项右侧带 `›` 箭头，悬停或点击即在旁边展开 —— 用的是 Obsidian 原生子菜单，父菜单不会收起，键盘左右键也能进出子菜单。
 
 | 方式 | 操作 |
 |------|------|
-| 右键 `.md` 文件 | **图片功能**：转换 / 重命名 / 整理位置 / 设置大小 · **文本排版**：修复排版（聊天记录 / 缩进 / 标签 / 公式） |
+| 右键 `.md` 文件 | **图片功能**：转换 / 重命名 / 整理位置 / 设置大小 · **文本排版**：修复排版（空格 / 缩进 / 聊天记录 / 标签 / 公式） |
 | 右键文件夹 | 同样两个二级栏，作用于该文件夹下所有笔记 |
-| 命令面板 (`Ctrl+P`) | 菜单里的每个操作都有对应命令：转换图片（当前笔记 / 整个仓库）、重命名乱码图片（当前笔记 / 整个仓库）、重命名全部图片（普通 / 强制）、整理图片位置（当前笔记 / 整个仓库）、设置图片大小（当前笔记 / 整个仓库）、修复排版（聊天记录、缩进、标签与公式，当前笔记 / 整个仓库） |
+| 命令面板 (`Ctrl+P`) | 菜单里的每个操作都有对应命令：转换图片（当前笔记 / 整个仓库）、重命名乱码图片（当前笔记 / 整个仓库）、重命名全部图片（普通 / 强制）、整理图片位置（当前笔记 / 整个仓库）、设置图片大小（当前笔记 / 整个仓库）、修复排版（空格、缩进、聊天记录、标签与公式，当前笔记 / 整个仓库） |
 
 ## 本地开发
 
@@ -588,12 +683,13 @@ npm run lint
 | 模块 | 职责 |
 |------|------|
 | `src/chat-log.ts` | 聊天记录排版（用户名/日期/时间开关、缩进、图文顺序、空行） |
-| `src/text-pipeline.ts` | 按固定顺序串起各排版步骤：缩进 → 标记 → 聊天记录 → 公式 → 标签 → 板块排序 |
+| `src/text-pipeline.ts` | 按固定顺序串起各排版步骤：缩进 → 标记 → 聊天记录 → 公式 → 空格 → 标签 → 板块排序 |
 | `src/text-layout.ts` | 行首缩进归一（4 空格 = 1 个 tab） |
 | `src/markdown-markers.ts` | 块级标记空白：注释（引用）、列表、标题 |
 | `src/tags.ts` | 标签排版：标签归位到块尾、表格按单元格、标签排序 |
 | `src/block-sort.ts` | 内容板块排序：分节、锚点、有序列表重新编号 |
-| `src/latex-layout.ts` | 公式排版：空格规则、`$$` 定界、`\\` 换行、续行缩进 |
+| `src/latex-layout.ts` | 公式排版（代码格式）：空格规则、`$$` 定界、`\\` 换行、续行缩进 |
+| `src/spacing.ts` | 空格排版（排版格式）：中文 / 英文 / 数字 / 公式 / 标点之间的距离、保护区域判定 |
 | `src/line-scan.ts` | 共用保护区判定：frontmatter、围栏代码块、缩进代码块、公式 |
 | `src/collate.ts` | "首字母"比较（中文按拼音、数字按数值） |
 | `src/image-size.ts` | 改写 `\|100` / `\|100x200` 尺寸，保护图片说明文字 |
@@ -622,6 +718,13 @@ npm run lint
 批量操作前建议备份仓库。
 
 ## 更新日志
+
+### v1.2.2
+- 新增：**空格排版**（排版格式）—— 管 `$…$` **外面**、也就是使用者实际看到的那层格式：中文与英文之间空一个字宽（行内代码、双链、链接、标签与英文等价）；中文与数字之间**不留空格**（已有空格一并删掉，`第 3 章` → `第3章`）；行内公式与前后文字空一格；全角标点两侧不留空格（引号与书名号内侧除外）；半角标点 `, . ! ? :` 前不留空格、后空一格；括号内侧不留空格；数字与单位之间空一格（默认关闭）。含字母的连写（`GPT4`、`3D`、`v1.2.2`、`100kg`）整体算一个英文单词，型号不会被拆开；《新 吊带袜天使》《a子计划》这类书名号、引号内部原样保留
+- 新增：设置面板按功能分区 —— **图片导入**、**图片大小**、**代码格式**（公式代码）、**排版格式**（文字间距、标点与符号、标签与板块、行首与标记、聊天记录）
+- 修复：公式里 `+` `-` 的一元（修饰）与二元（运算）判定补漏 —— 环境开头的符号（`\begin{cases}-1`、`\begin{bmatrix}-1`）原本被当成二元写成 `- 1`；`x^-1` 原本被写成 `x^- 1`；`f'-g` 原本只补右边空格。现在一律按"这个位置缺不缺操作数"判定：行首、左括号、关系符 / 运算符之后、逗号、`&`、`\\`、环境开头、`^` `_` 之后都是一元
+- 修复：`\pmod{n}` 被写成 `\pmod {n}`（自带花括号参数的关系符命令现与参数贴紧）；关系符表补上 `\Longrightarrow`、`\hookrightarrow`、`\nleq`、`\setminus`、`\uplus`、`\dagger` 等
+- 测试：新增 `test/spacing.test.ts`（八条规则、安全边界、9 种设置组合 × 幂等）；公式测试补 8 条一元 / 二元回归用例
 
 ### v1.2.1
 - 修复：**整行只有标签时标签被挪走** —— 纯标签行跟在段落后面还好，一旦它在段落开头或中间，那一行会被抽空删掉、标签被并到相邻正文行的末尾（`"第一行" / "#标签" / "第三行"` → `"第一行" / "第三行 #标签"`；连着两行纯标签还会被并成一行）。现在纯标签行**自成一块**：位置不动、标签不外流也不接收别处的标签，段落在这里断开，标签各归各的；纯标签行本身仍按需排序

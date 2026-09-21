@@ -6,6 +6,15 @@ body.suppress-notices div.notice {
 	visibility: hidden !important;
 }
 
+/* 设置面板：排版格式下的子分组标题（Obsidian 自带的 setHeading 只有一级） */
+.ait-settings-subheading h4 {
+	margin: 1.4em 0 0.2em;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	letter-spacing: 0.05em;
+}
+
 /* 图片大小弹窗：改动预览列表 */
 .ait-size-preview {
 	margin-top: 0.5em;

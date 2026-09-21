@@ -96,13 +96,18 @@ function splitGluedSpacing(name: string): { command: string } | null {
 
 /** 关系符 / 二元运算符命令：左右各一个空格（LaTeX 本来就会在渲染时插入间距） */
 const RELATION_COMMANDS = new Set([
-	'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'equiv', 'approx', 'sim', 'simeq', 'cong', 'propto',
+	'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'equiv', 'approx', 'sim', 'simeq', 'cong', 'propto', 'asymp', 'doteq',
 	'll', 'gg', 'prec', 'succ', 'preceq', 'succeq', 'subset', 'subseteq', 'supset', 'supseteq',
+	'subsetneq', 'supsetneq', 'sqsubseteq', 'sqsupseteq', 'nsubseteq', 'nsupseteq', 'nleq', 'ngeq',
 	'in', 'notin', 'ni', 'owns', 'cup', 'cap', 'land', 'wedge', 'lor', 'vee', 'oplus', 'otimes',
-	'odot', 'times', 'cdot', 'div', 'pm', 'mp', 'ast', 'star', 'circ', 'bullet', 'to', 'rightarrow',
-	'leftarrow', 'leftrightarrow', 'longrightarrow', 'longleftarrow', 'Rightarrow', 'Leftarrow',
-	'Leftrightarrow', 'implies', 'iff', 'mapsto', 'therefore', 'because', 'perp', 'parallel',
-	'mid', 'vdash', 'dashv', 'models', 'triangleq', 'overset', 'underset', 'stackrel', 'bmod', 'pmod',
+	'odot', 'times', 'cdot', 'div', 'pm', 'mp', 'ast', 'star', 'circ', 'bullet', 'bigcirc',
+	'setminus', 'uplus', 'sqcup', 'sqcap', 'wr', 'amalg', 'dagger', 'ddagger', 'triangleleft', 'triangleright',
+	'to', 'rightarrow', 'leftarrow', 'leftrightarrow', 'longrightarrow', 'longleftarrow', 'Longrightarrow',
+	'Longleftarrow', 'Longleftrightarrow', 'mapsto', 'longmapsto', 'hookrightarrow', 'hookleftarrow',
+	'rightsquigarrow', 'leadsto', 'nearrow', 'searrow', 'swarrow', 'nwarrow', 'uparrow', 'downarrow',
+	'updownarrow', 'nrightarrow', 'nleftarrow', 'Rightarrow', 'Leftarrow', 'Leftrightarrow',
+	'implies', 'iff', 'therefore', 'because', 'perp', 'parallel', 'nparallel', 'mid', 'nmid', 'vdash', 'dashv',
+	'models', 'triangleq', 'overset', 'underset', 'stackrel', 'bmod', 'pmod',
 ]);
 
 /** 定界符命令：当作括号处理（`\lVert x \rVert` 里的左右各一个） */
@@ -124,6 +129,12 @@ const TEXT_COMMANDS = new Set([
 	'textup', 'textmd', 'textcolor', 'operatorname', 'mathop', 'mathrm', 'mathbf', 'mathit',
 	'mathsf', 'mathtt', 'mathcal', 'mathbb', 'mathfrak', 'mathnormal', 'mbox', 'hbox',
 ]);
+
+/**
+ * 自带花括号参数的关系符命令：命令与它的参数之间贴紧（`\pmod{n}` 而不是 `\pmod {n}`）。
+ * 普通关系符（`=`、`\le`）不在此列 —— 它们左右都该空一格。
+ */
+const ARGUMENT_RELATION_COMMANDS = new Set(['overset', 'underset', 'stackrel', 'pmod']);
 
 /** 单个字符的关系符 / 运算符 */
 const RELATION_CHARS = new Set(['=', '<', '>', ':']);
@@ -223,7 +234,8 @@ function tokenize(body: string): Token[] {
 					continue;
 				}
 				if (RELATION_COMMANDS.has(name)) {
-					tokens.push({ kind: 'rel', text: `\\${name}` });
+					// 带上命令名：`\pmod{n}` 这类自带参数的关系符要能与参数贴紧
+					tokens.push({ kind: 'rel', text: `\\${name}`, command: name });
 					continue;
 				}
 				tokens.push({ kind: 'word', text: `\\${name}`, command: name, glued: gluedSplit !== null });
@@ -306,11 +318,33 @@ interface Item {
 	command?: string;
 }
 
-/** 一元还是二元：前面是"缺一个操作数"的位置（行首、左括号、运算符、逗号、& 、换行）就是一元 */
+/**
+ * 一元还是二元：前面是"缺一个操作数"的位置就是一元 ——
+ * 行首、左括号、运算符、逗号、`&`、换行，以及
+ * **环境开头**（`\begin{cases}-1`、`\begin{bmatrix}-1`：第一个元素前没有操作数）和
+ * **`^` `_` 之后**（`x^-1` 里的 `-` 是这个上标本身，要和上标内容贴紧）。
+ *
+ * `'`（撇号）不算：它是后置修饰符，`f'-g` 里的 `-` 是真的减法。
+ */
 function isUnary(previous: Item | null): boolean {
 	if (!previous) return true;
+	if (previous.kind === 'script') return previous.text !== "'";
+	if (previous.command === 'begin') return true;
 	return previous.kind === 'rel' || previous.kind === 'unary' || previous.kind === 'punct'
 		|| previous.kind === 'amp' || previous.kind === 'open' || previous.kind === 'break';
+}
+
+/**
+ * 只产生间距、不产生操作数的命令（`\quad`、`\,`、`\!` …）。
+ *
+ * 判断一元 / 二元时要"透过去"看：`\quad -x` 里 `\quad` 前面没有操作数，`-` 是一元；
+ * 而 `a \quad -b` 的 `-` 前面有 `a`，仍是二元。
+ */
+const SINGLE_SPACING_COMMANDS = new Set<string>([',', ':', ';', '!', ' ']);
+
+function isSpacingOnly(item: Item): boolean {
+	if (item.kind !== 'word' || !item.command) return false;
+	return SPACING_COMMANDS.includes(item.command) || SINGLE_SPACING_COMMANDS.has(item.command);
 }
 
 /**
@@ -323,7 +357,17 @@ function separator(previous: Item | null, next: Item): string {
 	if (!previous) return '';
 	if (previous.kind === 'open') return '';
 	if (next.kind === 'close') return '';
-	if (next.kind === 'script' || previous.kind === 'script') return '';
+
+	// 上下标与前后内容贴紧：`x_1`、`a^{2}`、`f'`
+	if (previous.kind === 'script') {
+		// 例外：`f'-g` 的 `-` 是真的减法，关系符该有的空格不能省
+		return next.kind === 'rel' ? ' ' : '';
+	}
+	if (next.kind === 'script') return '';
+
+	// 自带花括号参数的关系符命令与参数贴紧：`\pmod{n}`、`\overset{a}{b}`
+	if (next.kind === 'open' && previous.command !== undefined
+		&& ARGUMENT_RELATION_COMMANDS.has(previous.command)) return '';
 
 	// 一元符号：与参数贴紧；它自己前面留不留空格，由上一个 token 的规则决定
 	if (next.kind === 'unary') {
@@ -356,6 +400,8 @@ function renderTokens(tokens: Token[]): string[] {
 	const lines: string[] = [];
 	let current = '';
 	let previous: Item | null = null;
+	/** 上一个真正占位的操作数：间距命令要透过去，`\quad -x` 的 `-` 才算一元 */
+	let previousOperand: Item | null = null;
 
 	for (let index = 0; index < tokens.length; index++) {
 		const token = tokens[index];
@@ -377,11 +423,12 @@ function renderTokens(tokens: Token[]): string[] {
 			lines.push(current);
 			current = '';
 			previous = null;
+			previousOperand = null;
 			continue;
 		}
 
 		const item: Item = token.kind === 'sign'
-			? { ...token, kind: isUnary(previous) ? 'unary' : 'rel' }
+			? { ...token, kind: isUnary(previousOperand) ? 'unary' : 'rel' }
 			: token;
 
 		const gap = separator(previous, item);
@@ -391,6 +438,7 @@ function renderTokens(tokens: Token[]): string[] {
 
 		current += gap + text;
 		previous = { ...item, text };
+		if (!isSpacingOnly(item)) previousOperand = { ...item, text };
 	}
 
 	if (current !== '') lines.push(current);

@@ -1,5 +1,6 @@
-﻿import { App, Editor, MarkdownView, MarkdownFileInfo, MenuItem, Modal, Notice, Plugin, TFile, TFolder, TAbstractFile, Menu, normalizePath, Platform } from 'obsidian';
+import { App, Editor, MarkdownView, MarkdownFileInfo, MenuItem, Modal, Notice, Plugin, TFile, TFolder, TAbstractFile, Menu, normalizePath, Platform } from 'obsidian';
 import { DEFAULT_SETTINGS, ImageTransferSettings, ImageTransferSettingTab } from "./settings";
+import { getSpacingOptions } from "./settings";
 import { ChatLogOptions, resolveIndent } from "./chat-log";
 import { resolveLeadingIndentMode } from "./text-layout";
 import { formatNoteText, TextPipelineOptions } from "./text-pipeline";
@@ -295,7 +296,7 @@ export default class ImageTransferPlugin extends Plugin {
 
         this.addCommand({
             id: 'format-chat-log-current-note',
-            name: '修复当前笔记的排版（聊天记录 / 缩进 / 标签 / 公式）',
+            name: '修复当前笔记的排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）',
             editorCallback: (_editor: Editor, ctx: MarkdownView | MarkdownFileInfo) => {
                 if (!ctx.file) {
                     new Notice('⚠️ 无法获取当前文件，请确保您打开了一篇笔记！');
@@ -307,7 +308,7 @@ export default class ImageTransferPlugin extends Plugin {
 
         this.addCommand({
             id: 'format-chat-log-entire-vault',
-            name: '修复整个仓库的排版（聊天记录 / 缩进 / 标签 / 公式）',
+            name: '修复整个仓库的排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）',
             callback: () => {
                 return this.runChatLog(this.app.vault.getMarkdownFiles(), '整个仓库');
             }
@@ -1025,6 +1026,8 @@ export default class ImageTransferPlugin extends Plugin {
             leadingIndent: resolveLeadingIndentMode(this.settings.textLeadingIndentFix),
             chat: this.getChatLogOptions(),
             mathLayout: this.settings.mathLayout,
+            // 空格排版（排版格式）：中文 / 英文 / 数字 / 公式 / 标点之间的距离
+            spacing: getSpacingOptions(this.settings),
             // 标签排版默认关闭（会挪动正文），关闭时整步跳过
             tags: this.settings.tagLayout ? { sort: this.settings.tagSort } : null,
             blockSort: this.settings.blockSort,
@@ -1320,7 +1323,7 @@ export default class ImageTransferPlugin extends Plugin {
         this.addSubmenuEntry(parent, '文本排版', 'message-square', (menu) => {
             menu.addItem((item) => {
                 item
-                    .setTitle(`修复${where}的排版（聊天记录 / 缩进 / 标签 / 公式）`)
+                    .setTitle(`修复${where}的排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）`)
                     .setIcon('message-square')
                     .onClick(async () => {
                         await this.runChatLog(files, where);

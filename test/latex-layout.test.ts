@@ -90,6 +90,18 @@ const COMMAND_CASES: Array<[string, string, string]> = [
 		].join("\n"),
 	],
 	["\\left \\right 连定界符", String.raw`$$\left. \frac{a}{b}\right|_{x=x_e}$$`, String.raw`$$\left.\frac{a}{b}\right|_{x = x_e}$$`],
+	// 一元 / 二元的边界：这些位置"缺一个操作数"，加减号是修饰符号，必须贴紧
+	["环境开头的一元号（cases 第一个元素）", String.raw`$$\begin{cases}-1 & x<0\\ 1 & x\ge0\end{cases}$$`,
+		["$$" + String.raw`\begin{cases}-1 & x < 0 \\`, `${T}` + String.raw`1 & x \ge 0\end{cases}` + "$$"].join("\n")],
+	["环境开头的一元号（矩阵第一行）", String.raw`$$\begin{bmatrix}-1 \\ -2\end{bmatrix}$$`,
+		["$$" + String.raw`\begin{bmatrix}-1 \\`, `${T}` + String.raw`-2\end{bmatrix}` + "$$"].join("\n")],
+	["换行后的一元号仍然是一元", String.raw`$$\begin{aligned}a &= 1\\ -b &= 2\end{aligned}$$`,
+		["$$" + String.raw`\begin{aligned}a & = 1 \\`, `${T}` + String.raw`-b & = 2\end{aligned}` + "$$"].join("\n")],
+	["上标里的一元号贴紧（x^-1 而不是 x^- 1）", String.raw`$$x^-1$$`, String.raw`$$x^-1$$`],
+	["撇号后面是真减法，左右都留空格", String.raw`$$f'-g$$`, String.raw`$$f' - g$$`],
+	["间距命令不产生操作数：\\quad 后面的一元号", String.raw`$$\quad -x$$`, String.raw`$$\quad-x$$`],
+	["自带参数的关系符命令与参数贴紧", String.raw`$$a\pmod{n}$$`, String.raw`$$a \pmod{n}$$`],
+	["补充的关系符命令（\\Longrightarrow）", String.raw`$$A\Longrightarrow B$$`, String.raw`$$A \Longrightarrow B$$`],
 ];
 
 /** 规则 3：`$$` 与里面的内容之间没有空格 */

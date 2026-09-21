@@ -3,6 +3,8 @@ import ImageTransferPlugin from "./main";
 import type { ChatImageOrder, ChatIndent } from "./chat-log";
 import { DEFAULT_LEADING_INDENT_MODE, resolveLeadingIndentMode } from "./text-layout";
 import type { LeadingIndentMode } from "./text-layout";
+import { DEFAULT_SPACING_OPTIONS, resolveCjkDigitMode, resolveSpacingMode } from "./spacing";
+import type { SpacingOptions } from "./spacing";
 
 export interface ImageTransferSettings {
 	attachmentLocation: string;
@@ -39,9 +41,26 @@ export interface ImageTransferSettings {
 	tagSort: boolean;
 	/** 内容板块排版：按首字母对笔记各块内容排序 */
 	blockSort: boolean;
-	// ---- 公式排版 ----
+	// ---- 代码格式：公式排版 ----
 	/** 公式排版：整理 $$…$$ 里的 LaTeX 代码（空格、换行、缩进） */
 	mathLayout: boolean;
+	// ---- 排版格式：空格排版 ----
+	/** 中文 ↔ 英文之间空一个字宽 */
+	spacingCjkLatin: string;
+	/** 中文 ↔ 数字之间：不留空格 / 空一个字宽 / 保持原样 */
+	spacingCjkDigit: string;
+	/** 英文 ↔ 数字之间空一个字宽 */
+	spacingLatinDigit: string;
+	/** 行内公式 ↔ 文字之间空一个字宽 */
+	spacingMathText: string;
+	/** 全角标点两侧不留空格 */
+	spacingFullPunct: boolean;
+	/** 半角标点 `, . ! ? :` 前不留空格、后空一格 */
+	spacingHalfPunct: boolean;
+	/** 括号 `()` 内侧不留空格 */
+	spacingBracketInner: boolean;
+	/** 数字 ↔ 单位之间空一格 */
+	spacingDigitUnit: boolean;
 }
 
 export const DEFAULT_SETTINGS: ImageTransferSettings = {
@@ -66,7 +85,45 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	tagSort: true,
 	blockSort: false,
 	// 公式排版会重写 $$…$$ 里的代码，默认关闭
-	mathLayout: false
+	mathLayout: false,
+	// 空格排版：文字的规则默认生效；可能误伤专有名词的两条（英文↔数字、数字↔单位）默认关
+	spacingCjkLatin: DEFAULT_SPACING_OPTIONS.cjkLatin,
+	spacingCjkDigit: DEFAULT_SPACING_OPTIONS.cjkDigit,
+	spacingLatinDigit: DEFAULT_SPACING_OPTIONS.latinDigit,
+	spacingMathText: DEFAULT_SPACING_OPTIONS.mathText,
+	spacingFullPunct: DEFAULT_SPACING_OPTIONS.fullPunct,
+	spacingHalfPunct: DEFAULT_SPACING_OPTIONS.halfPunct,
+	spacingBracketInner: DEFAULT_SPACING_OPTIONS.bracketInner,
+	spacingDigitUnit: DEFAULT_SPACING_OPTIONS.digitUnit,
+}
+
+/**
+ * 把插件设置转换成空格排版选项。
+ * data.json 里可能存着旧版本没有的字段或手工改坏的值，统一在这里收敛。
+ */
+export function getSpacingOptions(settings: ImageTransferSettings): SpacingOptions {
+	return {
+		cjkLatin: resolveSpacingMode(settings.spacingCjkLatin, DEFAULT_SPACING_OPTIONS.cjkLatin),
+		cjkDigit: resolveCjkDigitMode(settings.spacingCjkDigit),
+		latinDigit: resolveSpacingMode(settings.spacingLatinDigit, DEFAULT_SPACING_OPTIONS.latinDigit),
+		mathText: resolveSpacingMode(settings.spacingMathText, DEFAULT_SPACING_OPTIONS.mathText),
+		fullPunct: settings.spacingFullPunct !== false,
+		halfPunct: settings.spacingHalfPunct !== false,
+		bracketInner: settings.spacingBracketInner !== false,
+		digitUnit: settings.spacingDigitUnit === true,
+	};
+}
+
+/**
+ * 设置面板里的小标题（分组用）。
+ *
+ * Obsidian 的 `Setting.setHeading()` 只有一级，而这里的层级是
+ * 「功能分区（代码格式 / 排版格式）→ 子分组（文字间距 / 标点与符号 …）」，
+ * 所以子分组自己造一个 h4，用 classes 控制样式（见 styles.css）。
+ */
+function addSubHeading(containerEl: HTMLElement, text: string) {
+	const wrapper = containerEl.createDiv({ cls: 'ait-settings-subheading' });
+	wrapper.createEl('h4', { text });
 }
 
 export class ImageTransferSettingTab extends PluginSettingTab {
@@ -89,6 +146,11 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 		const headerIsEmpty = !this.plugin.settings.chatShowUsername
 			&& !this.plugin.settings.chatShowDate
 			&& !this.plugin.settings.chatShowTime;
+
+		// ========================================================
+		// 图片导入
+		// ========================================================
+		new Setting(containerEl).setName('图片导入').setHeading();
 
 		new Setting(containerEl)
 			.setName('附件存储位置')
@@ -142,9 +204,9 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// --------------------------------------------------------
+		// ========================================================
 		// 图片大小
-		// --------------------------------------------------------
+		// ========================================================
 		new Setting(containerEl).setName('图片大小').setHeading();
 
 		new Setting(containerEl)
@@ -179,10 +241,175 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// --------------------------------------------------------
-		// 聊天记录排版
-		// --------------------------------------------------------
-		new Setting(containerEl).setName('聊天记录排版').setHeading();
+		// ========================================================
+		// 代码格式（源代码、公式代码怎么写）
+		// ========================================================
+		new Setting(containerEl).setName('代码格式').setHeading();
+
+		new Setting(containerEl)
+			.setName('公式排版')
+			.setDesc('整理数学公式：$$…$$ 区块与行内 $…$（行内只按空格规则整理、绝不换行）。原则是"代码里的空格 = 公式渲染出来的空格"：运算 / 逻辑 / 排版符号（= + - \\le \\to \\in、&、\\\\）左右各空一格；一元正负号与 \\partial \\delta \\sin 这类命令和参数之间贴紧（会吃掉命令名时写成 \\delta{x}）；逗号前不加、后加一个空格；多余的空格与换行删掉。只在 \\\\ 处换行，续行缩进 = 首行缩进 + 1 个 tab；$$ 与内容之间不留空格。间距命令与后面字母粘连（\\quadA 会被 LaTeX 当成未定义命令）会拆开：前面已有逗号等分隔就删掉多余的间距，否则写成 \\quad{A}。frontmatter、代码块、\\text{…} 里的文字都不动')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.mathLayout)
+				.onChange(async (value) => {
+					this.plugin.settings.mathLayout = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// ========================================================
+		// 排版格式（使用者实际看到的格式）
+		// ========================================================
+		new Setting(containerEl).setName('排版格式').setHeading();
+
+		// ---- 文字间距 ----
+		addSubHeading(containerEl, '文字间距');
+
+		new Setting(containerEl)
+			.setName('中文与英文之间')
+			.setDesc('中文和英文单词之间空一个字宽：`用anki卡片` → `用 anki 卡片`。行内代码、双链、链接、标签与英文等价，一并留空格（`见[[备注]]` → `见 [[备注]]`）；中英文与标点之间不留空格')
+			.addDropdown(dropdown => dropdown
+				.addOption('space', '空一个字宽 (推荐)')
+				.addOption('keep', '保持原样')
+				.setValue(resolveSpacingMode(this.plugin.settings.spacingCjkLatin, DEFAULT_SPACING_OPTIONS.cjkLatin))
+				.onChange(async (value) => {
+					this.plugin.settings.spacingCjkLatin = resolveSpacingMode(value, DEFAULT_SPACING_OPTIONS.cjkLatin);
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('中文与数字之间')
+			.setDesc('按「中文和数字之间都不空一个字宽」：已有空格一并删掉，`第 3 章` → `第3章`。注意这与常见的盘古之白规则相反，改选「空一个字宽」即可切换')
+			.addDropdown(dropdown => dropdown
+				.addOption('none', '不留空格 (按笔记规则，推荐)')
+				.addOption('space', '空一个字宽')
+				.addOption('keep', '保持原样')
+				.setValue(resolveCjkDigitMode(this.plugin.settings.spacingCjkDigit))
+				.onChange(async (value) => {
+					this.plugin.settings.spacingCjkDigit = resolveCjkDigitMode(value);
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('英文与数字之间')
+			.setDesc('笔记规则是"一般要空一个字宽"，但 `GPT4`、`3D`、`v1.2.2` 这类专有名词一拆就错，故默认保持原样（专有名词空格以原有形式为准）')
+			.addDropdown(dropdown => dropdown
+				.addOption('keep', '保持原样 (推荐)')
+				.addOption('space', '空一个字宽')
+				.setValue(resolveSpacingMode(this.plugin.settings.spacingLatinDigit, DEFAULT_SPACING_OPTIONS.latinDigit))
+				.onChange(async (value) => {
+					this.plugin.settings.spacingLatinDigit = resolveSpacingMode(value, DEFAULT_SPACING_OPTIONS.latinDigit);
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('公式与文字之间')
+			.setDesc('行内公式 $…$ 与前后文字之间空一个字宽：`设$x$为` → `设 $x$ 为`。只动 $ 外面 —— $ 内侧永远不空，那是 Obsidian 能否认出公式的前提；公式与标点之间不留空格')
+			.addDropdown(dropdown => dropdown
+				.addOption('space', '空一个字宽 (推荐)')
+				.addOption('keep', '保持原样')
+				.setValue(resolveSpacingMode(this.plugin.settings.spacingMathText, DEFAULT_SPACING_OPTIONS.mathText))
+				.onChange(async (value) => {
+					this.plugin.settings.spacingMathText = resolveSpacingMode(value, DEFAULT_SPACING_OPTIONS.mathText);
+					await this.plugin.saveSettings();
+				}));
+
+		// ---- 标点与符号 ----
+		addSubHeading(containerEl, '标点与符号');
+
+		new Setting(containerEl)
+			.setName('全角标点两侧不留空格')
+			.setDesc('中文标点（，。、；：！？…）与内容之间不留空格：`中文 ，内容` → `中文，内容`。引号 “”‘’ 两侧、书名号《》内侧例外 —— 那里可能是《新 吊带袜天使》这类故意留空的专有名词')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.spacingFullPunct)
+				.onChange(async (value) => {
+					this.plugin.settings.spacingFullPunct = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('半角标点前不留空格、后空一格')
+			.setDesc('英文符号 , . ! ? : 后面空一格、前面不留空格（`word,word` → `word, word`）。小数点与版本号（1.2.2）、时间（12:30）、省略号（...）不适用')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.spacingHalfPunct)
+				.onChange(async (value) => {
+					this.plugin.settings.spacingHalfPunct = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('括号内侧不留空格')
+			.setDesc('半角括号内侧不留空格：`( x )` → `(x)`；括号外侧不动，`word (x)` 保持原样')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.spacingBracketInner)
+				.onChange(async (value) => {
+					this.plugin.settings.spacingBracketInner = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('数字与单位之间空一格')
+			.setDesc('`100kg` → `100 kg`，单位须落在词表里（kg g m s min h L W V A N J Pa Hz px dpi ℃ …）；`%`、`3D`、`4K`、`5G` 这类不算单位，不会被拆开')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.spacingDigitUnit)
+				.onChange(async (value) => {
+					this.plugin.settings.spacingDigitUnit = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// ---- 标签与板块 ----
+		addSubHeading(containerEl, '标签与板块');
+
+		new Setting(containerEl)
+			.setName('标签排版')
+			.setDesc('把行内的 #标签 统一移到所在块的句尾，与正文之间空一格；整行只有标签时这一行自成一块，位置不动、也不会被并进相邻的正文行。一个段落算一块，一行列表项、一行标题各自算一块，表格按单元格算块（不会把标签挪到别的列）。frontmatter、代码块（围栏或缩进）、行内代码、%%注释%%、双链与链接里的 # 都不算标签')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.tagLayout)
+				.onChange(async (value) => {
+					this.plugin.settings.tagLayout = value;
+					await this.plugin.saveSettings();
+					// 重新渲染，刷新「标签排序」的可用状态
+					this.display();
+				}));
+
+		new Setting(containerEl)
+			.setName('标签排序')
+			.setDesc('同一处出现的多个标签按首字母排序（中文按拼音、数字按数值）；关闭后保持原有先后顺序')
+			.setDisabled(!this.plugin.settings.tagLayout)
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.tagSort)
+				.onChange(async (value) => {
+					this.plugin.settings.tagSort = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('内容板块排版')
+			.setDesc('按首字母对笔记各块内容排序（中文按拼音、数字按数值）。连续的列表项之间、连续的段落之间分别排序，列表与段落不会互相穿插；标题把排序范围切成一个个小节，表格、图片、分隔线、聊天记录保持原位。适合词条、清单类笔记，会重排正文')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.blockSort)
+				.onChange(async (value) => {
+					this.plugin.settings.blockSort = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// ---- 行首与标记 ----
+		addSubHeading(containerEl, '行首与标记');
+
+		new Setting(containerEl)
+			.setName('行首缩进修复')
+			.setDesc('把行首"用空格写的缩进"改回 tab：4 个空格算一个 tab，混在 tab 之间的零散空格删掉。正文、图片前多打的 1~3 个空格一并删掉；后面跟列表子项 / 标题等块级结构时保留缩进。顺带规范块级标记的空白：注释（引用）行前的零散空格删掉、">"与正文之间补一个空格（">引用" → "> 引用"）、列表符号与标题符号后的多个空格收成一个。frontmatter 与代码块内部不动')
+			.addDropdown(dropdown => dropdown
+				.addOption('smart', '智能：列表子项保留，其余行首空格删掉 (推荐)')
+				.addOption('strict', '严格：行首只留 tab，空格全删')
+				.addOption('off', '关闭')
+				.setValue(this.plugin.settings.textLeadingIndentFix)
+				.onChange(async (value) => {
+					this.plugin.settings.textLeadingIndentFix = resolveLeadingIndentMode(value);
+					await this.plugin.saveSettings();
+				}));
+
+		// ---- 聊天记录 ----
+		addSubHeading(containerEl, '聊天记录');
 
 		new Setting(containerEl)
 			.setName('显示用户名')
@@ -255,77 +482,6 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.chatBlankLineBetweenMessages)
 				.onChange(async (value) => {
 					this.plugin.settings.chatBlankLineBetweenMessages = value;
-					await this.plugin.saveSettings();
-				}));
-
-		// --------------------------------------------------------
-		// 通用排版修复（聊天记录以外的排版毛病）
-		// --------------------------------------------------------
-		new Setting(containerEl).setName('文本排版修复').setHeading();
-
-		new Setting(containerEl)
-			.setName('行首缩进修复')
-			.setDesc('把行首"用空格写的缩进"改回 tab：4 个空格算一个 tab，混在 tab 之间的零散空格删掉。正文、图片前多打的 1~3 个空格一并删掉；后面跟列表子项 / 标题等块级结构时保留缩进。顺带规范块级标记的空白：注释（引用）行前的零散空格删掉、">"与正文之间补一个空格（">引用" → "> 引用"）、列表符号与标题符号后的多个空格收成一个。frontmatter 与代码块内部不动')
-			.addDropdown(dropdown => dropdown
-				.addOption('smart', '智能：列表子项保留，其余行首空格删掉 (推荐)')
-				.addOption('strict', '严格：行首只留 tab，空格全删')
-				.addOption('off', '关闭')
-				.setValue(this.plugin.settings.textLeadingIndentFix)
-				.onChange(async (value) => {
-					this.plugin.settings.textLeadingIndentFix = resolveLeadingIndentMode(value);
-					await this.plugin.saveSettings();
-				}));
-
-		// --------------------------------------------------------
-		// 标签与板块排版
-		// --------------------------------------------------------
-		new Setting(containerEl).setName('标签与板块排版').setHeading();
-
-		new Setting(containerEl)
-			.setName('标签排版')
-			.setDesc('把行内的 #标签 统一移到所在块的句尾，与正文之间空一格；整行只有标签时这一行自成一块，位置不动、也不会被并进相邻的正文行。一个段落算一块，一行列表项、一行标题各自算一块，表格按单元格算块（不会把标签挪到别的列）。frontmatter、代码块（围栏或缩进）、行内代码、%%注释%%、双链与链接里的 # 都不算标签')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.tagLayout)
-				.onChange(async (value) => {
-					this.plugin.settings.tagLayout = value;
-					await this.plugin.saveSettings();
-					// 重新渲染，刷新「标签排序」的可用状态
-					this.display();
-				}));
-
-		new Setting(containerEl)
-			.setName('标签排序')
-			.setDesc('同一处出现的多个标签按首字母排序（中文按拼音、数字按数值）；关闭后保持原有先后顺序')
-			.setDisabled(!this.plugin.settings.tagLayout)
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.tagSort)
-				.onChange(async (value) => {
-					this.plugin.settings.tagSort = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName('内容板块排版')
-			.setDesc('按首字母对笔记各块内容排序（中文按拼音、数字按数值）。连续的列表项之间、连续的段落之间分别排序，列表与段落不会互相穿插；标题把排序范围切成一个个小节，表格、图片、分隔线、聊天记录保持原位。适合词条、清单类笔记，会重排正文')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.blockSort)
-				.onChange(async (value) => {
-					this.plugin.settings.blockSort = value;
-					await this.plugin.saveSettings();
-				}));
-
-		// --------------------------------------------------------
-		// 公式排版
-		// --------------------------------------------------------
-		new Setting(containerEl).setName('公式排版').setHeading();
-
-		new Setting(containerEl)
-			.setName('公式排版')
-			.setDesc('整理数学公式：$$…$$ 区块与行内 $…$（行内只按空格规则整理、绝不换行）。原则是"代码里的空格 = 公式渲染出来的空格"：运算 / 逻辑 / 排版符号（= + - \\le \\to \\in、&、\\\\）左右各空一格；一元正负号与 \\partial \\delta \\sin 这类命令和参数之间贴紧（会吃掉命令名时写成 \\delta{x}）；逗号前不加、后加一个空格；多余的空格与换行删掉。只在 \\\\ 处换行，续行缩进 = 首行缩进 + 1 个 tab；$$ 与内容之间不留空格。间距命令与后面字母粘连（\\quadA 会被 LaTeX 当成未定义命令）会拆开：前面已有逗号等分隔就删掉多余的间距，否则写成 \\quad{A}。frontmatter、代码块、\\text{…} 里的文字都不动')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.mathLayout)
-				.onChange(async (value) => {
-					this.plugin.settings.mathLayout = value;
 					await this.plugin.saveSettings();
 				}));
 	}

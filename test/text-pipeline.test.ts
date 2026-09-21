@@ -14,15 +14,17 @@ import { formatNoteText } from "../src/text-pipeline";
 import type { TextPipelineOptions } from "../src/text-pipeline";
 import { DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/chat-log";
 import type { ChatLogOptions } from "../src/chat-log";
+import { DEFAULT_SPACING_OPTIONS } from "../src/spacing";
 
 const T = "\t";
 const sp = (n: number): string => " ".repeat(n);
 
-/** 默认：只开行首缩进与标记排版（与插件默认设置一致） */
+/** 默认：行首缩进、标记排版与空格排版（都与插件默认设置一致） */
 const BASE: TextPipelineOptions = {
 	leadingIndent: "smart",
 	chat: DEFAULT_CHAT_LOG_OPTIONS,
 	mathLayout: false,
+	spacing: DEFAULT_SPACING_OPTIONS,
 	tags: null,
 	blockSort: false,
 };
@@ -103,6 +105,31 @@ function pipelineTests(): void {
 		"公式排版：打开后整理",
 		formatNoteText(formula, { ...BASE, mathLayout: true }),
 		["正文 $a_{n - 1} = b$ 与公式：$$x = 1 \\le y$$"].join("\n")
+	);
+
+	// 空格排版（排版格式）：与插件默认设置一致，文字规则全开
+	check("空格排版：中文与英文之间补空格", formatNoteText("用anki卡片记笔记", BASE), "用 anki 卡片记笔记");
+	check("空格排版：中文与数字之间不留空格", formatNoteText("第 3 章 的 内容", BASE), "第3章 的 内容");
+	check("空格排版：公式与文字之间补空格", formatNoteText("设$x$为未知数", BASE), "设 $x$ 为未知数");
+	check("空格排版：全角标点两侧不留空格", formatNoteText("中文 ，内容 。", BASE), "中文，内容。");
+	check(
+		"空格排版：全部规则关闭时不动",
+		formatNoteText(
+			"用anki卡片记笔记 ，设$x$为未知数",
+			{
+				...BASE,
+				spacing: {
+					...DEFAULT_SPACING_OPTIONS,
+					cjkLatin: "keep",
+					cjkDigit: "keep",
+					mathText: "keep",
+					fullPunct: false,
+					halfPunct: false,
+					bracketInner: false,
+				},
+			}
+		),
+		"用anki卡片记笔记 ，设$x$为未知数"
 	);
 }
 
