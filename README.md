@@ -225,6 +225,8 @@ Math symbols typed as plain text get wrapped in `$…$`, so they render as formu
 | `n维` / `n 阶` / `n 次` | `$n$ 维` / `$n$ 阶` / `$n$ 次` | measure words count as the Chinese anchor too |
 | `V(F)` / `a(b)` / `T(x)` | `$V(F)$` / `$a(b)$` / `$T(x)$` | a single letter plus a parenthesised argument |
 | `x = 0` / `x = Tz` / `Ax = λx` | `$x = 0$` / `$x = Tz$` / `$Ax = \lambda x$` | the **whole expression** is wrapped — never just the letters, which would leave `= 0` outside the formula |
+| `x - 1` / `n - 1` / `a + b` | `$x - 1$` / `$n - 1$` / `$a + b$` | a binary operator needs **one space on each side** to count as an expression |
+| `x=0` / `a+b+c` / `5/10mm` / `A-7` / `cd /d` / `x -1` | left alone | anything glued is never guessed at — it may be a designation, a hyphen, a shell command, or simply missing spaces. Prefix signs are modifiers and stay exempt, so `x = -1` is still wrapped |
 | `a, b ∈ F` | `$a, b \in F$` | commas, numbers and operators join the run |
 | `特征值 λ` | `特征值 $\lambda$` | Greek letters (and `∈ ≤ ≥ × → …`) become LaTeX commands; a space is inserted when the command would swallow the next letter (`\lambdax` is invalid) |
 | `$z$` written earlier, then `讨论 z 的模长` | `讨论 $z$ 的模长` | **variable table**: writing `z` as a formula declares "z is a variable", so every later plain `z` in the note is wrapped too — no context word needed |
@@ -241,7 +243,7 @@ Deliberately conservative — it rewrites prose, so "not sure" means "don't touc
 
 The variable table has a few limits: it only reads formulas already present in **the same note** (`$…$` and `$$…$$`, multi-line blocks included) and never spans notes; `$z$` inside code blocks, inline code or frontmatter does not count; letters are case-sensitive (writing `$z$` does not make `Z` follow); the Chinese-anchor rule still applies, so English prose such as `the value z is` is untouched; and `_`/`^` names (`Q_inv`, `z^2`, `z_1`) stay untouched. Wrapped formulas become "existing formulas", so running the layout twice gives the same result.
 
-Everything else is left alone: frontmatter, fenced/indented code, inline code, wikilinks, links, URLs, HTML tags, tags, comments, existing formulas (kept verbatim — they are only read into the variable table), the inside of `《…》` / `〈…〉` / `“…”` (so 《a子计划》 keeps its form), English prose, words of three letters or more (`Jordan`, `latex`, `Steinitz`), two-letter abbreviations with no expression around them (`AI`, `QQ`, `pg`, `tv`, `xx`), the two-letter function words (`is`, `to`), abbreviations (`e.g.`, `i.e.`), paths and extensions (`C:\data`, `main.ts`), model numbers (`A4`, `B5`), `_`/`^` naming conventions (`Q_inv`, `x^2`, `a_ij`), list labels (`(a)`, `(b)`), task checkboxes (`- [x]`) and letter-plus-proper-noun pairs (`C 语言`, `D 盘`, `A 股`). Turn the setting off to keep symbols as plain text.
+Everything else is left alone: frontmatter, fenced/indented code, inline code, wikilinks, links, URLs, HTML tags, tags, comments, existing formulas (kept verbatim — they are only read into the variable table), the inside of `《…》` / `〈…〉` / `“…”` (so 《a子计划》 keeps its form), English prose, words of three letters or more (`Jordan`, `latex`, `Steinitz`), two-letter abbreviations with no expression around them (`AI`, `QQ`, `pg`, `tv`, `xx`), the two-letter function words (`is`, `to`), abbreviations (`e.g.`, `i.e.`), paths and extensions (`C:\data`, `main.ts`), model numbers and designations (`A4`, `B5`, `A-7`, `F-22`), operators that are not spaced on both sides (`x=0`, `a+b+c`, `5/10mm`, `cd /d`), `_`/`^` naming conventions (`Q_inv`, `x^2`, `a_ij`), list labels (`(a)`, `(b)`), task checkboxes (`- [x]`) and letter-plus-proper-noun pairs (`C 语言`, `D 盘`, `A 股`). Turn the setting off to keep symbols as plain text.
 
 ### 10. List numbering and heading levels
 
@@ -370,7 +372,7 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 | Module | Responsibility |
 |--------|----------------|
 | `src/rule-registry.ts` | the rule registry: every layout/image rule tied to its spec item, settings switch, implementation and tests (see `docs/规则登记表.md`; regenerated with `node test/run-tests.mjs --update-rules-doc`) |
-| `src/text/pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → list numbering → heading levels → plain-text math → formulas → word spacing → tags → block sorting, and **iterates the whole pipeline to a fixed point** (at most 5 rounds, 1–3 in practice): a later step changes text an earlier step looked at — the space the number↔unit rule adds is what makes plain-text math recognise `5/10mm` as an expression, and normalizing `$w\approx 0$` to `$w \approx 0$` changes the key block sorting uses. Without the loop, "run it twice" would edit more lines than "run it once", so every save would rewrite the file |
+| `src/text/pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → list numbering → heading levels → plain-text math → formulas → word spacing → tags → block sorting, and **iterates the whole pipeline to a fixed point** (at most 5 rounds): a later step changes text an earlier step looked at — normalizing `$w\approx 0$` to `$w \approx 0$` changes the key block sorting uses. Without the loop, "run it twice" would edit more lines than "run it once", so every save would rewrite the file |
 | `src/text/list-numbering.ts` | list numbering: every list starts at 1 (lists that already start at 1 are never touched) |
 | `src/text/heading-levels.ts` | heading levels: a sub-heading sits exactly one level below its parent; when several headings change, all new levels are computed from the original ones in one pass |
 | `src/text/chat-log.ts` | chat log layout (username / date / time toggles, indent, image order, blank lines) |
@@ -412,6 +414,10 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 3. Reload Obsidian and enable **Note Tidy** (the old entry can be removed)
 
 ## Changelog
+
+### v1.3.5
+- Fixed: **plain-text math only accepts properly spaced expressions** — a binary operator needs **one space on each side** to count (math symbols 1: operators and relation signs take a space on both sides, unless the context is not mathematical, e.g. the shortcut `ctrl+c`): `x = 0`, `x - 1`, `a + b` are still wrapped, while `x=0`, `a+b+c`, `5/10mm`, `A-7`, `F-22`, `cd /d` and `x -1` are left alone — they may be a deliberate designation, a hyphen, a shell command, or simply missing spaces, and the layout does not guess. Prefix signs are modifiers (math symbols 3: no space around them), so `x = -1` and `f(-1)` are unaffected
+- Internal: the pipeline still iterates to a fixed point, kept as a cross-step safety net — the "spacing adds a gap, then plain-text math recognises the expression" chain no longer happens (`5/10mm` is not wrapped any more), and `test/text-pipeline.test.ts` covers convergence and idempotence for every switch combination
 
 ### v1.3.4
 - New: **list numbering** (typesetting, on by default) — every list starts at 1: a list whose first number is not 1 is renumbered from 1 upwards (`3. 4. 5.` → `1. 2. 3.`). A list that already starts at 1 is never touched, so a deliberate `1. 1. 1.` (letting Markdown count) or `1. 5. 9.` stays as written. Blank lines do not split a list (loose lists are one list), while paragraphs, code blocks and tables do; nested lists each start at 1; numbers get no leading zeros. See section 10

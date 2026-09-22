@@ -28,6 +28,11 @@
  *    - 至少有一个字母；每个字母只能是"单个字母"或"两个字母的连写"
  *      （`Ax` `Tz` 是变量乘积 ✓，`Jordan` `latex` `anki` 是单词 ✗，`is` `to` 这类虚词另有一张表 ✗）；
  *    - 字母与数字之间不能紧贴（`A4` `x2` 是型号 / 编号，不是变量）；
+ *    - 二元运算符**两侧都要留一格**（数学符号 1：「运算符号和状态符号前后都要加空格」）——
+ *      `x = 0`、`x - 1`、`a, b ∈ F` ✓；`x=0`、`a+b+c`、`5/10mm`、`A-7`、`cd /d`、`x -1` ✗。
+ *      紧贴的一律不认：那可能是作者故意写的编号（`A-7`）、连字符（`F-22`）、
+ *      命令（`cd /d`），也可能是他在正文里省空格 —— 排版不猜，只认写成规范形态的算式；
+ *      正负号这类**修饰符号**（数学符号 3：前后没有空格）本来就不对称，不在此列：`x = -1` ✓；
  *    - 不能紧贴 `_ ^ \ . / :` 这类连接符（`Q_inv` `x^2` `a_ij` `main.ts` `C:\` 交给公式排版与命名约定）；
  *    - **必须紧挨中文或中文标点**（英文句子里的 `the value x is` 因此不会中招）；
  *    - `C 语言` `D 盘` `A 股` 这类"字母 + 专有名词后缀"跳过；
@@ -317,6 +322,50 @@ function trimStretch(atoms: Atom[], from: number, to: number): [number, number] 
 	return depth === 0 ? [start, end] : null;
 }
 
+/** 从 index 朝一个方向找最近的"非空格"atom（判断运算符是不是前缀用） */
+function nearestContent(atoms: Atom[], index: number, step: number): Atom | undefined {
+	for (let i = index + step; i >= 0 && i < atoms.length; i += step) {
+		const atom = atoms[i];
+		if (atom === undefined) return undefined;
+		if (atom.kind !== 'space') return atom;
+	}
+	return undefined;
+}
+
+/**
+ * 前缀运算符（正负号）：左边没有内容，或左边是另一个运算符 / 开括号。
+ *
+ * 数学符号 3：「正负号等修饰符号前后没有空格」—— `x = -1` 里的负号属于数字本身
+ * （写成 `x = - 1` 反倒是错的），所以它不参与"运算符两侧要留一格"的判定，
+ * 与公式排版里的 isUnary 是同一个判断。
+ */
+function isPrefixOperator(atoms: Atom[], index: number): boolean {
+	const before = nearestContent(atoms, index, -1);
+	if (before === undefined || before.kind === 'op') return true;
+	return before.kind === 'punct' && (before.text === '(' || before.text === '[');
+}
+
+/**
+ * 这一段里有没有**紧贴的二元运算符**：运算符两侧没各留一格。
+ *
+ * 数学符号 1：「加减乘除等于等运算符号和大于小于等状态符号前后都要加空格
+ * （如果不是数学语境就不加，比如快捷键 `ctrl+c`）」—— 所以**留了空格才算数学语境**，
+ * 紧贴的一律不认：`x=0`、`a+b+c`、`5/10mm`、`A-7`、`cd /d`、`x -1` 都可能是作者故意写的
+ * 编号 / 连字符 / 命令 / 省略空格，排版不猜（只认写成规范形态的算式）。
+ */
+function hasTightOperator(atoms: Atom[], from: number, to: number): boolean {
+	for (let i = from; i < to; i++) {
+		const atom = atoms[i] as Atom;
+		if (atom.kind !== 'op') continue;
+		if (isPrefixOperator(atoms, i)) continue;
+		const left = atoms[i - 1];
+		const right = atoms[i + 1];
+		if (left === undefined || right === undefined) continue;
+		if (left.kind !== 'space' || right.kind !== 'space') return true;
+	}
+	return false;
+}
+
 /** 这一段像不像数学：有字母，字母不是单词，字母数字不粘连 */
 function isMathLike(atoms: Atom[], from: number, to: number): boolean {
 	let letters = 0;
@@ -347,6 +396,8 @@ function isMathLike(atoms: Atom[], from: number, to: number): boolean {
 	}
 
 	if (letters === 0) return false;
+	// `x=0` `a+b+c` `A-7` `cd /d`：运算符没按规范两侧各留一格 —— 不是规范形态的算式，不猜
+	if (hasTightOperator(atoms, from, to)) return false;
 	// 两个字母的连写必须出现在真正的算式里：`x = Tz` ✓，`AI 组装`、`xx 原则`、`pg 01` ✗
 	if (hasMultiLetter && !hasOperator) return false;
 	// 段首 / 段尾紧贴连接符：`Q_inv`、`main.ts`、`C:\`

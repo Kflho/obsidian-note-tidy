@@ -92,7 +92,9 @@ styles.css              # Plugin CSS (notice suppression, size dialog, settings 
 
 ### 排版流水线（text/pipeline.ts）
 
-固定顺序：**行首缩进 → 标记 → 聊天记录 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序**。顺序不是随便定的（每一步的依赖写在 `pipeline.ts` 头部注释里）——例如序号与标题级别必须排在聊天记录之后（正文缩进定下来才知道谁是子列表）、排在板块排序之前（排序拿标题当锚点、排完还要按列表重排编号）。整条链**迭代到不动点**（最多 5 轮）：后面的步骤会改前面的步骤看过的文本 —— 例如空格排版给 `5/10mm` 补的那一格，正是智能公式认不认出算式的前提。
+固定顺序：**行首缩进 → 标记 → 聊天记录 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序**。顺序不是随便定的（每一步的依赖写在 `pipeline.ts` 头部注释里）——例如序号与标题级别必须排在聊天记录之后（正文缩进定下来才知道谁是子列表）、排在板块排序之前（排序拿标题当锚点、排完还要按列表重排编号）。整条链**迭代到不动点**（最多 5 轮）：后面的步骤会改前面的步骤看过的文本 —— 例如公式排版把 `$w\approx 0$` 规范成 `$w \approx 0$`，板块排序的键随之改变。
+
+智能公式只认"写成规范形态"的算式：**二元运算符两侧各留一格**（数学符号 1）才算，紧贴的一律不认 —— `x=0`、`a+b+c`、`5/10mm`、`A-7`、`cd /d`、`x -1` 都不动（那可能是作者故意写的编号 / 连字符 / 命令，也可能只是省了空格）；正负号是修饰符号（数学符号 3），`x = -1`、`f(-1)` 照旧包。
 
 每一步都是纯函数且严格幂等，整篇没有真正变化时不写盘。改任何一步之前先看 `src/rule-registry.ts` 与 `docs/规则登记表.md`：那条规则对应规范里的哪一条、归谁实现、哪个测试在守。
 
@@ -149,7 +151,7 @@ Uses Node.js `fs/promises` and `path` for filesystem access. `isDesktopOnly: tru
 
 ## Git workflow
 
-- Branch naming: version-based (e.g., `1.0.5`)
+- Branch naming: 纯版本号，不带后缀（`1.3.5`，不要写 `1.3.5更新`）；tag 同样只用版本号，不带 `v`
 - CI (`.github/workflows/lint.yml`): runs on push/PR, tests Node 20.x and 22.x — `npm ci` → `npm run build` → `npm test` → `npm run lint`
 - Lint pins `eslint-plugin-obsidianmd` to the version the community-plugin review uses — keep it current, or the review will report findings the local lint misses
 - `version-bump.mjs` reads `npm_package_version`, writes `manifest.json` and `versions.json`
@@ -160,7 +162,7 @@ Uses Node.js `fs/promises` and `path` for filesystem access. `isDesktopOnly: tru
 
 当用户**明确要求**提交分支到 GitHub 时（例如 "提交到github"、"push到github"、"推送到远程"等），才执行以下步骤。**严禁在用户未明确要求时自动提交或推送。**
 
-1. **从分支名提取版本号**：当前分支名通常包含版本号，如 `1.1.1` 或 `1.1.1更新`。从分支名中提取语义版本号（如 `1.1.1`）。
+1. **从分支名提取版本号**：分支名就是纯语义版本号，如 `1.3.5`（`1.3.4更新` 这类后缀是旧习惯，不再沿用）。
 
 2. **更新所有版本号文件**，将提取的版本号同步到以下三个文件：
    - `manifest.json` → 更新 `"version"` 字段

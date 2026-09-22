@@ -117,10 +117,10 @@ function pipelineTests(): void {
 		formatNoteText(["设 $z$ 为复数。", "", "讨论 z 的模长与 Z 的模长"].join("\n"), BASE),
 		["设 $z$ 为复数。", "", "讨论 $z$ 的模长与 Z 的模长"].join("\n")
 	);
-	// 变量表 → 新包出来的公式 → 公式排版，一条链走完
+	// 新包出来的公式 → 公式排版，一条链走完（运算符两侧各留一格才算算式，见 text-math.test.ts）
 	check(
 		"智能公式：包出来的公式接着被公式排版整理",
-		formatNoteText(["$z$ 为参数", "取 z=0 时成立"].join("\n"), { ...BASE, mathLayout: true }),
+		formatNoteText(["$z$ 为参数", "取 z = 0 时成立"].join("\n"), { ...BASE, mathLayout: true }),
 		["$z$ 为参数", "取 $z = 0$ 时成立"].join("\n")
 	);
 
@@ -129,16 +129,24 @@ function pipelineTests(): void {
 	check("空格排版：中文与数字之间不留空格", formatNoteText("第 3 章 的 内容", BASE), "第3章 的 内容");
 	check("空格排版：公式与文字之间补空格", formatNoteText("设$x$为未知数", BASE), "设 $x$ 为未知数");
 	check("空格排版：全角标点两侧不留空格", formatNoteText("中文 ，内容 。", BASE), "中文，内容。");
-	// 跨步骤收敛：`数字 ↔ 单位` 补出的那一格，智能公式在**同一次**排版里就认出来
+	// 跨步骤：`数字 ↔ 单位` 补出的那一格照旧要补（`5/10mm` → `5/10 mm`）；
+	// 智能公式现在要求运算符两侧各留一格，所以这里的 `/` 紧贴 → 不再包成公式。
 	check(
-		"跨步骤：单位空格 → 公式（一次到位）",
+		"跨步骤：单位空格",
 		formatNoteText("- [ ] 目标：把 5/10mm 偏移纳入训练", {
 			...BASE,
 			mathLayout: true,
 			spacing: { ...DEFAULT_SPACING_OPTIONS, digitUnit: true },
 		}),
-		"- [ ] 目标：把 $5/10mm$ 偏移纳入训练"
+		"- [ ] 目标：把 5/10 mm 偏移纳入训练"
 	);
+	// 用户报的坑：`cd /d 路径` 被当成算式（`cd` 两字母 + 有运算符），
+	// 智能公式包成 `$cd /d$` 之后，公式排版再把 `/` 两侧的空格收掉，就成了 `$cd/d$`
+	check("命令 / 选项写法不进公式", formatNoteText("同时切换盘和目录：cd /d 路径", ALL), "同时切换盘和目录：cd /d 路径");
+	// 用户报的坑：`x=0`、`a+b+c` 也可能是作者故意写的（编号 / 代号），只有写成规范形态的才算算式
+	check("紧贴的算式不进公式", formatNoteText("取 x=0 的值，以及流水线 A+B+C 的模块", ALL), "取 x=0的值，以及流水线 A+B+C 的模块");
+	check("算式照旧（运算符两侧都留一格）", formatNoteText("取 x - 1 的值", ALL), "取 $x - 1$ 的值");
+	check("前缀正负号照旧（修饰符号不留空格）", formatNoteText("若 x = -1 则负定", ALL), "若 $x = -1$ 则负定");
 	check(
 		"空格排版：全部规则关闭时不动",
 		formatNoteText(

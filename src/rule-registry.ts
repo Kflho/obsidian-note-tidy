@@ -600,10 +600,10 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: ['textMathWrapSymbols'],
 				impl: {
 					file: 'src/text/math-wrap.ts',
-					symbols: ['wrapPlainMath', 'mathStretches', 'isMathLike', 'isMathContext', 'renderStretch'],
+					symbols: ['wrapPlainMath', 'mathStretches', 'isMathLike', 'isMathContext', 'hasTightOperator', 'isPrefixOperator', 'renderStretch'],
 				},
-				tests: ['test/text-math.test.ts'],
-				note: '规范只写了"用 latex 语法打"；判定规则（数学语境词、量词、变量表、专有名词与缩写排除）是实现补充，见模块头注释',
+				tests: ['test/text-math.test.ts', 'test/text-pipeline.test.ts'],
+				note: '规范只写了"用 latex 语法打"；判定规则（数学语境词、量词、变量表、专有名词与缩写排除、运算符必须留空格）是实现补充，见模块头注释。运算符一条按数学符号 1「运算符号和状态符号前后都要加空格（如果不是数学语境就不加，比如快捷键 ctrl+c）」：**只认写成规范形态的算式** —— 二元运算符两侧各留一格才包（`x = 0`、`x - 1`、`a + b`），紧贴的一律不认（`x=0`、`a+b+c`、`5/10mm`、`A-7`、`F-22`、`cd /d`、`x -1`），因为那可能是作者故意写的编号 / 连字符 / 命令，或他就是在正文里省了空格 —— 排版不猜。正负号是修饰符号（数学符号 3：前后没有空格），`x = -1`、`f(-1)` 不在此列（与公式排版的 math.unary 同一个判断）',
 			},
 			{
 				id: 'math.space-equals-render',
