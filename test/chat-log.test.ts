@@ -51,6 +51,10 @@ const CASES: Array<[string, string]> = [
 	["连续空行", "张三 2024/1/5 14:30:25\n\n\n你好\n\n\n笔记"],
 	["空行加不可解析姓名", "张三 2024/1/5 14:30:25\n\n[图片] 2024/1/5 14:30:25"],
 	["方括号姓名", "[图片] 2024/1/5 14:30:25\n你好\n[图片] 2024/1/5 14:31:00\n在的"],
+	// QQ 直接粘贴的常见形态：整段消息写在同一行，消息之间只有一个空格
+	["同行消息_空格分隔", "张三: 2024/1/5 14:30:25 你好 李四: 2024/1/5 14:31:02 在的"],
+	["同行消息_含图", `张三: 2024/1/5 14:30:25 ${IMG} 李四: 2024/1/5 14:31:02 你好`],
+	["同行消息_前一条紧贴", "张三: 2024/1/5 14:30:25你好  李四: 2024/1/5 14:31:02在的"],
 ];
 
 // -------------------------------------------------------------- 确定性 fuzz
@@ -75,12 +79,15 @@ function fuzzCase(): string {
 	for (let b = 0; b < blocks; b++) {
 		s += pick(NOISE) + "\n";
 		const msgs = 1 + Math.floor(rnd() * 3);
+		// 四分之一的块按 QQ 直接粘贴的形态生成：整段消息写在同一行、消息之间只有一个空格
+		const oneLine = rnd() < 0.25;
 		for (let i = 0; i < msgs; i++) {
-			s += pick(NAMES) + (rnd() < 0.5 ? " " : ": ") + pick(STAMPS) + "\n";
+			s += (i > 0 && oneLine ? " " : "") + pick(NAMES) + (rnd() < 0.5 ? " " : ": ") + pick(STAMPS);
 			const lines = 1 + Math.floor(rnd() * 2);
 			for (let j = 0; j < lines; j++) {
-				s += pick(BODIES) + "\n";
+				s += (j === 0 && oneLine ? " " : "\n") + pick(BODIES);
 			}
+			if (!oneLine) s += "\n";
 		}
 		s += pick(["", "", "\n"]);
 	}
@@ -211,6 +218,44 @@ function goldenTests(): void {
 		formatChatLog("张三 2024/1/5 14:30:25\n你好\n\n \t李四 2024/1/5 14:31:02\n在的", D),
 		"张三: 2024/01/05 14:30:25\n\t你好\n\n李四: 2024/01/05 14:31:02\n\t在的\n"
 	);
+
+	// 同一行的多条消息（消息之间只有一个空格）—— 历史 bug：那截空格已被上一条正文 trim 掉，
+	// 而 `substring(start, end)` 在 start > end 时会**交换参数**（slice 才是返回空串），
+	// 于是每条消息前都漏出一个"只剩空格"的行，再经空格排版变成真正的空行 ——
+	// 用户看到的就是"选了不插空行却仍然有空行"。
+	const SAME_LINE = "张三: 2024/1/5 14:30:25 你好 李四: 2024/1/5 14:31:02 在的";
+	check(
+		"同行消息_默认设置不留空白行",
+		formatChatLog(SAME_LINE, D),
+		"张三: 2024/01/05 14:30:25\n\t你好\n李四: 2024/01/05 14:31:02\n\t在的\n"
+	);
+	check("同行消息_头部全关不留空白行", formatChatLog(SAME_LINE, ALL_OFF), "\t你好\n\t在的\n");
+	check(
+		"同行消息_头部全关_插空行设置仍然生效",
+		formatChatLog(SAME_LINE, { ...ALL_OFF, blankLineBetweenMessages: true }),
+		"\t你好\n\n\t在的\n"
+	);
+	check(
+		"同行消息_含图",
+		formatChatLog(`张三: 2024/1/5 14:30:25 ${IMG} 李四: 2024/1/5 14:31:02 你好`, ALL_OFF),
+		`\t${IMG}\n\t你好\n`
+	);
+	check(
+		"同行消息_前一条紧贴_多空格",
+		formatChatLog("张三: 2024/1/5 14:30:25你好  李四: 2024/1/5 14:31:02在的", ALL_OFF),
+		"\t你好\n\t在的\n"
+	);
+
+	// 输出里的行要么有内容、要么是真空行：不该出现"只有空格 / Tab 的行"（渲染出来同样是空行）
+	for (const [name, input] of [
+		["同行消息", SAME_LINE],
+		["同行消息_含图", `张三: 2024/1/5 14:30:25 ${IMG} 李四: 2024/1/5 14:31:02 你好`],
+	] as Array<[string, string]>) {
+		for (const [label, options] of [["默认", D], ["头部全关", ALL_OFF]] as Array<[string, ChatLogOptions]>) {
+			const out = formatChatLog(input, options);
+			checkTrue(`输出出现纯空白行 ${name} [${label}]`, !/^[ \t]+$/m.test(out), `  ${show(out)}`);
+		}
+	}
 }
 
 // ------------------------------------------------------------ 设置组合枚举

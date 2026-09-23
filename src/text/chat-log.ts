@@ -278,7 +278,14 @@ export function formatChatLog(
 		}
 
 		// 1. 提取当前聊天记录之前的文本（笔记、空行等）
-		let fragment = rawContent.substring(lastProcessedIndex, fragmentEnd);
+		//
+		// fragmentEnd 可能退到 lastProcessedIndex 之前：多条消息写在同一行、之间只隔一个
+		// 空格时（QQ 直接粘贴的常见形态），那截空格已被上一条的正文 trim 掉，
+		// 而 skipIndentBefore 会退到它前面。`substring` 在 start > end 时**会自动交换两个参数**
+		// （不像 slice 返回空串），于是这里会漏出一个"只剩空格"的行 —— 再经空格排版
+		// 变成真正的空行，也就是"选了不插空行却仍然有空行"的来源。
+		// 被退掉的那截已经被前面的正文消费过，退不回去就是空串。
+		let fragment = rawContent.substring(lastProcessedIndex, Math.max(lastProcessedIndex, fragmentEnd));
 
 		// 核心修复1：重叠换行抵消（防止多次运行导致换行符堆叠生长）
 		if (fragment.startsWith('\n') && result.endsWith('\n')) {
