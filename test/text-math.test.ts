@@ -190,6 +190,9 @@ function safetyTests(): void {
 	keepCheck("行内代码", "用 `A = 1` 与 `n 维` 表示");
 	keepCheck("双链与链接", "见 [[矩阵 A]] 与 [向量 b](https://a.com/x y)");
 	caseCheck("URL 本身与周围单字母都不动", "参考 https://a.com/A=1 与 b 的关系", "参考 https://a.com/A=1 与 b 的关系");
+	// 没有 `//` 的 scheme（磁力链接）与裸域名、文件名整段当保护区
+	keepCheck("磁力链接", "下载 magnet:?xt=urn:btih:7947d6cdb83a537fc29e9032d2cd2660eacbea25&dn=Queen&xl=3353074364 备用");
+	keepCheck("裸域名与文件名", "见 www.bilibili.com/video/BV1xx 与 main.ts 与 file.txt");
 	keepCheck("标签", "#矩阵A 与 #线性代数 内容");
 	keepCheck("%%注释%%", "%%矩阵 A 与 x = 0%%");
 	caseCheck("HTML 标签属性不动，正文照常", '<div class="A" data-x="1">矩阵 A</div>', '<div class="A" data-x="1">矩阵 $A$</div>');

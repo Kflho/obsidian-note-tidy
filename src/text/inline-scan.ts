@@ -2,7 +2,8 @@
  * 行内扫描的共用判定（纯函数，不依赖 Obsidian API）。
  *
  * 「空格排版」与「智能公式」都要在同一行文字里找出"不能碰的地方"：
- * 行内代码、双链与图片、markdown 链接、URL、HTML 标签、`%%注释%%`、`#标签`，
+ * 行内代码、双链与图片、markdown 链接、链接与地址（URL / 邮箱 / 裸域名 / 主机端口）、
+ * HTML 标签与实体、`%%注释%%`、`#标签`，
  * 以及已经写好的行内公式 `$…$`。各写一份必然各有各的边界 bug，
  * 所以统一放这里，两个模块共用同一套实现。
  */
@@ -18,6 +19,87 @@ export function isSpaceChar(char: string): boolean {
 	return char === ' ' || char === '\t' || char === '\u00a0';
 }
 
+// ------------------------------------------------------------- 链接与地址
+
+/**
+ * 为什么链接要单独成组保护 —— 一次真实事故：
+ *
+ * 磁力链接 `magnet:?xt=urn:btih:…&dn=…&xl=…` 里没有 `//`，
+ * 而原来的裸 URL 规则只认 `http(s)://` `file://` `obsidian://` 三种写法，
+ * 于是整条链接被当成正文排版：`:` 后补一格（`magnet:? xt=urn: btih:`）、
+ * `&` 两边各补一格、百分号里的 `10bit` 被"数字 ↔ 单位"拆成 `10 bit` ——
+ * 复制出来就是一条废链接。同一条毛病的还有：
+ *
+ * - `ed2k://|file|…|`：scheme 不在白名单里，`abc.mkv` 被拆成 `abc. mkv`；
+ * - `data:image/png;base64,…`、`mailto:a@b.com`、`tel:+86…`：没有 `//`；
+ * - 裸域名 `www.example.com/x?y=1` → `www. example. com/x? y=1`；
+ * - `localhost:8080` → `localhost: 8080`；`main.ts` → `main. ts`；
+ * - UNC 路径 `\\server\share\file.txt` 里的文件名同样被拆；
+ * - HTML 实体 `&nbsp;` → `&nbsp；`（分号被"半角标点换全角"吃掉）。
+ *
+ * 保护方式与其它区间一致：整段当一个"英文单词"，**里面一个字符都不动**，
+ * 只按"中文 ↔ 英文"规则决定它与左右邻居之间那一格。
+ */
+
+/**
+ * 链接的"尾巴"：URL 里能出现的字符，遇到这些就停 ——
+ * 空白、尖括号、圆括号与方括号、中日韩标点、全角括号与引号。
+ *
+ * 中日韩**文字**照收：`https://a.com/中文English?x=1.2.2` 是作者写的地址，整体保住
+ * （test/spacing.test.ts 钉着这一条）；中日韩**标点**一律不收 ——
+ * `见 https://a.com/b，然后` 里那个逗号是正文的，吃进来会把后半句一起冻住。
+ */
+const URI_TAIL_CHAR = String.raw`[^\s<>()\[\]（）【】〖〗《》〈〉「」『』〔〕“”‘’′″、。，；：！？…‥—～·]`;
+const URI_TAIL = `${URI_TAIL_CHAR}+`;
+
+/** `scheme://…`：`//` 是硬标志，任何 scheme 都认（http / file / obsidian / smb / ed2k / ws…） */
+const SLASH_SCHEME_RE = new RegExp(String.raw`[A-Za-z][A-Za-z0-9+.\-]*://${URI_TAIL}`, 'g');
+
+/**
+ * 不带 `//` 的 `scheme:…`：`magnet:`、`data:`、`mailto:`、`tel:`、`bitcoin:`…
+ *
+ * 这种写法跟"某个英文词 + 冒号"长得一模一样（`Note:this`），所以要求冒号后面
+ * **紧贴着的那一段里得有 URI 记号**（`?` `=` `&` `%` `#` `@` `/` `+` `;`）才认：
+ * `magnet:?xt=…`（`?`）、`data:text/plain;base64,…`（`/`）、`mailto:a@b.com`（`@`）、
+ * `tel:+86…`（`+`）都算；`Note:this`、`word:word` 不算。
+ */
+const OPAQUE_SCHEME_RE = new RegExp(
+	String.raw`[A-Za-z][A-Za-z0-9+.\-]*:(?=${URI_TAIL_CHAR}*[?=&%#@/+;])${URI_TAIL}`,
+	'g'
+);
+
+/** 邮箱：`someone@example.com`（本地部分允许 `._%+-`，域名部分与 HOST_RE 同一套写法） */
+const EMAIL_RE =
+	/[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}/g;
+
+/**
+ * 裸域名 / 主机名，连带后面的路径、查询串与端口：
+ * `www.bilibili.com/video/BV1xx?p=1`、`example.com:8080/admin`。
+ *
+ * 三条限制都是为了让"英文句子里的句号"不被当成域名：
+ * 域名一律**小写**（`Hello.World!Yes` 该排成 `Hello. World! Yes`，`main.ts`、
+ * `data.json` 这类文件名却是全小写的）、顶层域名要**两个字母以上**且**只由字母组成**。
+ * 于是 `e.g.` `i.e.` `U.S.`、版本号 `v1.2.2`、小数点 `3.14`、IP `192.168.1.1`
+ * 都不会被卷进来。
+ */
+const HOST_RE = new RegExp(
+	String.raw`(?:[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?\.)+[a-z]{2,}(?::[0-9]{1,5})?(?:/${URI_TAIL})?`,
+	'g'
+);
+
+/** `主机:端口`（名字里没有点的那种）：`localhost:8080`、`localhost:8080/admin` */
+const HOST_PORT_RE = new RegExp(
+	String.raw`[A-Za-z][A-Za-z0-9\-]*:[0-9]{1,5}(?![0-9])(?:/${URI_TAIL})?`,
+	'g'
+);
+
+/**
+ * HTML 实体：`&amp;` `&nbsp;` `&#39;` `&#x27;`。
+ * 不收的话 `&` 会被当成"和号"补空格、`;` 会被"半角标点换全角"改成 `；`，
+ * `&nbsp;` 就成了 `&nbsp；`。
+ */
+const HTML_ENTITY_RE = /&(?:[A-Za-z][A-Za-z0-9]{1,31}|#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6});/g;
+
 /**
  * 一行里"整体看待"的区间（左闭右开）：里面的字符不参与排版规则，
  * 只决定这个整体与左右邻居之间的距离。这也顺带挡住了里面的 `$`、`#`、`(`。
@@ -30,7 +112,12 @@ export function collectMaskedRanges(line: string): Array<[number, number]> {
 		[/!?\[\[[^\]\n]*\]\]/g, 0],                              // 双链与图片嵌入
 		[/!?\[[^\]\n]*\]\([^()\n]*\)/g, 0],                      // markdown 链接与图片
 		[/\[\^[^\]\n]*\]/g, 0],                                  // 脚注引用
-		[/(?:https?|file|obsidian):\/\/[^\s<>()[\]（）【】]+/g, 0], // 裸 URL
+		[SLASH_SCHEME_RE, 0],                                    // `scheme://…`
+		[OPAQUE_SCHEME_RE, 0],                                   // `scheme:…`（磁力 / data / mailto…）
+		[EMAIL_RE, 0],                                           // 邮箱
+		[HOST_RE, 0],                                            // 裸域名 / 主机名（含路径与端口）
+		[HOST_PORT_RE, 0],                                       // `主机:端口`
+		[HTML_ENTITY_RE, 0],                                     // HTML 实体
 		[/<[^<>\n]*>/g, 0],                                      // HTML 标签与自动链接
 		[/%%[^%\n]*%%/g, 0],                                     // %%注释%%
 		[/(?:^|[\s(（[【])#[^\s#，。、；：！？（）【】《》“”'"]+/g, 1], // #标签

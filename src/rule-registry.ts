@@ -696,17 +696,24 @@ export const RULE_SECTIONS: RuleSection[] = [
 					file: 'src/text/line-scan.ts',
 					symbols: ['markProtectedLines', 'markIndentedCodeLines', 'markTableLines', 'inlineCodeRanges'],
 				},
-				tests: ['test/spacing.test.ts', 'test/tags.test.ts', 'test/block-sort.test.ts'],
-				note: '规范里没写，但改坏代码块是排版类功能最大的风险',
+				tests: ['test/spacing.test.ts', 'test/tags.test.ts', 'test/block-sort.test.ts', 'test/latex-layout.test.ts'],
+				note: '规范里没写，但改坏代码块是排版类功能最大的风险。表格行是"对齐用空格"的家：空格排版与列表序号整行跳过；公式排版按**单元格**处理 —— 一对 `$` 跨过单元格分隔符 `|` 就不认（作者少打一个 `$` 时，配出来的"公式"会把填充空格压掉、整行对齐散掉），同一个单元格里的 `$…$` 照常排版',
 			},
 			{
 				id: 'cross.protect-inline',
-				name: '行内保护区：行内代码、双链与链接、URL、HTML、注释、标签',
+				name: '行内保护区：行内代码、双链与链接、链接与地址（URL / 邮箱 / 裸域名 / 主机端口）、HTML 标签与实体、注释、标签',
 				spec: null,
 				status: 'done',
 				switchKeys: [],
-				impl: { file: 'src/text/inline-scan.ts', symbols: ['collectMaskedRanges', 'isSpaceChar'] },
+				impl: {
+					file: 'src/text/inline-scan.ts',
+					symbols: [
+						'collectMaskedRanges', 'isSpaceChar',
+						'SLASH_SCHEME_RE', 'OPAQUE_SCHEME_RE', 'EMAIL_RE', 'HOST_RE', 'HOST_PORT_RE', 'HTML_ENTITY_RE',
+					],
+				},
 				tests: ['test/spacing.test.ts', 'test/text-math.test.ts'],
+				note: '链接与地址整段当一个"英文单词"，里面一个字符都不动。以前只认 `http(s)://` `file://` `obsidian://` 三种写法，于是**磁力链接**（`magnet:?xt=urn:btih:…`，没有 `//`）被当成正文排版：`magnet:? xt=urn: btih:`、`&` 两边各补一格、百分号里的 `10bit` 被"数字 ↔ 单位"拆成 `10 bit` —— 2026-09 全库实测报的 bug。同一条毛病一起收进来：`ed2k://|file|…`（scheme 不在白名单）、`data:` / `mailto:` / `tel:`（没有 `//`）、裸域名 `www.example.com/x?y=1`、`localhost:8080`、文件名 `main.ts`（旧版会排成 `main. ts`）、HTML 实体 `&nbsp;`（分号被换成 `；`）',
 			},
 			{
 				id: 'cross.math-recognition',

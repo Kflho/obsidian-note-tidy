@@ -262,6 +262,24 @@ function guardTests(): void {
 		["正文", String.raw`$$x=1`, "后面还有正文"].join("\n")
 	);
 
+	// 表格行：一对 `$` 不许跨单元格（表格里的空格是对齐用的）
+	const table = (row: string): string => ["| 名称 | 值 |", "| --- | --- |", row].join("\n");
+	check(
+		"表格单元格里的公式照常整理",
+		formatDisplayMath(table("| $k_{transient}$ | $a=1$ |")),
+		table("| $k_{transient}$ | $a = 1$ |")
+	);
+	check(
+		"表格里跨单元格的 $ 不配对（作者少打一个 $）",
+		formatDisplayMath(table("| 超时空要塞$f                | 3$   |")),
+		table("| 超时空要塞$f                | 3$   |")
+	);
+	check(
+		"公式自己的竖线不算单元格分隔符",
+		formatDisplayMath(table(String.raw`| $\max|\lambda(A_z)|=0.962$ | x |`)),
+		table(String.raw`| $\max|\lambda(A_z)| = 0.962$ | x |`)
+	);
+
 	// 文本参数里原样保留
 	check(
 		"\\text{} 里的文字与空格不动",

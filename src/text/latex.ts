@@ -21,10 +21,15 @@
  *    间距命令与后面的字母粘连（`\quadA`，LaTeX 会当成未定义命令报错）按这条修：
  *    前面已有逗号等分隔就删掉这个多余的间距，否则写成 `\quad{A}`。
  *
- * 不碰的地方：frontmatter、围栏代码块、行内代码里的 `$`；`\text{}` / `\operatorname{}` 这类文本参数内部原样保留；
+ * 不碰的地方：frontmatter、围栏代码块、行内代码里的 `$`、**跨单元格的"公式"**；`\text{}` / `\operatorname{}` 这类文本参数内部原样保留；
  * 含 `%` 注释的公式整体跳过；行内公式里出现 `\\` 时跳过（免得把正文行截断）。
+ *
+ * 表格行按**单元格**看（与标签排版同一个口径）：一个单元格里的 `$…$` 照常排版，
+ * 但一对 `$` 不许跨过 `|`。少了这条，作者把 `$f` 少打一个 `$` 时（`| 超时空要塞$f    | 3$ |`），
+ * 配出来的"公式"会把单元格之间的填充空格当作公式内容压掉，整行对齐就散了 ——
+ * 表格里的空格是对齐用的，空格排版与列表序号早就把表格当保护区处理。
  */
-import { markProtectedLines, inlineCodeRanges } from './line-scan';
+import { markProtectedLines, markTableLines, inlineCodeRanges } from './line-scan';
 import { dollarMarks, readInlineMath } from './inline-scan';
 
 /** token 的间隔类别：决定它与左右邻居之间留不留空格 */
@@ -512,7 +517,9 @@ function formatDisplayBlocks(content: string): string {
 
 	const lines = content.split('\n');
 	const protectedLines = markProtectedLines(lines);
-	const marks = dollarMarks(lines, protectedLines);
+	// 表格行不参与 `$$` 配对：表格里没有合法的显示公式，配对却可能横跨整张表（见文件头）
+	const tableLines = markTableLines(lines);
+	const marks = dollarMarks(lines, lines.map((_, index) => protectedLines[index] === true || tableLines[index] === true));
 	if (marks.length < 2) return content;
 
 	// 行首偏移，用来把 (行, 列) 换算成绝对位置
@@ -589,6 +596,7 @@ function formatInlineMath(content: string): string {
 
 	const lines = content.split('\n');
 	const protectedLines = markProtectedLines(lines);
+	const tableLines = markTableLines(lines);
 	/** 是否处在 `$$ … $$` 里（可能跨行）：里面不是行内公式 */
 	let inDisplay = false;
 	let changed = false;
@@ -596,6 +604,7 @@ function formatInlineMath(content: string): string {
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i] ?? '';
 		if (protectedLines[i] || !line.includes('$')) continue;
+		const tableRow = tableLines[i] === true;
 
 		const codeRanges = inlineCodeRanges(line);
 		const inCode = (at: number): boolean => codeRanges.some(([start, end]) => at < end && at + 1 > start);
@@ -639,6 +648,16 @@ function formatInlineMath(content: string): string {
 			}
 
 			const body = math.text.substring(1, math.text.length - 1);
+			// 表格行：一对 `$` 不许跨单元格。作者少打一个 `$`（`| 超时空要塞$f    | 3$ |`）时，
+			// 配出来的"公式"会把单元格之间的填充空格当成公式内容压掉，整行对齐就散了。
+			// 判据是**单元格分隔符**：前面带空白的 `|`（表格都写成 `| a | b |`）；
+			// 公式自己的竖线（`\max|\lambda(A_z)|`、`P(A|B)`）紧贴内容，不算分隔符。
+			// 整段跳过而不是只跳过这个 `$`：否则剩下的半边会跟后面的 `$` 重新配成 `$，$` 这种假公式。
+			if (tableRow && /\s\|/.test(math.text)) {
+				out += math.text;
+				index = math.next;
+				continue;
+			}
 			const segments = renderTokens(tokenize(body));
 			// 出现 `\\` 就会切成多行：行内公式不能截断正文，整段跳过
 			if (segments.length !== 1) {

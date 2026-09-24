@@ -203,6 +203,27 @@ function safetyTests(): void {
 	caseCheck("%%注释%%内部不动", "%%中文English,x%%", "%%中文English,x%%");
 	caseCheck("HTML 标签属性不动", '<div class="中文English,x">', '<div class="中文English,x">');
 
+	// 链接与地址：整段一个字符都不动（2026-09 全库实测报的 bug —— 磁力链接被当成正文排版）
+	caseCheck(
+		"磁力链接内部不动",
+		"下载：magnet:?xt=urn:btih:7947d6cdb83a537fc29e9032d2cd2660eacbea25&dn=%5BQueen%20Blade%5D&xl=3353074364",
+		"下载：magnet:?xt=urn:btih:7947d6cdb83a537fc29e9032d2cd2660eacbea25&dn=%5BQueen%20Blade%5D&xl=3353074364"
+	);
+	caseCheck(
+		"ed2k 与 data 与 mailto 内部不动",
+		"见 ed2k://|file|abc.mkv|123456|/ 与 data:text/plain;base64,SGVsbG8= 与 mailto:someone@example.com 三个",
+		"见 ed2k://|file|abc.mkv|123456|/ 与 data:text/plain;base64,SGVsbG8= 与 mailto:someone@example.com 三个"
+	);
+	caseCheck(
+		"裸域名与文件名内部不动",
+		"见 www.bilibili.com/video/BV1xx?p=1 与 main.ts 与 data.json",
+		"见 www.bilibili.com/video/BV1xx?p=1 与 main.ts 与 data.json"
+	);
+	caseCheck("邮箱与主机端口内部不动", "someone@example.com 与 localhost:8080 两个", "someone@example.com 与 localhost:8080 两个");
+	caseCheck("HTML 实体内部不动", "见 &amp; 与 &nbsp; 两个", "见 &amp; 与 &nbsp; 两个");
+	// 反过来：英文句子里的句号照旧排（域名规则只认小写 + 两个字母以上的顶层域名）
+	caseCheck("英文句号照旧", "Hello.World!Yes", "Hello. World! Yes");
+
 	// 列表标记与表格：结构字符不参与规则
 	caseCheck("列表标记不动", "- 项目一\n1. 项目二", "- 项目一\n1. 项目二");
 	caseCheck("表格分隔行不动", "| --- | --- |", "| --- | --- |");
