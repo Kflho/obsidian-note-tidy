@@ -12,6 +12,7 @@ import {
 	MENU_SCOPE_LABELS,
 	emptyHiddenItems,
 	isHiddenItem,
+	menuItemsForPanel,
 	parseHiddenItems,
 	serializeHiddenItems,
 	withHiddenItem,
@@ -96,6 +97,19 @@ checkEqual("原对象没被改", hidden.folder, []);
 const removed = withHiddenItem(added, "image", "另存为图片…", false);
 checkEqual("去掉一条", removed.image, []);
 checkEqual("去掉后别的还在", removed.folder, ["在系统中显示"]);
+checkEqual("带空白也算同一条（判重去空白）", withHiddenItem(parseHiddenItems("图片：复制"), "image", "  复制 ", false).image, []);
+checkEqual("写进名单的是去掉空白的标题", withHiddenItem(emptyHiddenItems(), "note", "  粘贴  ", true).note, ["粘贴"]);
+
+// 5. 面板要列出的项：检测到的 + 名单里那些这次没检测到的
+//    （2026-09 的 bug：隐藏项在菜单里被摘掉 → 下次检测不到 → 面板列不出来 → 永远打不开）
+checkEqual("隐藏项也列出来", menuItemsForPanel(["打开", "重命名", "删除"], ["删除", "在系统中显示"]),
+	["打开", "重命名", "删除", "在系统中显示"]);
+checkEqual("检测到的在前，只剩名单的按名单顺序接上", menuItemsForPanel(["复制", "粘贴"], ["新建笔记", "收藏"]),
+	["复制", "粘贴", "新建笔记", "收藏"]);
+checkEqual("两边都有不重复列", menuItemsForPanel(["删除"], ["删除"]), ["删除"]);
+checkEqual("都没检测到时就只列名单里的", menuItemsForPanel([], ["删除"]), ["删除"]);
+checkEqual("两样都没有 → 空", menuItemsForPanel([], []), []);
+checkEqual("空白标题两边都丢掉", menuItemsForPanel([" 复制 ", ""], [" ", "  删除 "]), ["复制", "删除"]);
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

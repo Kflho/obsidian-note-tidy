@@ -355,10 +355,10 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: [],
 				impl: {
 					file: 'src/ui/menu-injector.ts',
-					symbols: ['installMenuInjector', 'observeMenuInstance', 'moveOwnItemsFirst', 'removeHiddenItems', 'probeMenuItemTitle'],
+					symbols: ['installMenuInjector', 'observeMenuInstance', 'moveOwnItemsFirst', 'removeHiddenItems', 'seenMenuItemTitles', 'probeMenuItemTitle'],
 				},
 				tests: ['test/image-menu.test.ts'],
-				note: '**两层**：`installMenuInjector` 接 `Menu.prototype`（对"和插件同一个 Menu 类"的菜单有效 —— 图片菜单就是这条路），`observeMenuInstance` 接 Obsidian 通过 `editor-menu` / `file-menu` **交到我们手上的那个实例**（编辑器菜单、文件菜单不一定走插件的 Menu 类，光靠原型读不到它加了什么 —— 2026-09 笔记菜单一直空着就是这个原因）。两层都做四件事：记录菜单项、把我们自己的项插进去并**排到最前**（`moveOwnItemsFirst`：`addItem` 只能往后加，顺序只能在显示之后于 DOM 上重排）、按 `menuHiddenItems` 过滤、以及**显示后按标题把隐藏项摘掉**（`removeHiddenItems`）—— 最后这条是必需的：新增链接 / 新增外部链接 / 文本格式 / 段落设置这些项**在我们拿到菜单之前**就加好了，`addItem` 那一刻根本拦不住（2026-09 用户报"关不掉"）。原型那层：右键按下时"上膛" → 上膛期间**每份菜单各记一份清单** → `show*` 时**只认"真要显示的那份"**（不能认"第一份"：编辑器菜单的二级菜单 —— 正文 / 1~6 级标题 / 引用 / 任务列表 / 表格 / 脚注 / 标注 —— 可能比主菜单先建，2026-09 的 bug）；二级菜单是之后才弹的，所以作用域会"粘"30 秒（`STICKY_SCOPE_MS`），那一层也按同一份名单过滤。检测结果按用户看到的顺序给（DOM 顺序优先）。⚠️ 两层都失效时的表现很好认：右键看不到本插件的项、管理面板里也检测不到任何项',
+				note: '**两层**：`installMenuInjector` 接 `Menu.prototype`（对"和插件同一个 Menu 类"的菜单有效 —— 图片菜单就是这条路），`observeMenuInstance` 接 Obsidian 通过 `editor-menu` / `file-menu` **交到我们手上的那个实例**（编辑器菜单、文件菜单不一定走插件的 Menu 类，光靠原型读不到它加了什么 —— 2026-09 笔记菜单一直空着就是这个原因）。两层都做四件事：记录菜单项、把我们自己的项插进去并**排到最前**（`moveOwnItemsFirst`：`addItem` 只能往后加，顺序只能在显示之后于 DOM 上重排）、按 `menuHiddenItems` 过滤、以及**显示后按标题把隐藏项摘掉**（`removeHiddenItems`）—— 最后这条是必需的：新增链接 / 新增外部链接 / 文本格式 / 段落设置这些项**在我们拿到菜单之前**就加好了，`addItem` 那一刻根本拦不住（2026-09 用户报"关不掉"）。原型那层：右键按下时"上膛" → 上膛期间**每份菜单各记一份清单** → `show*` 时**只认"真要显示的那份"**（不能认"第一份"：编辑器菜单的二级菜单 —— 正文 / 1~6 级标题 / 引用 / 任务列表 / 表格 / 脚注 / 标注 —— 可能比主菜单先建，2026-09 的 bug）；二级菜单是之后才弹的，所以作用域会"粘"30 秒（`STICKY_SCOPE_MS`），那一层也按同一份名单过滤。检测结果按用户看到的顺序给（DOM 顺序优先），并且**被隐藏名单拦下 / 摘掉的项要补回检测结果**（`seenMenuItemTitles`：原型那层在 `addItem` 与摘项时各记一笔，实例那层补读 DOM 时并回来 —— 不补的话"关掉一项，它就从这个菜单的清单里消失"，管理面板上再也找不到那个开关，2026-09 用户报的文件夹菜单「删除」）。⚠️ 两层都失效时的表现很好认：右键看不到本插件的项、管理面板里也检测不到任何项',
 			},
 			{
 				id: 'image.menu-hidden',
@@ -368,10 +368,10 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: [],
 				impl: {
 					file: 'src/ui/menu-hidden.ts',
-					symbols: ['MENU_SCOPES', 'MENU_SCOPE_LABELS', 'parseHiddenItems', 'serializeHiddenItems', 'isHiddenItem', 'withHiddenItem'],
+					symbols: ['MENU_SCOPES', 'MENU_SCOPE_LABELS', 'parseHiddenItems', 'serializeHiddenItems', 'isHiddenItem', 'withHiddenItem', 'menuItemsForPanel'],
 				},
 				tests: ['test/menu-hidden.test.ts'],
-				note: '三个菜单各一份名单，存成一段文本（`menuHiddenItems`）：每行「作用域：标题」，作用域写 图片 / 笔记 / 文件夹（英文 key 也认）；**不写作用域的按图片算** —— 最早的版本只支持图片菜单、写的就是裸标题，这样老数据不用迁移。只按标题原文匹配，所以本插件自己那些带动态数字的项不进这份名单',
+				note: '三个菜单各一份名单，存成一段文本（`menuHiddenItems`）：每行「作用域：标题」，作用域写 图片 / 笔记 / 文件夹（英文 key 也认）；**不写作用域的按图片算** —— 最早的版本只支持图片菜单、写的就是裸标题，这样老数据不用迁移。只按标题原文匹配，所以本插件自己那些带动态数字的项不进这份名单。面板列的是 `menuItemsForPanel`（检测到的 + 名单里的）：**名单里那些这次检测不到的也必须列出来** —— 隐藏是靠"把项从菜单里摘掉"实现的，摘掉就检测不到，只列检测结果的话用户关掉一项就再也找不到那个开关（2026-09 的 bug）',
 			},
 			{
 				id: 'image.menu-manage',
@@ -380,8 +380,8 @@ export const RULE_SECTIONS: RuleSection[] = [
 				status: 'done',
 				switchKeys: [],
 				impl: { file: 'src/ui/menu-manage-modal.ts', symbols: ['MenuManageModal'] },
-				tests: [],
-				note: '清单来自"最近一次右键"（image-menu.ts 与 menu-injector 在上膛期间看到的项，含原生项与其它插件加的项），按 图片 / 笔记 / 文件夹 三节列出。**开关一律"开着 = 显示"**：早先做成"勾上 = 隐藏"，用户把"开启管理菜单"理解成勾上，就把自己的入口关掉了（2026-09 的 bug）。本插件自己的三项由各自的开关管、不进隐藏名单。面板只做"开关 + 写回设置"，菜单逻辑不在这里；入口是图片菜单里的"管理右键菜单…（Note Tidy）"与命令面板的同名命令（那条命令没有菜单入口，在 test/commands.test.ts 的 PANEL_COMMANDS 里登记）',
+				tests: ['test/menu-hidden.test.ts'],
+				note: '清单来自"最近一次右键"（image-menu.ts 与 menu-injector 在上膛期间看到的项，含原生项与其它插件加的项），按 图片 / 笔记 / 文件夹 三节列出 —— 并且**每节列的是"检测到的 + 隐藏名单里的"**（`menuItemsForPanel`）：关掉的项在菜单里已经被摘掉，只列检测结果的话它就消失了，用户再也打不开（2026-09 用户报"右键文件夹没有删除这个选项了，管理面板里也找不到"—— 名单其实一直存在设置里，是面板没把它列出来）。所以面板里关掉的项一直是关着开关列在那儿的，随时能再打开；底部另有「全部恢复显示」按钮（清空名单），用来收拾旧版本攒下的记录。**开关一律"开着 = 显示"**：早先做成"勾上 = 隐藏"，用户把"开启管理菜单"理解成勾上，就把自己的入口关掉了（2026-09 的 bug）。本插件自己的三项由各自的开关管、不进隐藏名单。面板只做"开关 + 写回设置"，菜单逻辑不在这里；入口是图片菜单里的"管理右键菜单…（Note Tidy）"与命令面板的同名命令（那条命令没有菜单入口，在 test/commands.test.ts 的 PANEL_COMMANDS 里登记）',
 			},
 		],
 	},

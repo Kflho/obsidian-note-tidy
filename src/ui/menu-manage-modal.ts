@@ -1,6 +1,6 @@
 import { Modal, Setting } from 'obsidian';
 import type { App } from 'obsidian';
-import { MENU_SCOPES, MENU_SCOPE_LABELS, withHiddenItem } from './menu-hidden';
+import { MENU_SCOPES, MENU_SCOPE_LABELS, emptyHiddenItems, menuItemsForPanel, withHiddenItem } from './menu-hidden';
 import type { HiddenItems, MenuScope } from './menu-hidden';
 import { OWN_ITEMS, OWN_ITEM_SCOPES } from './image-menu';
 import type { OwnItemKey } from './image-menu';
@@ -18,6 +18,11 @@ import type { OwnItemKey } from './image-menu';
  * 2. **本插件自己的项由各自的开关管，不进隐藏名单**（不然"管理右键菜单"会被自己藏掉）。
  *    同一个开关可能出现在两层里（比如「复制图片」图片菜单与笔记菜单都有）——
  *    所以改完会重画一遍，让两处的开关保持一致。
+ *
+ * 还有一条是 2026-09 补上的：**已经隐藏的项也必须一直列着**（见 `menuItemsForPanel`）。
+ * 隐藏是靠"把项从菜单里摘掉"实现的，摘掉之后就检测不到了 —— 面板要是只列检测结果，
+ * 用户关掉一项就再也找不到那个开关，等于永远打不开（用户报的就是这个：文件夹菜单的「删除」）。
+ * 所以每层列的是"检测到的 + 名单里的"，另外给一个"全部恢复显示"按钮，一次清空名单。
  *
  * 面板只做"开关 + 写回设置"，不碰菜单逻辑，所以能脱离 Obsidian 单测。
  */
@@ -39,6 +44,18 @@ const EMPTY_HINTS: Record<MenuScope, string> = {
 	note: '暂时没有可显示的项目。请先在笔记正文中右键一次，再打开本面板。',
 	folder: '暂时没有可显示的项目。请先在左侧文件列表中右键一次文件或文件夹，再打开本面板。',
 };
+
+/**
+ * 已隐藏那一行的说明。
+ *
+ * "这次还检测得到"与"检测不到"要分开讲：后者是名单里攒下的、当前菜单里见不到的记录
+ * （旧版本的名单、或者菜单项本身变了名字），用户看到一串陌生的名字时不至于以为坏了。
+ */
+function hiddenHint(detectedNow: boolean): string {
+	return detectedNow
+		? '已隐藏：打开开关即可恢复显示'
+		: '已隐藏：最近一次检测这个菜单时没有见到它（可能是旧版本留下的记录），打开开关即可恢复显示';
+}
 
 export class MenuManageModal extends Modal {
 	private hidden: HiddenItems;
@@ -70,11 +87,14 @@ export class MenuManageModal extends Modal {
 		contentEl.createEl('h2', { text: '右键菜单' });
 		contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: '按 图片 / 笔记 / 文件夹 三层分别列出最近一次打开该菜单时其中的项目，包括 Obsidian 自带的和其它插件添加的。打开开关即在菜单中显示该项，关闭即隐藏。',
+			text: '按 图片 / 笔记 / 文件夹 三层分别列出最近一次打开该菜单时其中的项目，包括 Obsidian 自带的和其它插件添加的。打开开关即在菜单中显示该项，关闭即隐藏；关掉的项会一直留在下面的清单里，随时可以再打开。',
 		});
 
 		for (const scope of MENU_SCOPES) {
-			contentEl.createEl('h3', { text: `${MENU_SCOPE_LABELS[scope]}菜单` });
+			const detected = this.config.detected[scope];
+			const hiddenCount = this.hidden[scope].length;
+			const heading = `${MENU_SCOPE_LABELS[scope]}菜单`;
+			contentEl.createEl('h3', { text: hiddenCount > 0 ? `${heading}（已隐藏 ${hiddenCount} 项）` : heading });
 
 			// 本插件在这一层加的项（开关是同一个，改完重画让两层保持一致）
 			const keys = (Object.keys(OWN_ITEM_SCOPES) as OwnItemKey[])
@@ -85,18 +105,39 @@ export class MenuManageModal extends Modal {
 				});
 			}
 
-			const detected = this.config.detected[scope];
-			if (detected.length === 0) {
+			// 检测到的 + 已经隐藏的：隐藏项在菜单里已经被摘掉，下次检测不到，只能靠名单列出来
+			const items = menuItemsForPanel(detected, this.hidden[scope]);
+			if (items.length === 0) {
 				contentEl.createEl('p', { cls: 'setting-item-description', text: EMPTY_HINTS[scope] });
 				continue;
 			}
-			contentEl.createEl('p', { cls: 'setting-item-description', text: '以下为该菜单中的其它项目：' });
-			for (const title of detected) {
-				this.addToggle(title, !this.isHidden(scope, title), '', (value) => {
+
+			const detectedTitles = new Set(detected.map(title => title.trim()));
+			contentEl.createEl('p', {
+				cls: 'setting-item-description',
+				text: detected.length === 0
+					? '最近一次没有检测到这个菜单（可能还没在它上面右键过）。下面是已经隐藏的项目：'
+					: '以下为该菜单中的其它项目，含已经关掉的（关掉的项也留在这里，随时能再打开）：',
+			});
+			for (const title of items) {
+				const hidden = this.isHidden(scope, title);
+				this.addToggle(title, !hidden, hidden ? hiddenHint(detectedTitles.has(title)) : '', (value) => {
 					this.setHidden(scope, title, !value);
 				});
 			}
 		}
+
+		// 名单是一段文本，攒久了会混进旧版本的记录；给一个一次清空的出口
+		contentEl.createEl('h3', { text: '恢复' });
+		new Setting(contentEl)
+			.setName('全部恢复显示')
+			.setDesc('清空隐藏名单：三个菜单里被关掉的项全部恢复显示。本插件自己的五项由上面的开关控制，不受影响。')
+			.addButton(button => button
+				.setButtonText('全部恢复显示')
+				.onClick(async () => {
+					this.hidden = emptyHiddenItems();
+					await this.persist();
+				}));
 
 		this.rendering = false;
 	}
@@ -116,7 +157,8 @@ export class MenuManageModal extends Modal {
 	}
 
 	private isHidden(scope: MenuScope, title: string): boolean {
-		return this.hidden[scope].includes(title);
+		const key = title.trim();
+		return this.hidden[scope].some(item => item.trim() === key);
 	}
 
 	private setHidden(scope: MenuScope, title: string, hide: boolean): void {

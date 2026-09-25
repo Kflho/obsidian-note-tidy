@@ -88,8 +88,39 @@ export function isHiddenItem(scope: MenuScope, title: string, hidden: HiddenItem
 	return hidden[scope].includes(key);
 }
 
-/** 改一条（面板用）：hide = true 加进名单，false 拿掉 */
+/**
+ * 改一条（面板用）：hide = true 加进名单，false 拿掉。
+ *
+ * 判重与写入都按去掉首尾空白后的标题（`isHiddenItem` 也是这么比的）——
+ * 免得名单里出现"同一个标题的两种写法"，面板上看着像两项。
+ */
 export function withHiddenItem(hidden: HiddenItems, scope: MenuScope, title: string, hide: boolean): HiddenItems {
-	const current = hidden[scope].filter(item => item !== title);
-	return { ...hidden, [scope]: hide ? [...current, title] : current };
+	const key = title.trim();
+	const current = hidden[scope].filter(item => item.trim() !== key);
+	return { ...hidden, [scope]: hide ? [...current, key] : current };
+}
+
+/**
+ * 管理面板在一层菜单里要列出的项：**检测到的（按用户看到的顺序）+ 名单里那些这次没检测到的**。
+ *
+ * 为什么必须并上后者（2026-09 用户报的 bug）：隐藏是在菜单里"摘掉"实现的 ——
+ * `addItem` 那一刻不加它，来不及拦的还要在显示之后从 DOM 里摘掉。所以下一次右键时
+ * **它已经不在菜单里了**，检测结果里当然也没有它；面板要是只列检测结果，用户关掉一项之后
+ * 就再也找不到那个开关，等于永远打不开（用户原话："关掉的选项就不显示了，也就是永远打不开了"）。
+ * 名单本身一直存在设置里，并回来就能随时恢复。
+ *
+ * 去重按去掉首尾空白后的标题比（菜单标题与名单标题都不带空白，这里只是兜底）。
+ */
+export function menuItemsForPanel(detected: string[], hidden: string[]): string[] {
+	const items = detected.map(title => title.trim()).filter(title => title !== '');
+	const seen = new Set(items);
+
+	for (const title of hidden) {
+		const text = title.trim();
+		if (text === '' || seen.has(text)) continue;
+		seen.add(text);
+		items.push(text);
+	}
+
+	return items;
 }
