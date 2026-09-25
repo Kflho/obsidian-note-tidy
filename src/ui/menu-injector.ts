@@ -163,6 +163,34 @@ export function moveOwnItemsFirst(menu: Menu, ownTitles: string[], doc: Document
 }
 
 /**
+ * 这一轮上膛里"每份菜单里出现过哪些标题"（原型那层记的，**含被隐藏名单拦下的**）。
+ *
+ * 记它干什么：实例那层（`publish`）补读 DOM 时，**被 `addItem` 当场拦下的项压根不在 DOM 里**
+ * （隐藏就是这么生效的），只读 DOM 就会漏掉它们；从 DOM 里摘掉的那些同理，摘之前也记一笔。
+ * 漏掉一项 = 管理面板上少一个开关 = 用户关掉的项再也打不开（2026-09 的 bug：文件夹菜单的「删除」，
+ * 用户原话"关掉的选项就不显示了，也就是永远打不开了"）。
+ *
+ * 每次新上膛换一张新表（与 `buffers` 同步清空），WeakMap 跟着菜单对象回收，不用清理。
+ */
+let seenTitles = new WeakMap<object, string[]>();
+
+/** 这份菜单这一轮里出现过哪些标题（DOM 里读不到的那些要靠它补回来） */
+export function seenMenuItemTitles(menu: Menu): string[] {
+	return [...(seenTitles.get(menu as object) ?? [])];
+}
+
+/** 记一条"这份菜单里出现过它"（我们自己的项不算，调用方已经滤过） */
+function rememberMenuTitle(menu: Menu, title: string): void {
+	const text = title.trim();
+	if (text === '') return;
+
+	const key = menu as object;
+	const list = seenTitles.get(key);
+	if (list === undefined) seenTitles.set(key, [text]);
+	else if (!list.includes(text)) list.push(text);
+}
+
+/**
  * 把隐藏名单里的项从**已显示**的菜单里摘掉。
  *
  * 在 `addItem` 那一刻过滤只对"我们接得到的那条路"有效；而菜里的项有的是**在我们拿到它之前**
@@ -185,6 +213,7 @@ export function removeHiddenItems(
 		const title = menuItemTitle(item);
 		if (title === '' || isOwnTitle(title) || ownTitles.includes(title)) continue;
 		if (!isHiddenItem(scope, title, hidden)) continue;
+		rememberMenuTitle(menu, title);
 		item.remove();
 	}
 }
@@ -251,8 +280,12 @@ export function observeMenuInstance(
 	}
 
 	const publish = (doc: Document | null): void => {
-		// 事件之前就加好的项枚举不到，从菜单 DOM 里补读；顺序按用户看到的来（DOM 顺序优先）
-		const fromDom = readMenuTitles(menu, doc).filter(title => !isOwnTitle(title));
+		// 事件之前就加好的项枚举不到，从菜单 DOM 里补读；顺序按用户看到的来（DOM 顺序优先）。
+		// 被隐藏名单拦下 / 摘掉的项 DOM 里没有，从"这一轮记下的标题"里补回来 ——
+		// 少了它们，面板上就再也找不到那个开关（见 seenMenuItemTitles）。
+		const fromDom = [...readMenuTitles(menu, doc), ...seenMenuItemTitles(menu)]
+			.filter(title => !isOwnTitle(title))
+			.filter((title, index, all) => all.indexOf(title) === index);
 		const merged = [...fromDom, ...collected.filter(title => !fromDom.includes(title))];
 		collected.splice(0, collected.length, ...merged);
 
@@ -362,6 +395,7 @@ export function installMenuInjector(menuClass: typeof Menu, options: MenuInjecto
 			currentArmed = armed;
 			armId++;
 			buffers = new Map();
+			seenTitles = new WeakMap();
 			lastMenu = null;
 			surfaced = false;
 			fallbackScheduled = false;
@@ -376,6 +410,8 @@ export function installMenuInjector(menuClass: typeof Menu, options: MenuInjecto
 
 		const title = probeMenuItemTitle(builder);
 		if (title !== null) {
+			// 记在菜单身上（含等一下会被名单拦下的那些）：实例那层补读 DOM 时要把它们并回来
+			rememberMenuTitle(menu, title);
 			const list = buffers.get(menu);
 			if (list) list.push(title);
 			else buffers.set(menu, [title]);

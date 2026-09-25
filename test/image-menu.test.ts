@@ -468,6 +468,72 @@ function scopeTableTests(): void {
 	checkEqual("五项都有登记（注入项配命令，二级栏是容器）", Object.keys(OWN_ITEM_COMMANDS).sort(), ["copy", "imageSubmenu", "manage", "quickSize", "textSubmenu"]);
 }
 
+// ------------------------------- 9. 两层都在时，隐藏项也要留在检测结果里
+/**
+ * 2026-09 用户报的 bug：在文件夹菜单里关掉「删除」之后，管理面板里也找不到它了 ——
+ * 关掉 = 在菜单里"摘掉"（`addItem` 那刻不加它，来不及拦的显示后再从 DOM 里摘），
+ * 于是下次检测它就不在结果里；检测结果少一项，面板上就少一个开关，用户再也打不开。
+ * 两条路都要守住：① 被 `addItem` 拦下（压根没进 DOM）；② 进了 DOM、显示后被摘掉。
+ */
+async function hiddenDetectionTests(): Promise<void> {
+	const settings: ImageTransferSettings = { ...DEFAULT_SETTINGS };
+	settings.menuHiddenItems = "文件夹：删除";
+
+	const detected: string[] = [];
+	const record = (items: string[]): void => { detected.splice(0, detected.length, ...items); };
+	const cleanups: Array<() => void> = [];
+	let armed: ArmedMenu = { scope: "folder" };
+
+	installMenuInjector(Menu as unknown as typeof Menu, {
+		getSettings: () => settings,
+		isArmed: () => armed,
+		onDetected: (scope, items) => { void scope; record(items); },
+		onCleanup: (cleanup) => { cleanups.push(cleanup); },
+	});
+
+	// ① Obsidian 自己的项在 file-menu 事件之前就加好了 —— 走原型那层，隐藏的项当场被拦下
+	const blocked = new Menu() as unknown as StubMenu;
+	for (const title of ["打开", "重命名", "删除", "在系统中显示"]) {
+		(blocked as unknown as Menu).addItem((item: MenuItem) => item.setTitle(title));
+	}
+	observeMenuInstance(blocked as unknown as Menu, {
+		scope: "folder",
+		getSettings: () => settings,
+		onDetected: (scope, items) => { void scope; record(items); },
+	});
+	(blocked as unknown as Menu).showAtMouseEvent({} as MouseEvent);
+	await Promise.resolve();
+
+	checkTrue("隐藏的项确实没加进菜单", !blocked.items.some(item => item.title === "删除"),
+		`实际 ${JSON.stringify(blocked.items.map(item => item.title))}`);
+	checkEqual("被 addItem 拦下的项照样算进检测结果（面板要能把它列出来）", detected,
+		["打开", "重命名", "删除", "在系统中显示"]);
+
+	// ② 只能从 DOM 里读的那些（事件之前就渲染好的）：显示后被摘掉，检测同样要留着
+	armed = { scope: "folder" }; // 新上膛
+	const menu = new Menu() as unknown as StubMenu & { dom?: HTMLElement };
+	const dom = fakeMenu(["打开", "重命名", "删除", "在系统中显示"]);
+	menu.dom = dom.root;
+
+	observeMenuInstance(menu as unknown as Menu, {
+		scope: "folder",
+		getSettings: () => settings,
+		onDetected: (scope, items) => { void scope; record(items); },
+	});
+
+	// 事件之后又加了一项（真实里是别的插件加的）：这条走原型那层，从而把"上膛"登记下来
+	(menu as unknown as Menu).addItem((item: MenuItem) => item.setTitle("全选"));
+
+	(menu as unknown as Menu).showAtMouseEvent({} as MouseEvent);
+	await Promise.resolve(); // 摘项在显示时做，DOM 补读在微任务里做
+
+	checkEqual("隐藏的项照样算进检测结果（面板要能把它列出来）", detected,
+		["打开", "重命名", "在系统中显示", "全选", "删除"]);
+	checkEqual("但它在菜单里确实被摘掉了", dom.titles(), ["打开", "重命名", "在系统中显示"]);
+
+	for (const cleanup of cleanups) cleanup();
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 取图规则 ===");
 refTests();
@@ -485,6 +551,8 @@ console.log("=== 本插件项置顶 ===");
 orderTests();
 console.log("=== 开关表一致性 ===");
 scopeTableTests();
+console.log("=== 隐藏项仍进检测结果 ===");
+await hiddenDetectionTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {
