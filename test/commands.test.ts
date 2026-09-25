@@ -13,6 +13,9 @@
 import { Menu, MenuItem, Notice, TFile } from "obsidian";
 import type { App, PluginManifest } from "obsidian";
 import ImageTransferPlugin from "../src/main";
+import { DEFAULT_SETTINGS } from "../src/settings/model";
+import { INJECTED_ITEM_KEYS, OWN_ITEM_COMMANDS, OWN_ITEM_SCOPES, ownMenuEntries } from "../src/ui/image-menu";
+import type { MenuScope } from "../src/ui/menu-hidden";
 
 // -------------------------------------------------------------------- 断言
 let checks = 0;
@@ -64,6 +67,8 @@ interface RecordedCommand {
 interface RecordedPlugin {
 	commands: RecordedCommand[];
 	settingTabs: unknown[];
+	statusBarItems: unknown[];
+	editorExtensions: unknown[];
 }
 
 type FileMenuHandler = (menu: StubMenu, file: TFile) => void;
@@ -105,7 +110,65 @@ const OPERATIONS: Array<{ menu: RegExp; commands: string[] }> = [
 		menu: /^修复.*的排版（空格 \/ 缩进 \/ 聊天记录 \/ 标签 \/ 公式）$/,
 		commands: ["format-chat-log-current-note", "format-chat-log-entire-vault"],
 	},
+	{
+		menu: /^快速设置.*图片的大小$/,
+		commands: ["quick-set-image-size-current-note"],
+	},
 ];
+
+/**
+ * 编辑器 / 图片右键菜单里的操作 → 命令 ID。
+ *
+ * 「复制图片」挂在编辑器菜单（编辑模式）与图片自己的菜单（阅读模式）上，
+ * 不在文件菜单里，所以单独一张表（触发方式也不同，见 collectEditorMenus）。
+ */
+const EDITOR_OPERATIONS: Array<{ menu: RegExp; commands: string[] }> = [
+	{
+		menu: /^复制.*图片（Note Tidy）$/,
+		commands: ["copy-images-to-clipboard"],
+	},
+	{
+		menu: /^快速设置图片大小（Note Tidy）$/,
+		commands: ["quick-set-image-size-current-note"],
+	},
+	{
+		// 三个菜单里都有这一项：编辑器菜单这条由本表看着，图片 / 文件夹菜单那条是插进去的
+		menu: /^管理右键菜单…（Note Tidy）$/,
+		commands: ["manage-image-menu"],
+	},
+];
+
+/**
+ * 没有右键菜单入口的命令（目前是空的：设置 / 命令面板里的面板类命令将来若有，
+ * 又没有菜单入口，就登记在这里 —— 免得漏掉一个"注册了却没人用"的命令）。
+ */
+const PANEL_COMMANDS: string[] = [];
+
+/**
+ * **注入**进图片 / 文件夹菜单的那些项 → 命令 ID。
+ *
+ * 它们不是走 `file-menu` / `editor-menu` 事件加的（上面两张表抓不到），
+ * 所以从实现里的 `imageMenuEntries` 直接生成：菜单里能看到的功能，命令面板里必须也找得到。
+ */
+const INJECTED_OPERATIONS: Array<{ scope: MenuScope; key: 'copy' | 'quickSize' | 'manage' }> = [
+	{ scope: "image", key: "copy" },
+	{ scope: "image", key: "quickSize" },
+	{ scope: "image", key: "manage" },
+	{ scope: "note", key: "copy" },
+	{ scope: "note", key: "quickSize" },
+	{ scope: "note", key: "manage" },
+	{ scope: "folder", key: "manage" },
+];
+
+/**
+ * 每个菜单里到底该出现哪几项 —— 与 OWN_ITEM_SCOPES 对着核。
+ * 少写一项 = 那一层拿不到这个功能；多写一项 = 那一层会多出一个设置里没有开关的项。
+ */
+const EXPECTED_OWN_ITEMS: Record<string, string[]> = {
+	image: ["copy", "quickSize", "manage"],
+	note: ["copy", "quickSize", "manage"],
+	folder: ["imageSubmenu", "manage", "textSubmenu"],
+};
 
 // ------------------------------------------------------------------ 辅助构造
 /** 记录笔记内容与"读就报错"的文件，用来跑真实的批处理路径 */
@@ -193,21 +256,26 @@ function collectMenus(handlers: Map<string, FileMenuHandler[]>): { titles: strin
 
 /** 菜单操作是否与 OPERATIONS 表双向对应 */
 function checkOperations(label: string, leaves: string[]): void {
+	checkAgainst(label, leaves, OPERATIONS);
+}
+
+/** 菜单里的标题与某张审计表是否双向对应 */
+function checkAgainst(label: string, leaves: string[], table: Array<{ menu: RegExp; commands: string[] }>): void {
 	const matched = new Set<number>();
 	for (const title of leaves) {
-		const hits = OPERATIONS.map((op, index) => (op.menu.test(title) ? index : -1)).filter(index => index >= 0);
+		const hits = table.map((op, index) => (op.menu.test(title) ? index : -1)).filter(index => index >= 0);
 		if (hits.length !== 1) {
 			checkTrue(
 				`${label}：菜单项已登记`,
 				false,
-				`菜单里有「${title}」，审计表 OPERATIONS 匹配到 ${hits.length} 条（应为 1 条）`
+				`菜单里有「${title}」，审计表匹配到 ${hits.length} 条（应为 1 条）`
 			);
 			continue;
 		}
 		matched.add(hits[0] as number);
 	}
-	for (let i = 0; i < OPERATIONS.length; i++) {
-		const op = OPERATIONS[i];
+	for (let i = 0; i < table.length; i++) {
+		const op = table[i];
 		if (!op) continue;
 		checkTrue(
 			`${label}：操作出现在菜单里`,
@@ -215,18 +283,46 @@ function checkOperations(label: string, leaves: string[]): void {
 			`审计表里的 ${op.menu} 在右键菜单里找不到`
 		);
 	}
-	checkTrue(`${label}：菜单项数量`, leaves.length === OPERATIONS.length, `期望 ${OPERATIONS.length} 项，实际 ${leaves.length} 项`);
+	checkTrue(`${label}：菜单项数量`, leaves.length === table.length, `期望 ${table.length} 项，实际 ${leaves.length} 项`);
+}
+
+/** 编辑器替身：菜单注册只用 getValue / posToOffset / getCursor / getSelection 四个方法 */
+function fakeEditor(text: string, cursor: number): unknown {
+	return {
+		getValue: () => text,
+		posToOffset: (pos: { ch: number }) => pos.ch,
+		getCursor: () => ({ line: 0, ch: cursor }),
+		getSelection: () => "",
+	};
+}
+
+/**
+ * 触发一次编辑器右键菜单（编辑模式的图片入口）。
+ * 文本里放一张图，光标停在它上面 —— 与用户右键点图片时的情形一致。
+ */
+function collectEditorMenus(handlers: Map<string, FileMenuHandler[]>): string[] {
+	const menu = new Menu() as unknown as StubMenu;
+	const file = Object.assign(new TFile(), { extension: "md", name: "测试.md", path: "测试.md" });
+	const text = "正文\n![[图.png]]\n";
+	const editor = fakeEditor(text, text.indexOf("![[图.png]]") + 2);
+
+	for (const handler of handlers.get("editor-menu") ?? []) {
+		(handler as unknown as (menu: StubMenu, editor: unknown, info: { file: TFile }) => void)(menu, editor, { file });
+	}
+	return menu.items.map(item => item.title);
 }
 
 // -------------------------------------------------------------------- 审计
 async function audit(): Promise<void> {
+	// 插件 onload 里会挂 document 上的右键监听，Node 下先把 DOM 替身备好
+	installDomStubs();
 	const { plugin, handlers } = await loadPlugin();
 
 	// ---- 1. 命令 ID 与注册情况 ----
 	const registered = plugin.commands.map(command => command.id);
 	checkTrue("命令 ID 不重复", new Set(registered).size === registered.length, `出现重复：${registered.join(", ")}`);
 
-	const expected = OPERATIONS.flatMap(op => op.commands);
+	const expected = [...OPERATIONS, ...EDITOR_OPERATIONS].flatMap(op => op.commands).concat(PANEL_COMMANDS);
 	for (const id of expected) {
 		checkTrue(`命令已注册：${id}`, registered.includes(id), `审计表里的 ${id} 没有被 addCommand 注册`);
 	}
@@ -234,7 +330,7 @@ async function audit(): Promise<void> {
 		checkTrue(
 			`命令已登记审计表：${id}`,
 			expected.includes(id),
-			`${id} 没有登记在本文件的 OPERATIONS 表里，请补上它对应的菜单操作`
+			`${id} 没有登记在本文件的 OPERATIONS / EDITOR_OPERATIONS / PANEL_COMMANDS 表里，请补上它对应的入口`
 		);
 	}
 
@@ -259,8 +355,58 @@ async function audit(): Promise<void> {
 		MenuItemPrototype.setSubmenu = savedSetSubmenu;
 	}
 
-	// ---- 4. 其他入口 ----
+	// ---- 4. 编辑器 / 图片右键菜单（「复制图片」的家） ----
+	const editorMenus = collectEditorMenus(handlers);
+	checkAgainst("编辑器右键菜单", editorMenus, EDITOR_OPERATIONS);
+
+	// ---- 4.5 注入进图片 / 文件夹菜单的项：一样得对得上命令 ----
+	// 这些项由 ownMenuEntries 生成（走 Menu.prototype，审计的菜单事件抓不到），
+	// 所以直接照着实现算一遍：每个菜单层该有哪几项、每项对应哪条命令。
+	const ownTitles: Record<string, string[]> = { image: [], note: [], folder: [] };
+	for (const scope of ["image", "note", "folder"] as MenuScope[]) {
+		const entries = ownMenuEntries({
+			scope,
+			settings: DEFAULT_SETTINGS,
+			refs: scope === "folder" ? [] : [{ target: "图.png", kind: "wiki", from: 0, to: 0 }],
+			hasFile: scope !== "folder",
+			copy: () => { /* 不做事 */ },
+			quickSize: () => { /* 不做事 */ },
+			manage: () => { /* 不做事 */ },
+		});
+		ownTitles[scope] = entries.map(entry => entry.title);
+	}
+
+	for (const [scope, expectedKeys] of Object.entries(EXPECTED_OWN_ITEMS)) {
+		const keys = Object.entries(OWN_ITEM_SCOPES)
+			.filter(([, scopes]) => scopes.includes(scope as MenuScope))
+			.map(([key]) => key)
+			.sort();
+		checkList(`本插件项的开关覆盖 ${scope} 菜单`, keys, [...expectedKeys].sort());
+
+		// 注入进去的那几项（二级栏由 menus.ts 加，不在这条路上）
+		const injected = INJECTED_ITEM_KEYS.filter(key => OWN_ITEM_SCOPES[key].includes(scope as MenuScope));
+		checkTrue(`${scope} 菜单里真有这几项`, ownTitles[scope]?.length === injected.length,
+			`期望 ${injected.length} 项，实际 ${JSON.stringify(ownTitles[scope])}`);
+	}
+
+	for (const operation of INJECTED_OPERATIONS) {
+		const command = OWN_ITEM_COMMANDS[operation.key];
+		checkTrue(`注入项「${operation.key}」有对应命令`, command !== null && registered.includes(command),
+			`${operation.key} → ${String(command)} 没有注册`);
+	}
+
+	// 二级栏是容器项：本身不是命令，但要能对应到文件菜单那一行（里面的命令由 OPERATIONS 看着）
+	for (const key of ["imageSubmenu", "textSubmenu"] as const) {
+		checkTrue(`容器项 ${key} 不占命令`, OWN_ITEM_COMMANDS[key] === null, String(OWN_ITEM_COMMANDS[key]));
+		checkList(`容器项 ${key} 属于文件夹菜单`, OWN_ITEM_SCOPES[key], ["folder"]);
+	}
+
+	// ---- 5. 其他入口 ----
 	checkTrue("设置面板已注册", plugin.settingTabs.length === 1, `实际注册 ${plugin.settingTabs.length} 个`);
+	// 状态栏两格：批量进度 + 选中内容的图片张数（各占一格才不会互相覆盖）
+	checkTrue("状态栏注册了两格", plugin.statusBarItems.length === 2, `实际注册 ${plugin.statusBarItems.length} 格`);
+	// 选区监听是 CodeMirror 扩展：Obsidian 的公开事件里没有"选区变化"
+	checkTrue("选区监听扩展已注册", plugin.editorExtensions.length === 1, `实际注册 ${plugin.editorExtensions.length} 个`);
 }
 
 // ------------------------------------------------- 5. 整库批处理：单篇失败不拖垮整批

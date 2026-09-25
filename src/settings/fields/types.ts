@@ -14,6 +14,8 @@ export type ControlSpec =
 	| { type: 'toggle' }
 	/** 单行输入框 */
 	| { type: 'text'; placeholder: string }
+	/** 多行输入框（一行的列表用它，如"每行一个菜单项"） */
+	| { type: 'textarea'; placeholder: string; rows: number }
 	/** 下拉框：取值 → 显示文案 */
 	| { type: 'dropdown'; options: Record<string, string> };
 

@@ -8,6 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Images**: transfers external-path images (e.g. `file:///D:\...`) into the vault as internal `![[...]]` links, renames garbled image files, sets image sizes, and re-links images copied across folders.
 - **Text**: typesets notes — plain-text math → `$…$`, LaTeX code layout, CJK/English/formula spacing, punctuation width by language, leading indentation, block markers, list numbering, heading levels, tag placement and sorting, content block sorting, and QQ/WeChat chat log reformatting.
+- **Status bar** (optional, off by default): shows how many images the current editor selection contains (`showSelectionImageCount`).
+- **Clipboard**: copies image *files* to the system clipboard (right-click an image, or the command) so they can be pasted into a folder — not just into QQ/Word. Multiple images at once by selecting them, and when the selection also contains text the text rides along as HTML so QQ/WeChat/Word paste "sentence + pictures"; an optional Ctrl+C takeover in the editor does the same without going through the menu (`takeOverCopyShortcut`, off by default).
+- **Context menus**: three menus (image / note / file explorer) can be inspected and have their entries switched on and off; this plugin only ever *inserts* its own items (复制图片 / 快速设置图片大小 / 管理右键菜单) and never takes a menu over.
 
 ## Commands
 
@@ -28,7 +31,7 @@ The esbuild config (`esbuild.config.mjs`) bundles `src/main.ts` into `main.js` (
 ```
 src/
   main.ts               # 插件入口：只做生命周期与装配（读设置、把各部件接起来、注册命令与菜单）
-  commands.ts           # 12 条命令的注册（命令 ID 是稳定接口，test/commands.test.ts 逐条比对菜单）
+  commands.ts           # 15 条命令的注册（命令 ID 是稳定接口，test/commands.test.ts 逐条比对菜单）
   tasks.ts              # 任务编排：每种操作一份实现，命令面板 / 右键菜单 / 弹窗三条路都落到这里
   batch.ts              # 批量外壳：互斥锁 + 通知屏蔽 + 状态栏进度 + 出错兜底 + 结果通知
   rule-registry.ts      # 规则登记表：规范出处 ↔ 开关 ↔ 实现 ↔ 测试（不进 main.js，只有测试与文档用它）
@@ -62,11 +65,22 @@ src/
     organize.ts         # 图片位置整理
     attachment-folder.ts# 附件夹定位与按需创建
     constants.ts        # 扩展名表与嵌入链接正则
+    scan.ts             # 图片嵌入扫描（`![[图.png]]` / `![说明](图.png)` + 位置），状态栏与复制共用
+    copy.ts             # 复制用：引用 → 磁盘文件（同名不猜、去重、资源 URL 还原）
+    clipboard.ts        # 复制用：把文件写进系统剪贴板（Windows PowerShell / macOS osascript）
+    rich-copy.ts        # 复制用：「文字 + 图片」混排的 HTML（CF_HTML）拼法
   ui/
     menus.ts            # 文件 / 文件夹右键菜单（图片功能 / 文本排版两个二级栏）
+    image-menu.ts       # 本插件的右键菜单项 + "这次点的是什么"（三个作用域）+ 编辑器菜单追加
+    menu-injector.ts    # 三个右键菜单共用：接一层 Menu.prototype，记录菜单项 / 按名单过滤 / 插项
+    menu-hidden.ts      # 隐藏名单（`作用域：标题`）的解析与生成（纯函数）
+    menu-manage-modal.ts# 右键菜单管理面板：图片 / 笔记 / 文件夹三节，开关各项
+    copy-shortcut.ts    # 可选的"接管编辑器里的 Ctrl+C"：选中图片时改走复制文件那条路
     image-size-modal.ts # 图片大小弹窗
     confirm-rename-modal.ts # 批量重命名确认
     progress.ts         # 状态栏进度
+    selection-count.ts  # 状态栏"选中内容的图片张数"：计数 + 文案（纯函数，不 import obsidian）
+    selection-status.ts # 选区监听（CodeMirror 扩展），把选中文本交给上面那一格
     notice-suppressor.ts# 批量期间屏蔽通知
 test/*.test.ts          # 每个纯函数模块一份测试（含幂等）；rules.test.ts 核对规则登记表与文档
 docs/规则登记表.md       # 由 src/rule-registry.ts 生成（node test/run-tests.mjs --update-rules-doc）
@@ -75,7 +89,7 @@ manifest.json           # Plugin metadata
 styles.css              # Plugin CSS (notice suppression, size dialog, settings sub-headings)
 ```
 
-**Note:** feature logic lives in the modules above; `main.ts` is only lifecycle + wiring. Every pipeline step is a pure, idempotent function so it can be tested without Obsidian. `src/rule-registry.ts` maps each typesetting/image rule to its spec item, settings switch, implementation and tests — the spec lives in the vault at `data/data note/note note.md`.
+**Note:** feature logic lives in the modules above; `main.ts` is only lifecycle + wiring. Every pipeline step is a pure, idempotent function so it can be tested without Obsidian. `src/rule-registry.ts` maps each typesetting/image rule to its spec item, settings switch, implementation and tests — the spec lives in the vault at `data/data note/data note.md`.
 
 ### Three core features
 
@@ -120,6 +134,75 @@ Uses Node.js `fs/promises` and `path` for filesystem access. `isDesktopOnly: tru
 
 受管位图格式由 `image/constants.ts` 的 `MANAGED_IMAGE_EXTENSIONS` 一处定义（`png` `jpg` `jpeg` `gif` `bmp` `webp` `heic`），导入与改名都从它生成正则。判定"链接指向的是不是图片"用的是 `image/links.ts` 里更宽的一张表（多 `avif` / `svg`）—— 两者刻意不合并。
 
+### 复制图片为什么绕到系统命令（`image/clipboard.ts`）
+
+Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到，资源管理器粘不出文件（Image Toolkit、Image Context Menus 都是这个毛病）。要"能在文件夹里粘出文件"必须写**文件拖放列表**（CF_HDROP），而 Electron 没暴露这个格式，所以请系统自带工具代劳：Windows 用 `powershell.exe` 的 WinForms `DataObject`、macOS 用 `osascript` 的 `POSIX file`。
+
+本机实测（2026-09，Windows）记下来的几条，改这个模块前先看一眼：
+
+- `powershell.exe -NoProfile -NonInteractive -EncodedCommand` 跑起来是 **STA**，`Clipboard.SetDataObject` 才不报错；**别用 `pwsh`**（PowerShell 7 是 MTA，且 `Set-Clipboard` 已移除 `-Path`）；
+- 自己拼 `DataObject` 一次写入，**FileDrop 与 Bitmap 能同时存在**（`Set-Clipboard -Path` 做不到：它会把位图那份挤掉）；只有一张图时才放位图，多张没法只放一张；
+- **不要写文本格式**：CF_UNICODETEXT 与 CF_HDROP 同时存在时有些程序会粘两遍（Windows Terminal 修过这个 bug）；
+- 路径一律 base64 进脚本、整段脚本再 `-EncodedCommand`（UTF-16LE）：命令行上不出现任何用户内容，文件名里的引号 / 反引号 / 换行都伤不到 PowerShell。
+
+### 图文混排：粘贴到 QQ / 微信 要"文字 + 图片"（`image/rich-copy.ts` + `clipboard.ts` 的 `buildRichScript`）
+
+选区里**既有文字又有图片**时，只放文件列表的话聊天窗口贴出来只有图片，正文那句文字没了。要让 QQ / 微信 贴出**图文混排**，得写 **HTML Format（CF_HTML）**。四条规矩，每条都是实测踩出来的：
+
+- **混排里绝不能有文件列表**（用户实测：只放 CF_HDROP 时 QQ 贴出来只有图片、没有文字）—— QQ 的粘贴处理是先看有没有文件，有文件就直接当图片上传，HTML 与文字根本没机会出现。所以混排只写 HTML + 纯文本；**代价**：混选那一份粘不到文件夹里（要图片文件就选纯图片，或用「复制图片」菜单项）；
+- **图片内嵌成 data URI**：QQ NT / 微信 是浏览器内核，从非 `file` 页面加载 `file:///` 子资源会被安全策略拦掉（贴出来是裂图）。读不到 / 后缀不认识 / 单张超 `MAX_EMBED_BYTES` / 合计超 `MAX_EMBED_TOTAL_BYTES` 时才退回 `file:///`（Word 那类允许读本地文件的程序仍旧好使）；
+- **不要放位图**：剪贴板里只要有 CF_BITMAP，微信 / 企业微信 就不再解析 HTML，贴出来只剩一张图；
+- **CF_HTML 是 UTF-8 字节流**，头里的 `StartHTML` / `EndHTML` / `StartFragment` / `EndFragment` 是**字节**偏移、补零到固定宽度（10 位）。中文一个字三字节 —— 按字符数算头就会错位，程序解析出来是乱码（社区里"贴出来是问号"就是这类问题）。
+
+**纯图片那条路不变**：文件列表（+ 单张时的位图），文件夹里能粘出文件。
+
+**写剪贴板别用 .NET 的 `DataObject`**（本机实测，2026-09）：
+
+- `SetData('HTML Format', $false, [byte[]]…)` 落到剪贴板上的**不是字节**，而是字符串 `"System.Byte[]"` —— .NET 把"HTML Format"当文本格式，会自己转换；中文更是直接丢；
+- 格式的**先后顺序不听我们的**：先 `SetData` 的 HTML，`EnumClipboardFormats` 读出来却是 `CF_HDROP` 打头。而社区实测的结论是"顺序会决定 QQ / 微信 挑哪一份解析"。
+
+所以混排走 **Win32 原生 `SetClipboardData`**（`buildRichScript`）：`OpenClipboard` → `EmptyClipboard` → 只写两样，`HTML Format`（UTF-8 字节 + NUL）→ `CF_UNICODETEXT`(13)。实测读回来正是这个顺序、HTML 字节与偏移都对得上、剪贴板里**没有** FileDrop（`EnumClipboardFormats` 只多出系统自动加的 CF_LOCALE / CF_TEXT / CF_OEMTEXT）。
+
+⚠️ 这两条只有在 Windows 上成立：macOS 的 `osascript` 一次只能 `set the clipboard to` 一样东西，混排在那边退化成"只放文件"（`clipboardCommandFor` 里明说）。
+
+⚠️ **选区长了要换条路**：Windows 一条命令行最多 32767 个字符，而 `-EncodedCommand` 的 base64 是脚本的两倍多 —— 选区里带上整段正文（HTML 里就是那几千字）就会顶爆。`clipboardCommandFor` 因此会看长度：超过 `COMMAND_LINE_LIMIT` 就把脚本写进系统临时目录、用 `-File` 执行（`copyImageFiles` 负责写与删；**落盘文件必须带 BOM**，否则 Windows PowerShell 5.1 按 ANSI 读，脚本里的中文注释会变乱码）。本机实测（2026-09）：6900 字的选区 → 20KB HTML → 走临时文件那条路，写出来的字节、偏移、格式顺序都对。
+
+### 为什么还要"接管 Ctrl+C"（`ui/copy-shortcut.ts`，默认关）
+
+正文里的 `![[图.png]]` 是**文本**：不接管时按 Ctrl+C 复制的是那串链接，粘到文件夹里得到一个文件名的字符串。开关打开后，编辑器里的 Ctrl+C（macOS 是 ⌘C）改走「复制图片」那条路 —— 选中的图片优先，选区里没图就看光标下那一张（复用 `image-menu.ts` 的 `editorImagePicks`，判定与右键菜单完全一致）。
+
+- **只在编辑器里抢**：事件源要有 `.cm-editor` 祖先。输入框、设置面板、其它插件的按钮一律放行 —— 抢错了用户会以为键盘坏了；
+- **判定集中在 `isCopyShortcut`**（`test/copy-shortcut.test.ts` 守着）：带 Shift / Alt 的不抢（Ctrl+Shift+C 在 Obsidian 里另有命令）、输入法组词中不抢；
+- **抢到就 `preventDefault` + `stopPropagation`**，否则 Obsidian 自己还会复制一遍，把刚写进去的文件挤掉；
+- **选区里还有文字时连文字一起复制**（用户按 Ctrl+C 就是"选了什么复制什么"）：走图文混排那条路 —— 聊天窗口里贴出"文字 + 图片"。只有纯图片选区才走"只放文件列表"那条老路，所以**要往文件夹里粘文件，就选纯图片**（或右键用「复制图片」菜单项）。
+
+### 右键菜单怎么插项、怎么管理（`ui/image-menu.ts` + `menu-injector.ts`）
+
+Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件基本都自己弹一份（`preventDefault` 掉原生那份），代价是原生项与其它插件加的项全没了。本插件的做法是**只插自己的项，谁都不删**，顺带把三个菜单都变成"可看、可开关"的：
+
+| 菜单 | 作用域 | 怎么加我们的项 | 我们的项 |
+| --- | --- | --- | --- |
+| 笔记里渲染出来的图片 | `image` | 菜单将要显示时插进去（`menu-injector.ts`） | 复制图片 / 快速设置图片大小 / 管理右键菜单 |
+| 笔记正文 | `note` | 官方的 `editor-menu` 事件，只追加 | 复制图片 / 快速设置图片大小 / 管理右键菜单 |
+| 文件浏览器 | `folder` | 菜单将要显示时插进去 | 管理右键菜单（"图片功能 / 文本排版"二级栏原本就走 `file-menu`） |
+
+「管理右键菜单」**三个菜单里都给** —— 它就是这套管理功能的入口，哪个菜单里没有它，用户在那个菜单里就找不到北。
+
+机制：右键**按下**时"上膛"并判断作用域 → 上膛期间**每份菜单各记一份清单**（`addItem` 记录 + 按隐藏名单过滤）→ `showAtMouseEvent` / `showAtPosition` 时**只认"真要显示的那份"**：把它的清单交给管理面板、把我们的项插进去 → 下膛后三个方法原样放行。
+
+几个踩过的坑，改这块前先看：
+
+- **隐藏要两道**：`addItem` 那一刻过滤只对"我们接得到的那条路"有效，而菜单里的项有的是**在我们拿到它之前**就加好的（编辑器菜单尤其如此：新增链接 / 新增外部链接 / 文本格式 / 段落设置那一批）—— 那些只能在**显示之后按标题把 DOM 摘掉**（`removeHiddenItems`）。两道都在 `test/image-menu.test.ts` 里守着；
+- **作用域要"粘住"**：二级菜单是**之后**才弹出来的，那时早就下膛了 —— 所以最近一次右键的作用域会留 30 秒（`STICKY_SCOPE_MS`），在这期间弹出的菜单都按它过滤，用户在二级菜单里关掉的项也生效；
+- **不能认"第一份菜单"**：Obsidian 的编辑器菜单带二级菜单（格式 / 块类型那一套：正文、1 级标题…、引用、任务列表、表格、脚注、标注），而二级菜单可能比主菜单**先**建 —— 认错了就会把二级菜单的项当成"笔记菜单里有什么"（2026-09 的 bug）。现在按菜单各记各的，`show*` 时才决定谁算数；
+- **菜单对象会被复用**：记号（Symbol）存的是"这次上膛的编号"而不是布尔，编号对不上就说明是上一次右键留下的记号；
+- **我们自己的项要在构建函数上打 `OWN_MENU_ITEM` 记号**（`addOwnMenuItems` 与 `menus.ts` 的 `addSubmenuEntry` 负责打）：我们的项同样走 `menu.addItem`，**任何加法路径**都得豁免过滤与摘除，否则会被隐藏名单误伤（"管理右键菜单"被自己藏掉 / 「图片功能」被摘掉 —— 2026-09 的 bug）、还会混进"检测到的项"里；
+- **本插件自己的项只认自己的开关**（`imageMenuCopyItem` / `imageMenuQuickSizeItem` / `imageMenuManageItem` / `fileMenuImageSubmenu` / `fileMenuTextSubmenu`，单一数据源见 `image-menu.ts` 的 `OWN_ITEMS` / `OWN_ITEM_SCOPES` / `OWN_ITEM_COMMANDS`）；
+- **面板上的开关一律"开着 = 显示"**（别做成"勾上 = 隐藏"，用户会把"开启"理解成勾上，然后把自己的入口关掉）；
+- **插项要在 `show*` 时做**：在第一个 `addItem` 时插会插进菜单中间；顺序同样只能在显示后用 `moveOwnItemsFirst` 重排（另有一次微任务兜底，认最后建的那份菜单）。
+
+⚠️ 这一套成立的前提是"Obsidian 内部建菜单用的就是 `obsidian` 模块导出的那个 `Menu` 类"。真失效时的表现很好认：**右键看不到本插件的项，管理面板里也检测不到任何项**。那时要么只保留 `editor-menu` + 命令面板入口，要么退回"自己弹一份菜单"（会丢原生项，用户明确否过这条路）。
+
 ### 改动指南（照着做就不会破坏结构）
 
 **加/改一条排版规则** —— 六处，缺一处 `test/rules.test.ts` 或构建就会报错：
@@ -133,7 +216,7 @@ Uses Node.js `fs/promises` and `path` for filesystem access. `isDesktopOnly: tru
 
 **加一个设置项**：只改 `src/settings/model.ts` + `src/settings/fields/`。面板的两条渲染路径（1.13+ 声明式 / 1.13 以下手写 DOM）都由字段表生成，`test/settings.test.ts` 核对"每个字段有且只有一条定义"；同时要让 `rule-registry.ts` 里某条规则用上这个开关（测试会查"有没有没人管的开关"）。
 
-**加一条命令 / 菜单项**：`src/commands.ts` + `src/ui/menus.ts`。命令 ID 是已发布版本的稳定接口，`test/commands.test.ts` 会逐条比对菜单与命令表。
+**加一条命令 / 菜单项**：`src/commands.ts` + `src/ui/menus.ts`。命令 ID 是已发布版本的稳定接口，`test/commands.test.ts` 会逐条比对菜单与命令表 —— **文件菜单**（`file-menu`）记在 `OPERATIONS`，**编辑器 / 图片右键菜单**（`editor-menu`，如「复制图片」）记在 `EDITOR_OPERATIONS`，两张表各自与命令一一对应。
 
 **改了规范笔记之后**：先改 `src/rule-registry.ts` 里的章节路径与条目号，跑 `npm test` —— 对不上会直接列出是哪几条；再重新生成 `docs/规则登记表.md`。注意测试能抓到"找不到第 N 条"，但抓不到"编号没变、内容换了"（例如 `英文符号 2` 从引号改成了省略号），所以改完要顺手核对该条目说的还是不是那条规则。
 

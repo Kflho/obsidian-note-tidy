@@ -3,7 +3,7 @@
  *
  * ## 为什么要有这张表
  *
- * 排版规则是在笔记规范（vault 里的 `data/data note/note note.md`）里讨论出来的，
+ * 排版规则是在笔记规范（vault 里的 `data/data note/data note.md`）里讨论出来的，
  * 代码这边靠注释里的"英文符号 1""标记命名 4"来标出处。讨论久了必然出事：
  * 规范改过一轮之后（`latex 符号格式` 这一节被并进 `通用符号` 并重新编号），
  * 注释里的出处就对不上了 —— 没人知道哪条实现对应哪条规则，也没人知道改规范要动哪里。
@@ -59,15 +59,17 @@ export interface RuleSection {
 }
 
 /** 规范笔记的默认位置（相对仓库根）与环境变量覆盖 */
-export const SPEC_NOTE_PATH = process.env.NOTE_TIDY_SPEC ?? '../../../data/data note/note note.md';
+export const SPEC_NOTE_PATH = process.env.NOTE_TIDY_SPEC ?? '../../../data/data note/data note.md';
 
 /**
  * 规范里的章节路径。
  *
- * 2026-09 规范重排过一次：`## 排版格式` 这一层被取消（各节直接挂在 `# 格式` 下）、
+ * 2026-09 规范重排过两次：`## 排版格式` 这一层被取消（各节直接挂在 `# 格式` 下）、
  * `标签` / `数字` 改名成 `标签格式` / `数字格式`、`## latex 排版格式` 并进了
- * `### 公式代码格式`、代码格式那一节重编了号。这份路径跟着规范走 ——
- * 规范再改，test/rules.test.ts 会立刻报"找不到这一节"。
+ * `### 公式代码格式`、代码格式那一节重编了号；规范笔记也从 `note note.md`
+ * 换成了 `data note.md`（`命名` / `格式` 两章现在都在这一篇里），
+ * 原来 `命名 / 标记命名` 那一节整节删掉了（见 structure.markers 的备注）。
+ * 这份路径跟着规范走 —— 规范再改，test/rules.test.ts 会立刻报"找不到这一节"。
  */
 const S = {
 	general: '格式 / 概论',
@@ -82,7 +84,6 @@ const S = {
 	mathSymbol: '格式 / 标点符号 / 数学符号',
 	textGeneral: '格式 / 文字格式 / 概论',
 	textEnglish: '格式 / 文字格式 / 英文',
-	marker: '命名 / 标记命名',
 } as const;
 
 export const RULE_SECTIONS: RuleSection[] = [
@@ -227,6 +228,144 @@ export const RULE_SECTIONS: RuleSection[] = [
 				},
 				tests: [],
 				note: '刻意不合并：合并会让改名功能开始碰 .svg，或让 avif 链接解析不出来（见文件头注释）',
+			},
+			{
+				id: 'image.selection-count',
+				name: '状态栏显示当前选中内容里的图片张数',
+				spec: null,
+				status: 'done',
+				switchKeys: ['showSelectionImageCount'],
+				impl: {
+					file: 'src/ui/selection-count.ts',
+					symbols: ['formatSelectionImageCount', 'SelectionImageCount'],
+				},
+				tests: ['test/selection-count.test.ts'],
+				note: '不是排版规则，是状态栏那一格的显示。"什么算一张图片"在 image.link-scan 那一条（与本条共用同一份扫描）；选区变化靠 CodeMirror 扩展（src/ui/selection-status.ts）：Obsidian 公开事件里只有 editor-change，拖选不触发',
+			},
+			{
+				id: 'image.link-scan',
+				name: '图片嵌入扫描：`![[图.png]]` 与 `![说明](图.png)`，代码块与行内代码里的不算',
+				spec: null,
+				status: 'done',
+				switchKeys: [],
+				impl: {
+					file: 'src/image/scan.ts',
+					symbols: ['collectImageRefs', 'countImageRefs', 'findImageRefAt', 'pickImageRefs'],
+				},
+				tests: ['test/image-scan.test.ts'],
+				note: '状态栏计数与"复制图片"共用这一份扫描（前者要张数，后者要目标与位置）。只数嵌入，普通链接不算；"算不算图片"沿用 image/links 的 isImagePath。围栏代码块走 text/line-scan 的 markFenceLines —— 拿到的是片段，开头的 `---` 多半是分隔线，不能按 frontmatter 判',
+			},
+			{
+				id: 'image.copy-resolve',
+				name: '复制图片：把引用解析成磁盘文件（同名不猜 + 去重）',
+				spec: null,
+				status: 'done',
+				switchKeys: [],
+				impl: {
+					file: 'src/image/copy.ts',
+					symbols: ['resolveImageFiles', 'absolutePathOf', 'basePathOf', 'isExternalTarget', 'baseNameOf', 'vaultPathFromResourceUrl'],
+				},
+				tests: ['test/image-copy.test.ts'],
+				note: '解析规则沿用图片功能的老两条：同名歧义宁可跳过（links.ts 的 resolveImageLink）、同一张图只放一份（否则粘到文件夹里会多出「图 2.png」）。外部绝对路径（`D:\\图.png`）交给 external-path 去磁盘上找；`/开头` 是"仓库根目录"而不是磁盘根，不当外部路径处理。阅读模式里只有 `<img>`，拿 `internal-embed` 的 src，拿不到就把 `app://local/…` 的资源 URL 按适配器 basePath 还原成仓库路径',
+			},
+			{
+				id: 'image.copy-to-clipboard',
+				name: '复制图片到系统剪贴板：文件夹里能粘出文件，聊天窗口里能贴出图片',
+				spec: null,
+				status: 'done',
+				switchKeys: [],
+				impl: {
+					file: 'src/image/clipboard.ts',
+					symbols: ['copyImageFiles', 'clipboardCommandFor', 'buildPowerShellScript', 'buildFileScript', 'buildRichScript', 'encodePowerShellCommand', 'buildAppleScript', 'COMMAND_LINE_LIMIT', 'RichClipboardContent'],
+				},
+				tests: ['test/image-clipboard.test.ts'],
+				note: 'Electron / 网页剪贴板只能写位图（CF_DIB），资源管理器不认（Image Toolkit 的复制图片就是这个毛病，粘进文件夹什么都没有），所以写**文件拖放列表**（CF_HDROP）得请系统工具代劳：Windows 用 powershell.exe（纯图片走 WinForms 的 `DataObject`，图文混排走 Win32 原生接口，见 `buildRichScript`），macOS 用 osascript 的 POSIX file。**纯图片那条路不写文本格式**：CF_UNICODETEXT 与 CF_HDROP 同时存在时有些程序会粘两遍（Windows Terminal 修过这个 bug）。**图文混排那条路反过来**：只写 HTML + 纯文本，**不放文件列表也不放位图**（有文件 QQ 就只贴图片、有位图微信就不解析 HTML），见 `image.copy-rich`。路径一律 base64 进脚本、整段脚本再走 -EncodedCommand（UTF-16LE），命令行上不出现任何用户内容。**选区里文字一多就得改路子**：Windows 一条命令行最多 32767 个字符，而 -EncodedCommand 里那串 base64 是脚本的两倍多 —— 长选区（HTML 里带着整段正文与内嵌图片）会把命令行撑爆，所以超过 `COMMAND_LINE_LIMIT` 时改成把脚本写进系统临时目录、用 -File 执行（写完即删；落盘文件带 BOM，否则 Windows PowerShell 5.1 按 ANSI 读，脚本里的中文注释变乱码）。⚠️ `.NET` 的 `DataObject` **不能**用来写 CF_HTML：`SetData` 一个 byte[] 进去，落到剪贴板上的是字符串 `"System.Byte[]"`（本机实测），而且格式顺序也不听我们的（实测 `CF_HDROP` 打头）',
+			},
+			{
+				id: 'image.copy-shortcut',
+				name: '接管 Ctrl+C：正文里选中图片时按插件的方法复制文件（可选项，默认关）',
+				spec: null,
+				status: 'done',
+				switchKeys: ['takeOverCopyShortcut'],
+				impl: {
+					file: 'src/ui/copy-shortcut.ts',
+					symbols: ['registerCopyShortcut', 'isCopyShortcut'],
+				},
+				tests: ['test/copy-shortcut.test.ts'],
+				note: '正文里的 `![[图.png]]` 是**文本**，系统 Ctrl+C 复制的是那串链接 —— 粘到文件夹里得到的是一个文件名的字符串，粘到聊天窗口里也只是一行字。开了这个开关后，在编辑器里按 Ctrl+C（macOS 的 ⌘C 同样算）改走「复制图片」那条路：选中的图片优先，选区里没图就看光标下那一张；**选区里还有文字时连文字一起复制**（图文混排，见 `image.copy-rich`）。**只在编辑器里抢**（事件源要有 `.cm-editor` 祖先）：输入框、设置面板、其它插件的按钮一律放行。判定集中在 `isCopyShortcut`：带 Shift / Alt 的不抢（Ctrl+Shift+C 在 Obsidian 里另有命令）、输入法组词中不抢。抢到就 `preventDefault` + `stopPropagation`，免得 Obsidian 自己再复制一遍把文件挤掉',
+			},
+			{
+				id: 'image.copy-rich',
+				name: '图文混排复制：选区里既有文字又有图片时，聊天窗口里贴出"文字 + 图片"',
+				spec: null,
+				status: 'done',
+				switchKeys: [],
+				impl: {
+					file: 'src/image/rich-copy.ts',
+					symbols: [
+						'hasTextBesidesImages', 'fileUrlOf', 'escapeHtml', 'buildHtmlFragment', 'buildClipboardHtml',
+						'buildRichContent', 'imageSourceMap', 'dataUriOf', 'mimeTypeOf', 'utf8Length',
+						'MAX_EMBED_BYTES', 'MAX_EMBED_TOTAL_BYTES',
+					],
+				},
+				tests: ['test/rich-copy.test.ts'],
+				note: '选区里既有文字又有图片时，这一份只写 **HTML（CF_HTML）与纯文本**：QQ / 微信 贴出来就是"文字 + 图片"。**纯图片仍然走文件列表那条路**（文件夹里能粘出文件，行为不变）。四条规矩：① **混排里绝不能有文件列表**（2026-09 用户实测：只放 CF_HDROP 时 QQ 贴出来只有图片、没有文字 —— 它的粘贴处理是先看有没有文件，有文件就直接当图片上传，那段文字根本没机会出现）；代价是混选复制粘不到文件夹里，要图片文件就选纯图片；② **图片内嵌成 data URI**：QQ NT / 微信 是浏览器内核，从非 file 页面加载 `file:///` 子资源会被安全策略拦掉（贴出来是裂图），读不到 / 后缀不认识 / 单张超 `MAX_EMBED_BYTES` / 合计超 `MAX_EMBED_TOTAL_BYTES` 时才退回 `file:///`；③ **CF_HTML 是 UTF-8 字节流**，头里的 StartHTML / EndHTML / StartFragment / EndFragment 是**字节**偏移、补零到固定宽度（10 位），中文一个字三字节 —— 按字符数算就会错位，程序解析出来是乱码（社区里"贴出来是问号"就是这个）；④ 混排时**一份位图都不放** —— 剪贴板里只要有 CF_BITMAP，微信 / 企业微信 就不再解析 HTML，贴出来只剩一张图。写剪贴板的那一端见 `clipboard.ts` 的 `buildRichScript`',
+			},
+			{
+				id: 'image.copy-menu',
+				name: '本插件的右键菜单项：复制图片 / 快速设置图片大小 / 管理入口（只插自己的项，不接管菜单）',
+				spec: null,
+				status: 'done',
+				switchKeys: [
+					'imageMenuCopyItem', 'imageMenuQuickSizeItem', 'imageMenuManageItem',
+					'fileMenuImageSubmenu', 'fileMenuTextSubmenu', 'menuHiddenItems',
+				],
+				impl: {
+					file: 'src/ui/image-menu.ts',
+					symbols: [
+						'registerImageMenu', 'ownMenuEntries', 'addOwnMenuItems', 'editorImageRefs', 'copyMenuTitle',
+						'lastDetectedMenuItems', 'recordDetectedMenuItems', 'MANAGE_MENU_TITLE', 'QUICK_SIZE_MENU_TITLE',
+						'OWN_ITEMS', 'OWN_ITEM_SCOPES', 'OWN_ITEM_COMMANDS',
+					],
+				},
+				tests: ['test/image-menu.test.ts'],
+				note: '**不接管菜单**：Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件基本都自己弹一份（`preventDefault` 掉原生的），代价是原生项与其它插件的项全没了 —— 这里只往里插自己的项。两个加法：笔记正文走官方的 `editor-menu`（只追加）；图片 / 文件夹菜单靠 menu-injector 在菜单显示时插，显示之后把我们自己的项**重排到最前面**（`moveOwnItemsFirst`，同一个任务里做完、浏览器还没绘制，用户看不到跳动）。菜单项一律带"（Note Tidy）"：原生菜单里本来就有"复制图片"，且那个是位图版。**本插件自己的项只认自己的开关，绝不走"按标题隐藏"那条路** —— 否则标题一旦进了隐藏名单，"管理右键菜单"就再也点不开、「图片功能」二级栏也会被摘掉（2026-09 踩过这个坑）。`OWN_ITEMS` / `OWN_ITEM_SCOPES` / `OWN_ITEM_COMMANDS` 是这五项的单一数据源（图标与说明 / 出现在哪几层 / 对应哪条命令，二级栏是容器所以命令为 null），管理面板与 `test/commands.test.ts` 都按它核',
+			},
+			{
+				id: 'image.menu-injector',
+				name: '菜单观察与插项：接 Menu.prototype + 实例两层，三个菜单各自记录与过滤',
+				spec: null,
+				status: 'done',
+				switchKeys: [],
+				impl: {
+					file: 'src/ui/menu-injector.ts',
+					symbols: ['installMenuInjector', 'observeMenuInstance', 'moveOwnItemsFirst', 'removeHiddenItems', 'probeMenuItemTitle'],
+				},
+				tests: ['test/image-menu.test.ts'],
+				note: '**两层**：`installMenuInjector` 接 `Menu.prototype`（对"和插件同一个 Menu 类"的菜单有效 —— 图片菜单就是这条路），`observeMenuInstance` 接 Obsidian 通过 `editor-menu` / `file-menu` **交到我们手上的那个实例**（编辑器菜单、文件菜单不一定走插件的 Menu 类，光靠原型读不到它加了什么 —— 2026-09 笔记菜单一直空着就是这个原因）。两层都做四件事：记录菜单项、把我们自己的项插进去并**排到最前**（`moveOwnItemsFirst`：`addItem` 只能往后加，顺序只能在显示之后于 DOM 上重排）、按 `menuHiddenItems` 过滤、以及**显示后按标题把隐藏项摘掉**（`removeHiddenItems`）—— 最后这条是必需的：新增链接 / 新增外部链接 / 文本格式 / 段落设置这些项**在我们拿到菜单之前**就加好了，`addItem` 那一刻根本拦不住（2026-09 用户报"关不掉"）。原型那层：右键按下时"上膛" → 上膛期间**每份菜单各记一份清单** → `show*` 时**只认"真要显示的那份"**（不能认"第一份"：编辑器菜单的二级菜单 —— 正文 / 1~6 级标题 / 引用 / 任务列表 / 表格 / 脚注 / 标注 —— 可能比主菜单先建，2026-09 的 bug）；二级菜单是之后才弹的，所以作用域会"粘"30 秒（`STICKY_SCOPE_MS`），那一层也按同一份名单过滤。检测结果按用户看到的顺序给（DOM 顺序优先）。⚠️ 两层都失效时的表现很好认：右键看不到本插件的项、管理面板里也检测不到任何项',
+			},
+			{
+				id: 'image.menu-hidden',
+				name: '隐藏名单：`作用域：标题` 的解析与生成（不写作用域按图片算）',
+				spec: null,
+				status: 'done',
+				switchKeys: [],
+				impl: {
+					file: 'src/ui/menu-hidden.ts',
+					symbols: ['MENU_SCOPES', 'MENU_SCOPE_LABELS', 'parseHiddenItems', 'serializeHiddenItems', 'isHiddenItem', 'withHiddenItem'],
+				},
+				tests: ['test/menu-hidden.test.ts'],
+				note: '三个菜单各一份名单，存成一段文本（`menuHiddenItems`）：每行「作用域：标题」，作用域写 图片 / 笔记 / 文件夹（英文 key 也认）；**不写作用域的按图片算** —— 最早的版本只支持图片菜单、写的就是裸标题，这样老数据不用迁移。只按标题原文匹配，所以本插件自己那些带动态数字的项不进这份名单',
+			},
+			{
+				id: 'image.menu-manage',
+				name: '右键菜单管理面板：看三个菜单里检测到的项、开关哪些显示',
+				spec: null,
+				status: 'done',
+				switchKeys: [],
+				impl: { file: 'src/ui/menu-manage-modal.ts', symbols: ['MenuManageModal'] },
+				tests: [],
+				note: '清单来自"最近一次右键"（image-menu.ts 与 menu-injector 在上膛期间看到的项，含原生项与其它插件加的项），按 图片 / 笔记 / 文件夹 三节列出。**开关一律"开着 = 显示"**：早先做成"勾上 = 隐藏"，用户把"开启管理菜单"理解成勾上，就把自己的入口关掉了（2026-09 的 bug）。本插件自己的三项由各自的开关管、不进隐藏名单。面板只做"开关 + 写回设置"，菜单逻辑不在这里；入口是图片菜单里的"管理右键菜单…（Note Tidy）"与命令面板的同名命令（那条命令没有菜单入口，在 test/commands.test.ts 的 PANEL_COMMANDS 里登记）',
 			},
 		],
 	},
@@ -548,11 +687,12 @@ export const RULE_SECTIONS: RuleSection[] = [
 			{
 				id: 'structure.markers',
 				name: '块级标记空白：引用 `>` 后补空格、列表与标题符号后的多个空格收成一个',
-				spec: { path: S.marker, item: 15 },
+				spec: null,
 				status: 'done',
 				switchKeys: ['textLeadingIndentFix'],
 				impl: { file: 'src/text/markers.ts', symbols: ['fixBlockMarkers'] },
 				tests: ['test/markdown-markers.test.ts'],
+				note: '原来对着 `命名 / 标记命名` 第 15 条；2026-09 规范重排后那一节整节删掉了（规范里现在只剩 `格式 / markdown 格式` 的"列表支持缩进"一条），这条改成实现约定：引用 `>` 后补一格、列表与标题符号后的多个空格收成一个',
 			},
 			{
 				id: 'structure.list-number',
@@ -763,7 +903,7 @@ export function renderRuleRegistryDoc(): string {
 		'>',
 		'> 重新生成：`node test/run-tests.mjs --update-rules-doc`（`npm test` 会核对它与表是否一致）。',
 		'>',
-		'> 规范出处指 vault 里的 `data/data note/note note.md`；改规范或改实现时，先改 `src/rule-registry.ts`，再重新生成这份文档。',
+		'> 规范出处指 vault 里的 `data/data note/data note.md`；改规范或改实现时，先改 `src/rule-registry.ts`，再重新生成这份文档。',
 		'',
 		'状态：`done` 有实现且与规范一致 · `partial` 实现了但有已知偏差 · `spec-only` 规范里有、代码里没有。',
 		'',

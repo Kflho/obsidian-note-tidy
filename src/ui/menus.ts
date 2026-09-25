@@ -1,6 +1,9 @@
 import { Menu, MenuItem, TFolder, TFile } from 'obsidian';
 import type { App, Plugin, TAbstractFile } from 'obsidian';
+import type { ImageTransferSettings } from '../settings';
 import type { TaskActions } from '../tasks';
+import { OWN_MENU_ITEM, observeMenuInstance } from './menu-injector';
+import { IMAGE_SUBMENU_TITLE, TEXT_SUBMENU_TITLE, recordDetectedMenuItems } from './image-menu';
 
 /**
  * 文件 / 文件夹右键菜单（从 main.ts 抽出）。
@@ -19,18 +22,31 @@ import type { TaskActions } from '../tasks';
 type MenuItemWithSubmenu = MenuItem & { setSubmenu?: () => Menu };
 
 /** 注册 file-menu 事件（由插件负责清理：走 registerEvent） */
-export function registerFileMenu(plugin: Plugin, actions: TaskActions): void {
+export function registerFileMenu(
+	plugin: Plugin,
+	actions: TaskActions,
+	getSettings: () => ImageTransferSettings
+): void {
 	const app: App = plugin.app;
 	plugin.registerEvent(
 		app.workspace.on('file-menu', (menu: Menu, file: TAbstractFile) => {
+			// 这份菜单也纳入观察（检测 + 隐藏名单 + 把我们两个二级栏排到最前面）——
+			// 文件菜单是 Obsidian 自己建的，不一定走插件的 Menu 类，靠实例这一层最稳
+			observeMenuInstance(menu, {
+				scope: 'folder',
+				getSettings,
+				onDetected: (scope, items) => { recordDetectedMenuItems(scope, items); },
+			});
+
+			const settings = getSettings();
 			if (file instanceof TFile && file.extension === 'md') {
-				addImageSubmenu(menu, actions, [file], '本文件内', file.name);
-				addTextSubmenu(menu, actions, [file], '本文件内');
+				addImageSubmenu(menu, actions, [file], '本文件内', file.name, settings);
+				addTextSubmenu(menu, actions, [file], '本文件内', settings);
 			} else if (file instanceof TFolder) {
 				const prefix = file.path === '/' ? '' : file.path + '/';
 				const files = app.vault.getMarkdownFiles().filter(f => f.path.startsWith(prefix));
-				addImageSubmenu(menu, actions, files, '该文件夹下', `文件夹 ${file.name}`);
-				addTextSubmenu(menu, actions, files, '该文件夹下');
+				addImageSubmenu(menu, actions, files, '该文件夹下', `文件夹 ${file.name}`, settings);
+				addTextSubmenu(menu, actions, files, '该文件夹下', settings);
 			}
 		})
 	);
@@ -47,7 +63,7 @@ export function registerFileMenu(plugin: Plugin, actions: TaskActions): void {
  * 点击后在光标处弹出子菜单，标题自带 › 以免看不出层级。
  */
 function addSubmenuEntry(parent: Menu, title: string, icon: string, build: (menu: Menu) => void) {
-	parent.addItem((item) => {
+	const builder = (item: MenuItem): void => {
 		const nativeSetSubmenu = (item as MenuItemWithSubmenu).setSubmenu;
 		const hasNativeSubmenu = typeof nativeSetSubmenu === 'function';
 
@@ -72,7 +88,11 @@ function addSubmenuEntry(parent: Menu, title: string, icon: string, build: (menu
 				submenu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 3 });
 			}
 		});
-	});
+	};
+
+	// 打上"本插件的项"记号：观察层就不会把它记成别人的项、也不吃隐藏名单（它有自己的开关）
+	(builder as { [OWN_MENU_ITEM]?: boolean })[OWN_MENU_ITEM] = true;
+	parent.addItem(builder);
 }
 
 /**
@@ -81,8 +101,17 @@ function addSubmenuEntry(parent: Menu, title: string, icon: string, build: (menu
  * @param where 菜单文案片段（「本文件内」/「该文件夹下」）
  * @param label 弹窗里的影响范围描述
  */
-function addImageSubmenu(parent: Menu, actions: TaskActions, files: TFile[], where: string, label: string) {
-	addSubmenuEntry(parent, '图片功能', 'image', (menu) => {
+function addImageSubmenu(
+	parent: Menu,
+	actions: TaskActions,
+	files: TFile[],
+	where: string,
+	label: string,
+	settings: ImageTransferSettings
+) {
+	if (settings.fileMenuImageSubmenu === false) return;
+
+	addSubmenuEntry(parent, IMAGE_SUBMENU_TITLE, 'image', (menu) => {
 		menu.addItem((item) => {
 			item
 				.setTitle(`转换${where}的外部图片`)
@@ -136,12 +165,34 @@ function addImageSubmenu(parent: Menu, actions: TaskActions, files: TFile[], whe
 					actions.openImageSize(files, label);
 				});
 		});
+
+		// 快速版：直接用设置里的默认尺寸，不弹窗。只给单篇笔记用 ——
+		// 文件夹那一路是"该文件夹下"，一次性改一堆笔记的尺寸不该没有确认步骤
+		if (files.length === 1) {
+			menu.addItem((item) => {
+				item
+					.setTitle(`快速设置${where}图片的大小`)
+					.setIcon('image')
+					.onClick(async () => {
+						const target = files[0];
+						if (target) await actions.quickSetImageSize(target);
+					});
+			});
+		}
 	});
 }
 
 /** 文本排版二级菜单 */
-function addTextSubmenu(parent: Menu, actions: TaskActions, files: TFile[], where: string) {
-	addSubmenuEntry(parent, '文本排版', 'message-square', (menu) => {
+function addTextSubmenu(
+	parent: Menu,
+	actions: TaskActions,
+	files: TFile[],
+	where: string,
+	settings: ImageTransferSettings
+) {
+	if (settings.fileMenuTextSubmenu === false) return;
+
+	addSubmenuEntry(parent, TEXT_SUBMENU_TITLE, 'message-square', (menu) => {
 		menu.addItem((item) => {
 			item
 				.setTitle(`修复${where}的排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）`)

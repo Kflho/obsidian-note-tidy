@@ -267,6 +267,56 @@ Two "guarantee-style" fixes, **on by default**, that only touch what is out of l
 | `#` / `###` / `##` | `#` / `##` / `##` | coming back up gives siblings, not parent/child |
 | `##` / `#####` | `##` / `###` | the first heading sets the base |
 
+### 11. Copy images as files to the clipboard
+
+Most "copy image" implementations in Obsidian copy a **bitmap**: QQ, Word and WeChat accept it, but Windows Explorer does not — pasting into a folder gives you nothing at all ([the exact complaint this was built for](https://forum-zh.obsidian.md/t/topic/40964); Image Toolkit and Image Context Menus both behave this way).
+
+This plugin puts the **file** on the clipboard instead, so pasting into a folder produces the real `图片.png`:
+
+| Where you paste | What you get |
+|-----------------|--------------|
+| A folder in Explorer (or any file manager) | The actual image file(s) — copied, not moved |
+| QQ / WeChat / Word | The picture itself (a bitmap is added alongside for a single image) |
+| A text editor | Nothing — the text format is deliberately not written (some apps paste twice when both text and files are present) |
+
+**Several images at once**: select the text containing the images and use the menu / command — the menu shows **复制 3 张图片（Note Tidy）**. Images are deduplicated (the same picture embedded twice is copied once) and ambiguous same-name links are skipped rather than guessed, exactly like the plugin's other image features.
+
+**Text and images together**: if the selection contains words as well as images, the text comes along — so pasting into QQ / WeChat gives you the sentence *with* the pictures in place, not just the images. That copy carries an HTML flavour (CF_HTML) with the picture data embedded, plus the plain text:
+
+| What you selected | Paste into a folder | Paste into QQ / WeChat |
+|-------------------|---------------------|------------------------|
+| Images only (e.g. just `![[图片.png]]`) | The image file(s) | The picture |
+| Text + images | *(nothing — this copy carries no file list, see below)* | The text and the pictures, in order |
+
+Why the two differ: a clipboard entry that carries a **file list** makes QQ and WeChat upload the file and ignore everything else — the sentence never shows up ([the exact problem](https://www.wsisp.com/helps/30963.html) other plugins hit). So the mixed copy sends HTML + text only, with the images inlined as `data:` URLs (a browser-engine chat client will not load a local `file:///` image from pasted HTML). Consequences worth knowing:
+
+- to paste image **files** into a folder, select the images alone (or use the 复制图片 menu item on an image);
+- images are inlined up to 8 MB per image / 16 MB in total — a bigger photo falls back to its `file:///` path, which Word and friends still resolve;
+- mixed copy is Windows-only; on macOS this plugin puts the files on the clipboard (AppleScript can only write one flavour at a time).
+
+Where to find it (the menu item always carries **（Note Tidy）** — Obsidian's own image menu already has a *复制图片* item, and it is the bitmap one):
+
+- **Right-click a rendered image in a note** (reading view and Live Preview) → **复制图片（Note Tidy）** is *added* to the menu. Nothing is replaced: Obsidian's own items and other plugins' items stay exactly where they were;
+- **Right-click inside the editor with the caret on an image link** (or with images selected) → the same item, appended to Obsidian's own editor menu;
+- **Command palette** → **复制图片到剪贴板（可在文件夹中粘贴为文件）** (assign a hotkey if you like);
+- **Just press <kbd>Ctrl</kbd>+<kbd>C</kbd>** with the images selected (or the cursor on one) — off by default, switch it on under **Settings → Note Tidy → 复制 → 接管 Ctrl+C**. Same rules as above: only inside the note body, and words in the selection are copied along with the pictures.
+
+### Managing the context menus
+
+Because items are inserted into the existing menus (rather than taking them over), the plugin can also **show you what is in each menu and switch entries on and off**. Three menus are covered:
+
+| Menu | What it is | This plugin adds |
+|------|------------|------------------|
+| 图片 | right-click a rendered image in a note | 复制图片 · 快速设置图片大小 · 管理右键菜单 |
+| 笔记 | right-click the note text | 复制图片 · 快速设置图片大小 · 管理右键菜单 |
+| 文件夹 | right-click a file or folder in the file explorer | 管理右键菜单 (your own 图片功能 / 文本排版 submenus are already there) |
+
+- right-click once in the menu you care about, then use **管理右键菜单…（Note Tidy）** in it (or run **管理右键菜单** from the command palette) → the panel lists what was in that menu — Obsidian's own entries, other plugins' and this plugin's;
+- **a switch that is on means the entry shows up**; turn it off to hide that entry. This plugin's own entries have their own switches and can never be hidden by the entry list itself;
+- everything is stored in **Settings → Note Tidy → 右键菜单**, where the list can also be edited as plain text (`图片：标题` / `笔记：标题` / `文件夹：标题`).
+
+**Platforms**: Windows (PowerShell writes the file list and, for a single image, the bitmap in one clipboard payload) and macOS (`osascript` + `POSIX file`, Finder pastes the file). Linux is not supported yet — the command reports it instead of failing silently.
+
 ## How to use
 
 The right-click menu is grouped into two submenus so it stays short: **图片功能** (image tools) and **文本排版** (text layout). Both carry a `›` chevron at the right edge and open on hover or click — they use Obsidian's own submenu, so the parent menu stays open.
@@ -275,11 +325,12 @@ The right-click menu is grouped into two submenus so it stays short: **图片功
 |--------|--------|
 | Right-click a `.md` file | **图片功能**: convert / rename / organize locations / set size · **文本排版**: fix layout (spaces / indent / chat log / tags / formulas) |
 | Right-click a folder | The same two submenus, applied to every note in that folder |
-| Command palette (`Ctrl+P`) | Every menu action is also a command: convert images (current note / entire vault), rename garbled images (current note / entire vault), rename all images vault-wide (normal or forced), organize image locations (current note / entire vault), set image size (current note / entire vault), fix layout — spaces, indent, chat log, tags and formulas (current note / entire vault) |
+| Right-click an image (in a note, or its link in the editor) | **复制图片（Note Tidy）** is added to the menu — copies the image file itself, so it can be pasted into a folder, or into QQ / Word as a picture. Select a range first to copy several images at once (**复制 3 张图片（Note Tidy）**). The same menu also gets **快速设置图片大小（Note Tidy）** (applies the default size to the note, no dialog) and, in the image menu, **管理右键菜单…（Note Tidy）**, which lists the entries of the 图片 / 笔记 / 文件夹 menus and lets you switch them off |
+| Command palette (`Ctrl+P`) | Every menu action is also a command: convert images (current note / entire vault), rename garbled images (current note / entire vault), rename all images vault-wide (normal or forced), organize image locations (current note / entire vault), set image size (current note / entire vault), copy images to the clipboard, fix layout — spaces, indent, chat log, tags and formulas (current note / entire vault) |
 
 ### Settings
 
-The settings tab follows the same split as the spec: **图片导入** / **图片大小** for images, **代码格式** for how source code (LaTeX) is written, **排版格式** for what the reader sees.
+The settings tab follows the same split as the spec: **图片导入** / **图片大小** for images, **代码格式** for how source code (LaTeX) is written, **排版格式** for what the reader sees, plus **状态栏** for the optional status-bar counter, **右键菜单** for the context-menu entries and **复制** for what <kbd>Ctrl</kbd>+<kbd>C</kbd> does in the editor.
 
 - **Attachment location** — where transferred images are stored (system default, vault root, current folder, subfolder, or custom path)
 - **Image naming preset** — format for renamed images, supports `{YYYY}` `{MM}` `{DD}` `{HH}` `{mm}` `{ss}`
@@ -290,6 +341,8 @@ Image size:
 - **Default width** — pre-filled width in the size dialog, in pixels
 - **Default height** — optional; leave empty to scale proportionally
 - **Overwrite existing sizes** — when off, only images without a size are filled in
+
+> The same three values are what the **快速设置图片大小（Note Tidy）** item (and the matching command) applies — it skips the dialog entirely.
 
 Chat log formatting:
 
@@ -347,6 +400,19 @@ Chat log:
 - **Image position in mixed messages** — image above the text, below the text, or keep the original order
 - **Blank line between messages** — only available when username, date and time are all turned off; inserts an empty line between adjacent messages so they stay visually distinct
 
+- **Show image count for the selection** — off by default. When on, selecting text in the editor shows how many images the selection contains in the bottom-right status bar (`🖼 选中 3 张图片`). Only embeds count (`![[photo.png]]`, `![alt](photo.png)`, including sizes / aliases / fragments and `avif` / `svg`); a plain link to an image file does not, and neither do links inside fenced code blocks or inline code. The cell stays empty while nothing is selected or the selection has no images.
+
+Context menus:
+
+- **Show "copy image"** — on by default; inserts **复制图片（Note Tidy）** into the image menu and the note menu (nothing is replaced)
+- **Show "quick image size"** — on by default; inserts **快速设置图片大小（Note Tidy）** — applies the default size above to the current note without the dialog
+- **Show "manage context menus"** — on by default; inserts the entry that opens the management panel (turn it off and use the command palette instead)
+- **Hidden menu entries** — one `scope：title` per line, scope being `图片` / `笔记` / `文件夹` (a line without a scope counts as `图片`); those entries are not shown in that menu. This list covers Obsidian's own entries and other plugins' ones — this plugin's own entries are governed by the switches above, so they can never hide themselves. The management panel fills this in for you
+
+Copying:
+
+- **Take over Ctrl+C in the editor** — off by default. `![[图片.png]]` is *text*: a plain <kbd>Ctrl</kbd>+<kbd>C</kbd> copies that string, and pasting it into a folder gives you a file name, not a picture. With this on, pressing <kbd>Ctrl</kbd>+<kbd>C</kbd> (<kbd>⌘</kbd>+<kbd>C</kbd> on macOS) inside the note body copies the image **files** instead — the images in the selection, or the one under the cursor when the selection has none, exactly like the 复制图片 menu item. If the selection also contains words, the words come with them, so QQ / WeChat paste the sentence *and* the pictures (that copy carries no file list — see section 11). It only acts inside the editor (text boxes, settings and other plugins' buttons are left alone), and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> still do whatever they did before
+
 ## Supported formats
 
 `png` `jpg` `jpeg` `gif` `bmp` `webp` `heic` (case-insensitive)
@@ -392,12 +458,14 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 | `src/image/organize.ts` | copying images into a note's own attachment folder and repointing links |
 | `src/image/attachment-folder.ts` | resolving / creating the attachment folder (shared by several features) |
 | `src/image/` (rest) | `transfer.ts` external imports, `rename.ts` garbled / bulk renaming, `naming.ts` presets & uniqueness, `external-path.ts` flexible path probing, `constants.ts` extension tables |
+| `src/image/scan.ts` · `src/image/copy.ts` · `src/image/clipboard.ts` · `src/image/rich-copy.ts` | one shared scanner for image embeds (used by the status-bar counter and by copy), resolving links to files on disk, putting files on the system clipboard (PowerShell `DataObject` on Windows / `osascript` on macOS — Electron cannot write a file list), and building the CF_HTML flavour used when a copy contains text *and* images |
+| `src/ui/image-menu.ts` · `src/ui/menu-injector.ts` · `src/ui/menu-hidden.ts` · `src/ui/menu-manage-modal.ts` · `src/ui/copy-shortcut.ts` | this plugin's context-menu entries (image menu + note menu), the shared "observe the native menu and insert into it" layer (`Menu.prototype` + per-instance observation), the per-menu hidden-entry list, the panel that shows/toggles the entries of the 图片 / 笔记 / 文件夹 menus, and the optional <kbd>Ctrl</kbd>+<kbd>C</kbd> takeover |
 | `src/settings/` | `model.ts` fields & defaults, `fields/` the single source of truth for the settings UI, `tab.ts` renders it declaratively (1.13+) or by hand (below) |
-| `src/tasks.ts` · `src/batch.ts` · `src/ui/` | task orchestration, the batch shell (mutex + notice suppression + progress), menus and modals |
+| `src/tasks.ts` · `src/batch.ts` · `src/ui/` | task orchestration, the batch shell (mutex + notice suppression + progress), the status-bar selection image counter (a CodeMirror selection listener), menus and modals |
 
 `npm test` runs expected-output checks, idempotency across every settings combination, blank-line and content-loss invariants, and the safety rules that keep captions, non-image links and same-name images untouched.
 
-`test/commands.test.ts` boots the plugin against a stubbed Obsidian API and audits the entry points: every right-click menu action must have a matching command (and the reverse), command IDs are locked in, and both submenu paths — Obsidian's native `setSubmenu` and the fallback — must produce the same actions.
+`test/commands.test.ts` boots the plugin against a stubbed Obsidian API and audits the entry points: every right-click menu action must have a matching command (and the reverse — the file menu and the editor/image menu are two separate audit tables), command IDs are locked in, and both submenu paths — Obsidian's native `setSubmenu` and the fallback — must produce the same actions.
 
 ## Installation
 

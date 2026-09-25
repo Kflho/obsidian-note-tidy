@@ -17,6 +17,31 @@ interface Fence {
 }
 
 /**
+ * 围栏代码块的状态机：喂进一行，回答"这一行属于围栏代码块吗"（围栏行本身也算）。
+ *
+ * 围栏必须同字符、且闭合围栏不短于开始围栏才算闭合，未闭合时后面全部受保护。
+ * 提取成闭包是为了让下面两个函数共用同一份判定 —— 只标围栏的 `markFenceLines`
+ * 与连 frontmatter 一起标的 `markProtectedLines`，两边不能各写一套。
+ */
+function createFenceTracker(): (line: string) => boolean {
+	let fence: Fence | null = null;
+
+	return (line: string): boolean => {
+		const fenceMatch = /^[ \t]*(`{3,}|~{3,})/.exec(line);
+		if (fenceMatch) {
+			const marker = fenceMatch[1] ?? '';
+			if (fence === null) {
+				fence = { char: marker.charAt(0), length: marker.length };
+			} else if (fence.char === marker.charAt(0) && marker.length >= fence.length) {
+				fence = null;
+			}
+			return true;
+		}
+		return fence !== null;
+	};
+}
+
+/**
  * 标记出哪些行属于"保护区"。
  *
  * 约定与 Obsidian 一致：
@@ -28,8 +53,8 @@ interface Fence {
  */
 export function markProtectedLines(lines: string[]): boolean[] {
 	const flags: boolean[] = new Array<boolean>(lines.length).fill(false);
+	const trackFence = createFenceTracker();
 	let inFrontmatter = false;
-	let fence: Fence | null = null;
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i] ?? '';
@@ -45,21 +70,22 @@ export function markProtectedLines(lines: string[]): boolean[] {
 			continue;
 		}
 
-		const fenceMatch = /^[ \t]*(`{3,}|~{3,})/.exec(line);
-		if (fenceMatch) {
-			const marker = fenceMatch[1] ?? '';
-			flags[i] = true;
-			if (fence === null) {
-				fence = { char: marker.charAt(0), length: marker.length };
-			} else if (fence.char === marker.charAt(0) && marker.length >= fence.length) {
-				fence = null;
-			}
-			continue;
-		}
-		if (fence !== null) flags[i] = true;
+		flags[i] = trackFence(line);
 	}
 
 	return flags;
+}
+
+/**
+ * 只标围栏代码块的行，**不做 frontmatter 判定**。
+ *
+ * 给"拿到的是笔记片段而不是整篇"的调用方用（例如状态栏数选区内图片张数）：
+ * 片段开头那个 `---` 多半是分隔线，照 `markProtectedLines` 判会把
+ * "以 `---` 开头、以 `---` 结尾"的选区整段当成 frontmatter 吃掉。
+ */
+export function markFenceLines(lines: string[]): boolean[] {
+	const trackFence = createFenceTracker();
+	return lines.map(line => trackFence(line));
 }
 
 /** 列表符号：`-` `*` `+` `1.` `1)`，后面跟空白或行尾 */

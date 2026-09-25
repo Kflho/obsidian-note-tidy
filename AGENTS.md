@@ -8,7 +8,7 @@
 - **加设置项**只改 `src/settings/model.ts` + `src/settings/fields/`：面板的两条渲染路径都由字段表生成，别再去手写 DOM。
 - **不可破坏**：排版函数必须幂等、必须在没有改动时返回原内容、保护区判定统一走 `src/text/line-scan.ts` 与 `src/text/inline-scan.ts`、`src/text/` 不许 import obsidian。
 - **命令 ID、导出符号、设置字段名是稳定接口**，改名会直接让 `test/commands.test.ts` / `test/rules.test.ts` 失败。
-- **规范笔记改了**（vault 里的 `data/data note/note note.md`）：先改 `rule-registry.ts` 的章节路径与条目号，再跑 `npm test`，最后重新生成文档。
+- **规范笔记改了**（vault 里的 `data/data note/data note.md`）：先改 `rule-registry.ts` 的章节路径与条目号，再跑 `npm test`，最后重新生成文档。
 
 ## Project overview
 

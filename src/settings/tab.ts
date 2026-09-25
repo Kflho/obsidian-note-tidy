@@ -108,6 +108,14 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 					.onChange(write));
 				return;
 			}
+			case 'textarea': {
+				const value = this.getControlValue(field.key);
+				setting.addTextArea(text => text
+					.setPlaceholder(field.control.type === 'textarea' ? field.control.placeholder : '')
+					.setValue(typeof value === 'string' ? value : '')
+					.onChange(write));
+				return;
+			}
 			case 'toggle':
 				setting.addToggle(toggle => toggle
 					.setValue(Boolean(this.getControlValue(field.key)))
@@ -155,6 +163,7 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 			defaultValue: DEFAULT_SETTINGS[field.key],
 			...(field.control.type === 'dropdown' ? { options: field.control.options } : {}),
 			...(field.control.type === 'text' ? { placeholder: field.control.placeholder } : {}),
+			...(field.control.type === 'textarea' ? { placeholder: field.control.placeholder, rows: field.control.rows } : {}),
 			...(field.disabled ? { disabled: () => field.disabled?.(settings()) === true } : {}),
 		};
 		const definition = {

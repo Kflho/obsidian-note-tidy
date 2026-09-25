@@ -15,6 +15,12 @@ export class TFolder extends TAbstractFile {}
 export class App {}
 export class Component {}
 
+/**
+ * 视图基类替身：菜单注册要用 `instanceof MarkdownView` 判断"这张图属于哪个视图"。
+ * 测试里造不出真的视图，只需要这个类存在、能通过 instanceof 即可。
+ */
+export class MarkdownView {}
+
 /** 菜单项替身：只保留插件用到的方法，外加记录标题与点击回调 */
 export class MenuItem {
 	constructor(menu) {
@@ -97,7 +103,7 @@ Notice.messages = [];
 export class Setting {}
 export class PluginSettingTab {}
 
-/** 插件基类替身：记录 addCommand / addStatusBarItem / addSettingTab 的结果 */
+/** 插件基类替身：记录 addCommand / addStatusBarItem / addSettingTab / 编辑器扩展的结果 */
 export class Plugin {
 	constructor(app, manifest) {
 		this.app = app;
@@ -105,6 +111,7 @@ export class Plugin {
 		this.commands = [];
 		this.settingTabs = [];
 		this.statusBarItems = [];
+		this.editorExtensions = [];
 		this.events = [];
 	}
 	addCommand(command) {
@@ -118,6 +125,9 @@ export class Plugin {
 	}
 	addSettingTab(tab) {
 		this.settingTabs.push(tab);
+	}
+	registerEditorExtension(extension) {
+		this.editorExtensions.push(extension);
 	}
 	registerEvent(event) {
 		this.events.push(event);

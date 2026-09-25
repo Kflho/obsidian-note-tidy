@@ -76,6 +76,25 @@ export interface ImageTransferSettings {
 	spacingHalfToFullPunct: boolean;
 	/** 符号自己的空格规则（逐符号：`,` `.` 后空一格、`| & →` 左右空一格、`^` 不空…） */
 	spacingSymbolPad: boolean;
+	// ---- 状态栏 ----
+	/** 状态栏显示当前选中内容里的图片张数 */
+	showSelectionImageCount: boolean;
+	// ---- 右键菜单 ----
+	/** 在笔记右键菜单（图片菜单 + 笔记正文菜单）里显示「复制图片（Note Tidy）」 */
+	imageMenuCopyItem: boolean;
+	/** 在笔记右键菜单里显示「快速设置图片大小（Note Tidy）」 */
+	imageMenuQuickSizeItem: boolean;
+	/** 在图片菜单里显示「管理右键菜单…（Note Tidy）」 */
+	imageMenuManageItem: boolean;
+	/** 在文件 / 文件夹的右键菜单里显示「图片功能」二级栏 */
+	fileMenuImageSubmenu: boolean;
+	/** 在文件 / 文件夹的右键菜单里显示「文本排版」二级栏 */
+	fileMenuTextSubmenu: boolean;
+	/** 三个右键菜单里要隐藏的项（每行 `作用域：标题`，作用域 = 图片 / 笔记 / 文件夹） */
+	menuHiddenItems: string;
+	// ---- 复制 ----
+	/** 接管 Ctrl+C：光标处 / 选中内容里有图片时复制图片文件，而不是链接文字 */
+	takeOverCopyShortcut: boolean;
 }
 
 export const DEFAULT_SETTINGS: ImageTransferSettings = {
@@ -118,6 +137,18 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	spacingDigitUnit: DEFAULT_SPACING_OPTIONS.digitUnit,
 	spacingHalfToFullPunct: DEFAULT_SPACING_OPTIONS.halfToFullPunct,
 	spacingSymbolPad: DEFAULT_SPACING_OPTIONS.symbolPad,
+	// 状态栏那一格只在选中内容里真的有图片时才出现，默认不开（右下角越干净越好）
+	showSelectionImageCount: false,
+	// 右键菜单：默认插五项（图片功能 / 文本排版 两个二级栏 + 复制图片 / 快速设置大小 / 管理入口），
+	// 不接管菜单，原生项都在
+	imageMenuCopyItem: true,
+	imageMenuQuickSizeItem: true,
+	imageMenuManageItem: true,
+	fileMenuImageSubmenu: true,
+	fileMenuTextSubmenu: true,
+	menuHiddenItems: '',
+	// 接管 Ctrl+C 会改掉一个用惯了的快捷键，默认不开
+	takeOverCopyShortcut: false,
 }
 
 /**

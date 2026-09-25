@@ -1,10 +1,15 @@
 import { App, Notice, TFile } from 'obsidian';
 import type { BatchContext, BatchRunner } from './batch';
+import { copyImageFiles } from './image/clipboard';
+import { resolveImageFiles } from './image/copy';
+import { buildRichContent } from './image/rich-copy';
+import type { CopySelection } from './image/rich-copy';
+import type { ImageRef } from './image/scan';
 import { buildBasenameIndex } from './image/links';
 import { buildVaultBasenameMap } from './image/naming';
 import { organizeNoteImages } from './image/organize';
 import { countImages, fixImageLinkFormats, renameGarbledImages, renameImagesToPreset } from './image/rename';
-import { applyImageSize } from './image/size';
+import { applyImageSize, validateImageSize } from './image/size';
 import type { ImageSizeOptions } from './image/size';
 import { transferExternalImages } from './image/transfer';
 import { resolveIndent } from './text/chat-log';
@@ -15,6 +20,9 @@ import { resolveLeadingIndentMode } from './text/indent';
 import { formatNoteText } from './text/pipeline';
 import type { TextPipelineOptions } from './text/pipeline';
 import { ConfirmRenameModal } from './ui/confirm-rename-modal';
+import { MenuManageModal } from './ui/menu-manage-modal';
+import { lastDetectedMenuItems } from './ui/image-menu';
+import { parseHiddenItems, serializeHiddenItems } from './ui/menu-hidden';
 import { ImageSizeModal } from './ui/image-size-modal';
 import type { StatusBarProgress } from './ui/progress';
 
@@ -38,8 +46,19 @@ export interface TaskActions {
 	organizeImages(files: TFile[], where: string): Promise<void>;
 	/** 打开「图片大小」弹窗 */
 	openImageSize(files: TFile[], scopeLabel: string): void;
+	/** 快速设置一篇笔记的图片大小：直接用设置里的默认尺寸，不弹窗 */
+	quickSetImageSize(file: TFile): Promise<void>;
+	/** 复制图片到系统剪贴板（可在文件夹里粘出文件，聊天窗口里贴出图片） */
+	copyImages(file: TFile, refs: ImageRef[], selection?: CopySelection | null): Promise<void>;
+	/** 打开「图片右键菜单」管理面板（看检测到的菜单项、开关哪些显示） */
+	openMenuManager(): void;
 	/** 修复排版（空格 / 缩进 / 聊天记录 / 标签 / 公式） */
 	typeset(files: TFile[], where: string): Promise<void>;
+}
+
+/** 提示里列图片名：最多三个，其余用"…"带过（提示太长会挡住屏幕上的内容） */
+function summarizeNames(names: string[]): string {
+	return names.length > 3 ? `${names.slice(0, 3).join('、')}…` : names.join('、');
 }
 
 export class ImageTasks implements TaskActions {
@@ -47,7 +66,9 @@ export class ImageTasks implements TaskActions {
 		private readonly app: App,
 		private readonly getSettings: () => ImageTransferSettings,
 		private readonly runner: BatchRunner,
-		private readonly progress: StatusBarProgress
+		private readonly progress: StatusBarProgress,
+		/** 写盘（设置面板之外改设置的地方，比如菜单管理面板，得自己存） */
+		private readonly saveSettings: () => Promise<void>
 	) {}
 
 	// ------------------------------------------------------------------ 外部图片转换
@@ -311,6 +332,30 @@ export class ImageTasks implements TaskActions {
 		);
 	}
 
+	/**
+	 * 快速设置图片大小：**直接用设置里的默认宽度 / 高度 / 覆盖开关**，不弹窗。
+	 *
+	 * 弹窗那条路（`openImageSize`）适合"这次想换个尺寸"，这条适合"平时那套参数再来一遍"。
+	 * 参数不合法（比如宽度填了字母）时不出手，只提示 —— 免得把一堆链接改坏。
+	 */
+	async quickSetImageSize(file: TFile): Promise<void> {
+		const settings = this.getSettings();
+		const invalid = validateImageSize(settings.imageSizeWidth, settings.imageSizeHeight);
+		if (invalid !== null) {
+			new Notice(`⚠️ 默认尺寸无效：${invalid}。请在「图片大小」中修改默认宽度与高度。`);
+			return;
+		}
+		await this.setImageSize(
+			[file],
+			{
+				width: settings.imageSizeWidth,
+				height: settings.imageSizeHeight,
+				overwriteExisting: settings.imageSizeOverwrite,
+			},
+			'当前笔记'
+		);
+	}
+
 	/** 打开图片大小设置弹窗 */
 	openImageSize(files: TFile[], scopeLabel: string): void {
 		if (files.length === 0) {
@@ -327,6 +372,87 @@ export class ImageTasks implements TaskActions {
 			initialHeight: settings.imageSizeHeight,
 			initialOverwrite: settings.imageSizeOverwrite,
 			onConfirm: (options) => this.setImageSize(files, options, scopeLabel),
+		}).open();
+	}
+
+	// ------------------------------------------------------------------ 复制图片
+
+	/**
+	 * 把图片复制进系统剪贴板（命令面板、右键菜单与 Ctrl+C 三处共用）。
+	 *
+	 * 两种结果：
+	 * - **纯图片**（选区里没别的文字）：写文件拖放列表（+ 单张时的位图），文件夹里能粘出文件；
+	 * - **图文混排**（选区里既有文字又有图片）：只写 HTML 与纯文本，QQ / 微信 里贴出来是
+	 *   "文字 + 图片"。这时**不放位图**（有位图微信就不解析 HTML 了）、**也不放文件列表**
+	 *   （有文件列表 QQ 就只当图片上传，文字不会出现 —— 用户实测过）。拼法见 `rich-copy.ts`。
+	 *
+	 * 与其它任务不同，这个不需要批量外壳：它不动仓库、只跑一条系统命令，
+	 * 结果一句话就能说完（复制了几张、能不能粘）。**解析不出来的直接说清楚为什么**，
+	 * 因为"点了没反应"比"提示没找到"更让人摸不着头脑。
+	 */
+	async copyImages(file: TFile, refs: ImageRef[], selection: CopySelection | null = null): Promise<void> {
+		if (refs.length === 0) {
+			new Notice('没有找到可复制的图片。请把光标放到图片链接上，或选中包含图片的内容。');
+			return;
+		}
+
+		const images = await resolveImageFiles(this.app, file.path, refs);
+		if (images.length === 0) {
+			new Notice('没有找到对应的图片文件，它可能不在仓库中，或存在同名图片而无法确定。');
+			return;
+		}
+
+		const rich = await buildRichContent(selection, images);
+
+		try {
+			// 纯图片且只有一张时顺带放一份位图，QQ / Word 这类只认图的程序也能直接贴
+			const bitmapPath = rich === null && images.length === 1 ? images[0]?.path ?? null : null;
+			await copyImageFiles(images.map(image => image.path), bitmapPath, process.platform, rich);
+
+			const names = summarizeNames(images.map(image => image.name));
+			new Notice(
+				rich === null
+					? `📋 已复制 ${images.length} 张图片：${names}\n可粘贴到文件夹或聊天窗口。`
+					: `📋 已复制文字和 ${images.length} 张图片：${names}\n粘贴到聊天窗口是图文混排。`,
+				4000
+			);
+		} catch (e) {
+			console.error('❌ [Note Tidy] 复制图片失败：', e);
+			new Notice('❌ 复制图片失败，详情请见控制台。');
+		}
+	}
+
+	/**
+	 * 打开「右键菜单」管理面板（图片 / 笔记 / 文件夹三个菜单）。
+	 *
+	 * 清单来自"最近一次右键"（menu-injector.ts 在上膛期间看到的项），
+	 * 面板里关掉的项写进设置、下次就不再出现在那个菜单里。
+	 */
+	openMenuManager(): void {
+		const settings = this.getSettings();
+		new MenuManageModal(this.app, {
+			detected: {
+				image: lastDetectedMenuItems('image'),
+				note: lastDetectedMenuItems('note'),
+				folder: lastDetectedMenuItems('folder'),
+			},
+			hidden: parseHiddenItems(settings.menuHiddenItems),
+			ownItems: {
+				copy: settings.imageMenuCopyItem !== false,
+				quickSize: settings.imageMenuQuickSizeItem !== false,
+				manage: settings.imageMenuManageItem !== false,
+				imageSubmenu: settings.fileMenuImageSubmenu !== false,
+				textSubmenu: settings.fileMenuTextSubmenu !== false,
+			},
+			save: async ({ hidden, ownItems }) => {
+				settings.imageMenuCopyItem = ownItems.copy;
+				settings.imageMenuQuickSizeItem = ownItems.quickSize;
+				settings.imageMenuManageItem = ownItems.manage;
+				settings.fileMenuImageSubmenu = ownItems.imageSubmenu;
+				settings.fileMenuTextSubmenu = ownItems.textSubmenu;
+				settings.menuHiddenItems = serializeHiddenItems(hidden);
+				await this.saveSettings();
+			},
 		}).open();
 	}
 

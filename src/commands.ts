@@ -1,14 +1,17 @@
-import { Notice } from 'obsidian';
-import type { Editor, MarkdownFileInfo, MarkdownView, Plugin } from 'obsidian';
+import { MarkdownView, Notice } from 'obsidian';
+import type { Editor, MarkdownFileInfo, Plugin } from 'obsidian';
 import type { ImageTasks } from './tasks';
+import { editorImagePicks } from './ui/image-menu';
 
 /**
  * 命令注册（从 main.ts 抽出）。
  *
- * 12 条命令与右键菜单里的操作一一对应：**命令 ID 是已发布版本的稳定接口，不能改名**
+ * 命令与右键菜单里的操作一一对应：**命令 ID 是已发布版本的稳定接口，不能改名**
  * （test/commands.test.ts 会逐条比对菜单与命令表，漏注册就失败）。
  *
  * 「当前笔记」类命令在没打开笔记时立刻提示；「整个仓库」类命令直接铺开跑。
+ * 唯一的例外是「复制图片」：它挂在**编辑器 / 图片的右键菜单**上（不是文件菜单），
+ * 所以审计表里单独列在 EDITOR_OPERATIONS。
  */
 
 /** 命令里反复用到的「拿当前文件」检查 */
@@ -113,6 +116,46 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 		name: '设置整个仓库的图片大小',
 		callback: () => {
 			tasks.openImageSize(app.vault.getMarkdownFiles(), '整个仓库');
+		}
+	});
+
+	plugin.addCommand({
+		id: 'quick-set-image-size-current-note',
+		name: '快速设置当前笔记的图片大小',
+		// 不用 editorCallback：那个在阅读模式下会让命令从面板里消失，而笔记多半是在阅读模式里看的
+		checkCallback: (checking: boolean) => {
+			const view = app.workspace.getActiveViewOfType(MarkdownView);
+			const file = view?.file ?? null;
+			if (!file) return false;
+			if (!checking) {
+				void tasks.quickSetImageSize(file);
+			}
+			return true;
+		}
+	});
+
+	plugin.addCommand({
+		id: 'copy-images-to-clipboard',
+		name: '复制图片到剪贴板',
+		// 不用 editorCallback：那个在阅读模式下会让命令变灰，而图片多半是在阅读模式里右键的
+		checkCallback: (checking: boolean) => {
+			const view = app.workspace.getActiveViewOfType(MarkdownView);
+			const file = view?.file ?? null;
+			const editor = view?.editor;
+			if (!file || !editor) return false;
+			if (!checking) {
+				const picks = editorImagePicks(editor);
+				void tasks.copyImages(file, picks.refs, picks.selection);
+			}
+			return true;
+		}
+	});
+
+	plugin.addCommand({
+		id: 'manage-image-menu',
+		name: '管理右键菜单',
+		callback: () => {
+			tasks.openMenuManager();
 		}
 	});
 
