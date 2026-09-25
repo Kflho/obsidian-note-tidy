@@ -1,6 +1,19 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from 'node:module';
+import { deployArtifacts } from "./deploy.mjs";
+
+// 打包完成后把运行用文件同步到 vault 里的插件目录（源码只在本仓库）。
+// 目标目录不存在时静默跳过 —— CI 上跑 build 不该因此失败。
+const deployToPluginDir = {
+	name: "deploy-to-plugin-dir",
+	setup(build) {
+		build.onEnd((result) => {
+			if (result.errors.length > 0) return;
+			deployArtifacts();
+		});
+	},
+};
 
 const banner =
 `/*
@@ -39,6 +52,7 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
+	plugins: [deployToPluginDir],
 });
 
 if (prod) {

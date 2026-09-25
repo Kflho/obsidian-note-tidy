@@ -16,14 +16,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm install              # Install dependencies
-npm run dev              # Watch mode (esbuild --watch)
-npm run build            # Type-check then bundle for production (tsc --noEmit + esbuild minified)
+npm run dev              # Watch mode (esbuild --watch)；每次重建后自动同步到插件目录
+npm run build            # Type-check then bundle for production (tsc --noEmit + esbuild minified)；同样自动同步
+npm run deploy           # 只把 main.js / manifest.json / styles.css 复制到插件目录（不重新打包）
 npm test                 # Run test/*.test.ts through test/run-tests.mjs (no framework needed)
 npm run lint             # ESLint
 npm run version          # Bump manifest.json version + update versions.json (reads from npm_package_version env var)
 ```
 
 The esbuild config (`esbuild.config.mjs`) bundles `src/main.ts` into `main.js` (CJS, ES2018 target). Obsidian, electron, and CodeMirror packages are marked external.
+
+## 仓库在哪儿：源码仓库 ↔ 插件目录（2026-09 迁移）
+
+**源码只在本仓库**：`D:\data\local\software\programming\JavaScript\projects\js_02`（不在 vault 里，git 仓库、`node_modules`、测试、文档都在这儿）。
+
+**vault 里的插件目录**：`D:\data\online\software\common\obsidian\.obsidian\plugins\note-tidy\` —— **只放运行用文件**，就四个：
+
+| 文件 | 谁写的 |
+| --- | --- |
+| `main.js` | `npm run build` / `npm run dev` 产出后由 `deploy.mjs` 复制过去 |
+| `manifest.json` | 仓库里的同名文件（版本号改了要同步，`build` / `deploy` 会带过去） |
+| `styles.css` | 仓库里的同名文件 |
+| `data.json` | **Obsidian 自己写**（用户设置），仓库里没有、永远别删 |
+
+所以：**别在插件目录里改代码、跑 npm**（那边没有 `package.json`，也没有 `src/`）。改完源码跑 `npm run build`（或开着 `npm run dev`），产物会自动落到插件目录，回 Obsidian 里重新加载插件即可。
+
+同步逻辑就一个文件 `deploy.mjs`：目标目录取 `OBSIDIAN_PLUGIN_DIR` 环境变量，没设就用里面写死的本机 vault 路径；目录不存在（CI 上跑 build）就打印一行提示跳过，**不会让构建失败**。`esbuild.config.mjs` 挂了个 `onEnd` 插件调它，所以 `dev` 的 watch 与 `build` 都自动同步。换 vault / 换机器时设环境变量即可，不用改代码。
+
+⚠️ `npm run dev` 同步过去的是**开发版** `main.js`（未压缩、带 inline sourcemap，体积是压缩版的十倍上下）—— 开发时正常，**出 release / 发版前跑一次 `npm run build`**，插件目录里那份才是压缩版。
+
+⚠️ 两个连带影响：
+
+- `rules.test.ts` 核对规范出处要用 vault 里的 `data/data note/data note.md`。仓库搬出 vault 后那句相对路径（`../../../data/...`）指到了 `projects/` 下，核对会被**静默跳过**（只打印一行 ℹ️）。现在 `src/rule-registry.ts` 的 `SPEC_NOTE_PATH` 先认 `NOTE_TIDY_SPEC` 环境变量，再按候选列表找第一份存在的（第一条是本机 vault 的绝对路径），换机器时用环境变量指路。
+- 分支 / 发版流程不变：git 操作、`npm run build`、`npm test`、tag 与 release 工作流全在新仓库里跑，CI 不碰 vault。
 
 ## Architecture
 
@@ -218,7 +243,7 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 
 **加一条命令 / 菜单项**：`src/commands.ts` + `src/ui/menus.ts`。命令 ID 是已发布版本的稳定接口，`test/commands.test.ts` 会逐条比对菜单与命令表 —— **文件菜单**（`file-menu`）记在 `OPERATIONS`，**编辑器 / 图片右键菜单**（`editor-menu`，如「复制图片」）记在 `EDITOR_OPERATIONS`，两张表各自与命令一一对应。
 
-**改了规范笔记之后**：先改 `src/rule-registry.ts` 里的章节路径与条目号，跑 `npm test` —— 对不上会直接列出是哪几条；再重新生成 `docs/规则登记表.md`。注意测试能抓到"找不到第 N 条"，但抓不到"编号没变、内容换了"（例如 `英文符号 2` 从引号改成了省略号），所以改完要顺手核对该条目说的还是不是那条规则。
+**改了规范笔记之后**：先改 `src/rule-registry.ts` 里的章节路径与条目号，跑 `npm test` —— 对不上会直接列出是哪几条；再重新生成 `docs/规则登记表.md`。规范笔记不在仓库里（在 vault 的 `data/data note/data note.md`），`SPEC_NOTE_PATH` 找不到时**只打印一行 ℹ️ 就跳过核对**（CI 上正常），本地要看到核对结果就确认那个路径对得上，必要时用 `NOTE_TIDY_SPEC` 指过去。注意测试能抓到"找不到第 N 条"，但抓不到"编号没变、内容换了"（例如 `英文符号 2` 从引号改成了省略号），所以改完要顺手核对该条目说的还是不是那条规则。
 
 规范措辞有歧义时**先问清楚再改实现**。例如「包裹符号：括号、引号等，内外均没有空格」（通用符号 3 的包裹符号子条目）指的是**包裹符号自己不添空格**：内侧的填充空格要删，外侧不主动加、也不删**语言自带**的词距（`appendix (page 3)`、`He said "hello" loudly` 里那一格是英文词距，正如 `he said 你好(nihao)` 里中文旁本来就没有）。照字面理解成"外侧的空格也删掉"会把好好的英文词距删没。
 

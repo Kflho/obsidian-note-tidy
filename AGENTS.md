@@ -18,6 +18,8 @@
 
 ## Environment & tooling
 
+- **源码仓库位置**：`D:\data\local\software\programming\JavaScript\projects\js_02`（**不在 vault 里**；git、`node_modules`、源码、测试、文档都在这里跑）。
+- **vault 里的插件目录** `.obsidian/plugins/note-tidy/` **只留运行用文件**：`main.js`、`manifest.json`、`styles.css`（构建产物）、`data.json`（Obsidian 自己写的用户设置）。别在那边改代码或跑 npm —— 那边没有 `package.json`。同步由 `deploy.mjs` 负责（`npm run dev` / `npm run build` 后自动，或手动 `npm run deploy`；目标目录可用 `OBSIDIAN_PLUGIN_DIR` 覆盖，不存在时静默跳过，CI 不受影响）。
 - Node.js: use current LTS (Node 18+ recommended).
 - **Package manager: npm** (required for this sample - `package.json` defines npm scripts and dependencies).
 - **Bundler: esbuild** (required for this sample - `esbuild.config.mjs` and build scripts depend on it). Alternative bundlers like Rollup or webpack are acceptable for other projects if they bundle all external dependencies into `main.js`.
@@ -90,10 +92,7 @@ npm run build
 
 ## Testing
 
-- Manual install for testing: copy `main.js`, `manifest.json`, `styles.css` (if any) to:
-  ```
-  <Vault>/.obsidian/plugins/<plugin-id>/
-  ```
+- Manual install for testing: `npm run build`（或开着 `npm run dev`）—— 产物由 `deploy.mjs` 自动复制到本机 vault 的插件目录 `.obsidian/plugins/note-tidy/`；只想同步不重新打包就 `npm run deploy`。手工复制时目标只有 `main.js`、`manifest.json`、`styles.css` 三样。
 - Reload Obsidian and enable the plugin in **Settings → Community plugins**.
 
 ## Commands & settings

@@ -22,7 +22,11 @@
  * - `spec-only`：规范里有这一条，代码里没有对应实现（`note` 里写明现状）。
  *
  * `docs/规则登记表.md` 由本文件生成（`node test/run-tests.mjs --update-rules-doc`）。
+ *
+ * 只被测试与文档生成用到，不进 main.js —— 所以这里可以放心 import node 内置模块。
  */
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 /** 规范出处：规范笔记里的章节路径 + 条目号 */
 export interface SpecRef {
@@ -58,8 +62,20 @@ export interface RuleSection {
 	rules: RuleRecord[];
 }
 
-/** 规范笔记的默认位置（相对仓库根）与环境变量覆盖 */
-export const SPEC_NOTE_PATH = process.env.NOTE_TIDY_SPEC ?? '../../../data/data note/data note.md';
+/**
+ * 规范笔记的位置：环境变量优先，否则按下面的候选路径找第一份存在的。
+ *
+ * 源码仓库（projects/js_02）与 vault 不在同一棵树里 —— 从前那个相对路径
+ * `../../../data/data note/data note.md` 是"仓库就在插件目录里"时代的写法，
+ * 迁移后指到了 projects 下，核对会被静默跳过。第一条候选是本机 vault 的绝对路径。
+ */
+export const SPEC_NOTE_PATH =
+	process.env.NOTE_TIDY_SPEC ??
+	[
+		'D:/data/online/software/common/obsidian/data/data note/data note.md',
+		'../../../data/data note/data note.md',
+	].find(candidate => existsSync(resolve(candidate))) ??
+	'D:/data/online/software/common/obsidian/data/data note/data note.md';
 
 /**
  * 规范里的章节路径。
