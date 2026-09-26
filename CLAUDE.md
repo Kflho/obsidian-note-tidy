@@ -70,6 +70,7 @@ src/
     markers.ts          # 引用 / 列表 / 标题标记的空白规范化
     list-numbering.ts   # 列表序号整理（保证每个列表首项编号是 1）
     heading-levels.ts   # 标题级别整理（子标题与父标题恰好差一级，多标题并行算）
+    chapter-title.ts    # 章节 / 课次 / 附录这类标题标记的判定（空格排版与智能公式共用一份）
     chat-log.ts         # QQ/微信聊天记录排版
     math-wrap.ts        # 智能公式：正文里的 `矩阵 A`、`n维`、`V(F)`、`x = 0`、`λ` 自动包 `$…$`
     latex.ts            # 代码格式：$$…$$ 与行内 $…$ 的 LaTeX 代码
@@ -260,6 +261,7 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 ## Git workflow
 
 - Branch naming: 纯版本号，不带后缀（`1.3.5`，不要写 `1.3.5更新`）；tag 同样只用版本号，不带 `v`
+- **每次发版都要把版本分支 merge 进 `main`**（`main` 是仓库默认分支，插件市场只认默认分支上的代码）：**默认流程就是 merge 到 `main`**，不用每次问。顺序是 分支 push → 合并进 `main` → push `main` → 在 `main` 上打 tag（tag 必须落在 `main` 的历史里）。
 - CI (`.github/workflows/lint.yml`): runs on push/PR, tests Node 20.x and 22.x — `npm ci` → `npm run build` → `npm test` → `npm run lint`
 - Lint pins `eslint-plugin-obsidianmd` to the version the community-plugin review uses — keep it current, or the review will report findings the local lint misses
 - `version-bump.mjs` reads `npm_package_version`, writes `manifest.json` and `versions.json`
@@ -275,7 +277,7 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 2. **更新所有版本号文件**，将提取的版本号同步到以下三个文件：
    - `manifest.json` → 更新 `"version"` 字段
    - `package.json` → 更新 `"version"` 字段
-   - `versions.json` → 在末尾添加新版本条目 `"x.y.z": "1.0.0"`（如果尚不存在）
+   - `versions.json` → 在末尾添加新版本条目 `"x.y.z": "1.7.0"`（如果尚不存在）
 
 3. **构建并提交**（仅在用户明确要求提交时执行）：
    ```bash
@@ -287,7 +289,15 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
    git push origin <当前分支名>
    ```
 
-4. **发版**：推送版本号 tag，交给 release 工作流（它会构建、签名、建 release）：
+4. **合并进 `main`**（**默认必做**，发布前的最后一步）：`main` 是仓库默认分支，插件市场只认默认分支上的代码，所以 tag 之前必须让 `main` 跟上：
+   ```bash
+   git checkout main
+   git pull origin main
+   git merge --no-ff <版本分支> -m "版本号: x.y.z"
+   git push origin main
+   ```
+
+5. **发版**：在 `main` 上打版本号 tag 并推送，交给 release 工作流（它会构建、签名、建 release）：
    ```bash
    git tag x.y.z
    git push origin x.y.z

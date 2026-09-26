@@ -5,6 +5,7 @@
  */
 import { isSymbolChar } from '../symbols';
 import type { SymbolPad } from '../symbols';
+import { appendixLabelPiece, chapterGap, chapterMarkerAt } from '../chapter-title';
 import type { Piece } from './tokenize';
 import type { SpacingCjkDigitMode, SpacingMode, SpacingOptions } from './index';
 
@@ -57,6 +58,40 @@ const isContent = (piece: Piece): boolean =>
 
 const isUnit = (piece: Piece): boolean =>
 	piece.kind === 'unit' || (piece.kind === 'latin' && UNITS.has(piece.text));
+
+// -------------------------------------------------------------- 章节标题标记
+
+/**
+ * 「第一章，第一课，附录1 等标题和标题内容之间需要加空格」（文字格式 / 中文 1）。
+ *
+ * 判定本身在 chapter-title.ts：分词器按 `chapterMarkers` 把 `第一章矩阵` 切成
+ * `第一章` + `矩阵` 两个 piece，这里负责决定这个切点上补不补那一格：
+ *
+ * - 标记**内部**的切点（`第`|`1`|`章`）返回 null：数字是序号的一部分，
+ *   那儿该不该空由"中文 ↔ 数字"那条说了算（切分不能顺手改掉别的规则的口径）；
+ * - 标记与内容之间（`第一章`|`矩阵`）补一格；
+ * - 已经空开的不动（`第一章 矩阵`）—— 那两格属于"中文与中文之间的空格不动"，
+ *   也免得把 `第一章  矩阵` 收成一格。
+ */
+function chapterTitleGap(line: string, previous: Piece, next: Piece, gap: string): string | null {
+	if (gap !== '' || previous.end === undefined || next.start === undefined) return null;
+	if (next.start !== previous.end) return null;
+
+	const marker = chapterMarkerAt(line, next.start);
+	return marker ? chapterGap(line, marker.from, marker.boundary) : null;
+}
+
+/**
+ * `附录` 与紧跟其后的序号：标题标记是**一个整体**（`附录A`），中间不该有空格。
+ *
+ * 标记后面还有内容时才贴（`附录 A 矩阵` → `附录A 矩阵`）——
+ * `附录 A` 单独一行时那是个普通的词距，不该被收掉（那也不是"标题 + 内容"）。
+ */
+function appendixGlue(line: string, previous: Piece, next: Piece, gap: string): boolean {
+	if (gap !== '' && gap !== ' ') return false;
+	if (!appendixLabelPiece(previous.text + next.text)) return false;
+	return next.end !== undefined && next.end < line.length;
+}
 
 /** 按模式给出这个位置的空格：`space` → 恰好一个，`none` → 没有，`keep` → null（原样保留） */
 function applyMode(mode: SpacingMode | SpacingCjkDigitMode): string | null {
@@ -126,12 +161,19 @@ function symbolGap(previous: Piece, next: Piece): string | null {
 /**
  * 两个 piece 之间该留什么空格。
  *
+ * @param line 这一行的完整文本（章节标题标记要看标记前后的内容，只在行文本上判定）
  * @param previous 上一个非空 piece；行首为 null
  * @param next 当前 piece
  * @param gap 原文里两者之间的空白
  * @returns 新的空白；null 表示保持原样
  */
-export function decideGap(previous: Piece | null, next: Piece, gap: string, options: SpacingOptions): string | null {
+export function decideGap(
+	line: string,
+	previous: Piece | null,
+	next: Piece,
+	gap: string,
+	options: SpacingOptions
+): string | null {
 	if (!previous) return null;
 
 	// 书名号 / 引号内部：专有名词与引文原样保留，《a子计划》不能被拆成《a 子计划》
@@ -164,6 +206,16 @@ export function decideGap(previous: Piece | null, next: Piece, gap: string, opti
 			if (previous.fp === 'quote' || previous.fp === 'angleOpen') return null;
 			return '';
 		}
+	}
+
+	// 章节 / 课次 / 附录这类标题标记与标题内容之间空一格（文字格式 / 中文 1）。
+	// 只认**紧贴**的标记与内容（`第一章矩阵`、`第1课五十音`、`附录A矩阵`）：
+	// 已经空开的一律不动，`第 3 章` 里序号两侧那两格仍归"中文与数字之间不留空格"管
+	if (options.chapterTitle) {
+		// 标题标记自己是"一个整体"：`附录` 与它的序号（`附录A`）贴紧
+		if (appendixGlue(line, previous, next, gap)) return '';
+		const pad = chapterTitleGap(line, previous, next, gap);
+		if (pad !== null) return pad;
 	}
 
 	// 数字 ↔ 单位：比「英文 ↔ 数字」更具体，先判

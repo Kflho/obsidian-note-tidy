@@ -76,6 +76,8 @@ export interface ImageTransferSettings {
 	spacingHalfToFullPunct: boolean;
 	/** 符号自己的空格规则（逐符号：`,` `.` 后空一格、`| & →` 左右空一格、`^` 不空…） */
 	spacingSymbolPad: boolean;
+	/** 章节 / 课次 / 附录这类标题标记与标题内容之间空一格（`第一章矩阵` → `第一章 矩阵`） */
+	spacingChapterTitle: boolean;
 	// ---- 状态栏 ----
 	/** 状态栏显示当前选中内容里的图片张数 */
 	showSelectionImageCount: boolean;
@@ -137,6 +139,7 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	spacingDigitUnit: DEFAULT_SPACING_OPTIONS.digitUnit,
 	spacingHalfToFullPunct: DEFAULT_SPACING_OPTIONS.halfToFullPunct,
 	spacingSymbolPad: DEFAULT_SPACING_OPTIONS.symbolPad,
+	spacingChapterTitle: DEFAULT_SPACING_OPTIONS.chapterTitle,
 	// 状态栏那一格只在选中内容里真的有图片时才出现，默认不开（右下角越干净越好）
 	showSelectionImageCount: false,
 	// 右键菜单：默认插五项（图片功能 / 文本排版 两个二级栏 + 复制图片 / 快速设置大小 / 管理入口），
@@ -167,5 +170,6 @@ export function getSpacingOptions(settings: ImageTransferSettings): SpacingOptio
 		digitUnit: settings.spacingDigitUnit === true,
 		halfToFullPunct: settings.spacingHalfToFullPunct !== false,
 		symbolPad: settings.spacingSymbolPad !== false,
+		chapterTitle: settings.spacingChapterTitle !== false,
 	};
 }

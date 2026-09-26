@@ -47,6 +47,7 @@
  */
 import { markProtectedLines, markIndentedCodeLines, inlineCodeRanges } from './line-scan';
 import { collectMaskedRanges, isSpaceChar, mathRanges, readInlineMath } from './inline-scan';
+import { chapterGap, chapterMarkers } from './chapter-title';
 
 export interface TextMathOptions {
 	/** 是否把正文里的数学符号包成 `$…$` */
@@ -561,8 +562,14 @@ function formulaBodies(
 	return bodies;
 }
 
-/** 找出这一行里该包成 `$…$` 的算式段 */
-function mathStretches(atoms: Atom[], known: Set<string>): Array<[number, number]> {
+/**
+ * 找出这一行里该包成 `$…$` 的算式段。
+ *
+ * @param blocked 为了识别标题标记而**临时补过空格**的位置（见 formatLine，`prepared` 里的下标）：
+ *   算式段正好落在这些位置上就是标题内容（`附录A矩阵` 里的 `A`、`第一章矩阵` 里的 `矩阵`）
+ *   —— 那是标题标记的一部分或标题内容，不是公式里的字母，跳过。
+ */
+function mathStretches(atoms: Atom[], known: Set<string>, blocked: Set<number>): Array<[number, number]> {
 	const stretches: Array<[number, number]> = [];
 	let index = 0;
 
@@ -576,6 +583,7 @@ function mathStretches(atoms: Atom[], known: Set<string>): Array<[number, number
 
 		const trimmed = trimStretch(atoms, from, index);
 		if (!trimmed) continue;
+		if (blocked.has((atoms[trimmed[0]] as Atom).start)) continue;
 		if (isListLabel(atoms, trimmed[0], trimmed[1])) continue;
 		if (!isMathLike(atoms, trimmed[0], trimmed[1])) continue;
 		if (!isAnchored(atoms, trimmed[0], trimmed[1])) continue;
@@ -593,40 +601,113 @@ function mathStretches(atoms: Atom[], known: Set<string>): Array<[number, number
 }
 
 /** 把一段算式渲染成 `$…$`：希腊字母与数学符号换成 LaTeX 命令，命令后面紧跟字母就补空格 */
-function renderStretch(atoms: Atom[], from: number, to: number): string {
+function renderStretch(source: string): string {
+	const chars = Array.from(source);
 	let body = '';
 
-	for (let i = from; i < to; i++) {
-		const atom = atoms[i] as Atom;
-		const command = atom.kind === 'greek' ? GREEK_LETTERS[atom.text]
-			: atom.kind === 'op' ? SYMBOL_LETTERS[atom.text]
-				: undefined;
+	for (let i = 0; i < chars.length; i++) {
+		const char = chars[i] as string;
+		const command = GREEK_LETTERS[char] ?? SYMBOL_LETTERS[char];
 
 		if (command === undefined) {
-			body += atom.text;
+			body += char;
 			continue;
 		}
 		// `λx` → `\lambda x`：连写会变成未定义命令 `\lambdax`
-		const next = atoms[i + 1];
-		body += glued(atom, next) && next !== undefined && /^[A-Za-z0-9]/.test(next.text)
-			? `${command} `
-			: command;
+		body += /^[A-Za-z0-9]$/.test(chars[i + 1] ?? '') ? `${command} ` : command;
 	}
 
 	return `$${body}$`;
 }
 
+/**
+ * 标题标记（`附录A`、`第一章` 之类）与标题内容之间的那一格，智能公式**先补上**。
+ *
+ * 那一格本来归空格排版的"文字格式 / 中文 1"管（见 chapter-title.ts），可它排在智能公式
+ * **后面**：这里一旦把 `附录A矩阵` 里的 `A` 当成变量包成 `附录 $A$ 矩阵`，
+ * 标记与内容就不再相连，空格规则也就认不出这是标题了。
+ *
+ * 补的这一格**只用来识别、不写进结果**（见 formatLine 的位置映射）：标记后面因此不再
+ * 紧挨中文，序号（`A`）与标题内容开头的单字母都不会被当成变量。不写进结果是有意的 ——
+ * 那一格由空格排版按规范补，而且它还认得"标记后面是标点就不补"这些细节。
+ *
+ * 判定用**同一份** chapter-title（标记与内容的分界只有一处定义）。
+ * 返回每一处补格子的位置（**行内下标**，标记结束的地方就是标题内容的起点）。
+ */
+function chapterGaps(line: string): number[] {
+	return chapterMarkers(line)
+		.filter(marker => chapterGap(line, marker.from, marker.boundary) !== null)
+		.map(marker => marker.boundary)
+		.sort((a, b) => a - b);
+}
+
+/** 在标记与内容之间补一格（`at` 是**原文**里的下标），返回补完的文本与那一格在原文里的位置 */
+function withChapterGap(line: string, at: number): string {
+	return `${line.substring(0, at)} ${line.substring(at)}`;
+}
+
+/**
+ * `prepared` 里的下标映射回 `line`：补进去的那一格在原文里不存在，映射时直接跳过去，
+ * 落在它身上的位置（如果有）就并到前一个字符的末尾。
+ */
+function mapperFor(gaps: number[]): (index: number) => number {
+	return (index: number): number => {
+		let mapped = index;
+		for (const at of gaps) {
+			if (at < index) mapped--;
+		}
+		return Math.max(0, mapped);
+	};
+}
+
 /** 处理一行；`known` 是整篇共用的变量表，行内新确认的变量会加进去给后面的行用 */
 function formatLine(line: string, known: Set<string>): string {
-	const atoms = scanAtoms(line);
-	const stretches = mathStretches(atoms, known);
+	// 位置一律按**原文**算好（`chapterGaps` 读的是原文），再从后往前插空格：
+	// 这样前面插进去的空格不会让后面那些位置失效
+	const gaps = chapterGaps(line);
+	if (gaps.length === 0) return formatPrepared(line, line, mapperFor([]), new Set<number>(), known);
+
+	let prepared = line;
+	for (let i = gaps.length - 1; i >= 0; i--) prepared = withChapterGap(prepared, gaps[i] as number);
+
+	// 补过空格之后，标题内容（原文里从 `at` 处开始）在 `prepared` 里的位置是 `at + i`
+	// （它前面插过 i 格）；`附录A` 这种带序号的标记，序号本身（`at - 1` 处的那个字母）
+	// 也一并挡掉 —— 它是标记的一部分（`附录A` 是一个整体），不是公式里的变量
+	const blocked = new Set<number>();
+	gaps.forEach((at, i) => {
+		if (/[0-9A-Za-z]/.test(line.charAt(at - 1))) blocked.add(at + i - 1);
+		blocked.add(at + i);
+	});
+
+	return formatPrepared(prepared, line, mapperFor(gaps), blocked, known);
+}
+
+/**
+ * 扫描 `prepared`（可能补过识别用的空格），但结果一律回到 `line` 上拼。
+ *
+ * atom 的文字取自 `prepared`，位置用 `toOriginal` 映射回原文 —— 这样补出来的空格
+ * 不会被写进结果；`blocked` 里的位置（标题内容那一格）也不当作公式。
+ */
+function formatPrepared(
+	prepared: string,
+	line: string,
+	toOriginal: (index: number) => number,
+	blocked: Set<number>,
+	known: Set<string>
+): string {
+	const atoms = scanAtoms(prepared);
+	const stretches = mathStretches(atoms, known, blocked);
 	if (stretches.length === 0) return line;
 
 	let out = '';
 	let cursor = 0;
 	for (const [from, to] of stretches) {
-		out += line.substring(cursor, (atoms[from] as Atom).start) + renderStretch(atoms, from, to);
-		cursor = (atoms[to - 1] as Atom).end;
+		const start = toOriginal((atoms[from] as Atom).start);
+		// 别用 atom 的文字去拼：算式段两侧可能有空格 atom（`附录 A矩阵` 里补出来的那一格），
+		// 而且 atom 的位置在补过空格之后与原文有偏移 —— 一律在**原文**上截取，位置最准
+		const end = toOriginal((atoms[to - 1] as Atom).end);
+		out += line.substring(cursor, start) + renderStretch(line.substring(start, end));
+		cursor = end;
 	}
 	return out + line.substring(cursor);
 }

@@ -99,7 +99,7 @@ const S = {
 	enSymbol: '格式 / 标点符号 / 英文符号',
 	mathSymbol: '格式 / 标点符号 / 数学符号',
 	textGeneral: '格式 / 文字格式 / 概论',
-	textEnglish: '格式 / 文字格式 / 英文',
+	textChinese: '格式 / 文字格式 / 中文',
 } as const;
 
 export const RULE_SECTIONS: RuleSection[] = [
@@ -413,11 +413,12 @@ export const RULE_SECTIONS: RuleSection[] = [
 			{
 				id: 'punct.ellipsis',
 				name: '`...` 前后不留空格',
-				spec: { path: S.enSymbol, item: 3 },
+				spec: { path: S.enSymbol, item: 2 },
 				status: 'done',
 				switchKeys: ['spacingSymbolPad'],
 				impl: { file: 'src/text/spacing/tokenize.ts', symbols: ['markEllipsisRuns'] },
 				tests: ['test/spacing.test.ts'],
+				note: '2026-09 规范重排后「英文符号」只剩两条（原来第 3 条的位置），这条跟着挪到第 2 条',
 			},
 			{
 				id: 'punct.en-modifier',
@@ -631,7 +632,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 			{
 				id: 'text.english-word',
 				name: '带其他符号的英文词按单词整体处理（`GPT4`、`v1.2.2`）',
-				spec: { path: S.textEnglish, item: 1 },
+				spec: { path: S.textGeneral, item: 1 },
 				status: 'done',
 				switchKeys: ['spacingCjkLatin'],
 				impl: {
@@ -639,6 +640,20 @@ export const RULE_SECTIONS: RuleSection[] = [
 					symbols: ['markAlphanumericWords', 'markAbbreviationPieces'],
 				},
 				tests: ['test/spacing.test.ts'],
+				note: '原来对着 `文字格式 / 英文` 第 1 条；2026-09 规范把「英文」那一节整节删了（内容并在 `文字格式 / 概论` 第 1 条：「中英文和数字、符号等混用作专有名词，视为一个整体」），出处跟着挪过去',
+			},
+			{
+				id: 'text.chapter-title',
+				name: '章节 / 课次 / 附录这类标题标记与标题内容之间空一格（`第一章矩阵` → `第一章 矩阵`）',
+				spec: { path: S.textChinese, item: 1 },
+				status: 'done',
+				switchKeys: ['spacingChapterTitle'],
+				impl: {
+					file: 'src/text/chapter-title.ts',
+					symbols: ['chapterMarkers', 'chapterGap', 'appendixLabelPiece'],
+				},
+				tests: ['test/spacing.test.ts', 'test/text-math.test.ts'],
+				note: '认两种标记：`第` + 序号 + 章 / 课 / 节 / 讲 / 篇、`附录` + 序号（`附录A` `附录1` `附录一`；**序号必填** —— `附录矩阵的证明` 这种不写序号的标题认不出来，因为「附录里的内容」这类普通句子与它没有区别）。判定只有 chapter-title.ts 一份：分词器按 chapterMarkers 把标记与内容切成两块（中文本来连成一段切不开）再由空格判定补那一格；智能公式（math-wrap.ts）也得先用它把那一格补上，否则 `附录A矩阵` 里的 `A` 会先被包成 `$A$`，标记不再相连、这条规则就再也认不出来。标记后面是标点（`第一章、矩阵`）或连接词（`第一章的用法`）、或标记后面没有内容（整行只有 `第一章`）时不补',
 			},
 			{
 				id: 'text.use-space-sparingly',
@@ -830,12 +845,12 @@ export const RULE_SECTIONS: RuleSection[] = [
 			{
 				id: 'math.derivative-space',
 				name: '微分算子前加薄空格（`f(x)\\, dr`）',
-				spec: { path: S.mathSymbol, item: 5 },
+				spec: { path: S.mathSymbol, item: 3 },
 				status: 'spec-only',
 				switchKeys: [],
 				impl: { file: 'src/text/latex.ts', symbols: ['SINGLE_SPACING_COMMANDS'] },
 				tests: ['test/latex-layout.test.ts'],
-				note: '代码只保留作者自己写好的 `\\,`（当普通间距命令处理），**不自动补**：微分算子是写法问题，排版不该替作者补他没写的内容（2026-09 明确决定，别再"补全"）',
+				note: '代码只保留作者自己写好的 `\\,`（当普通间距命令处理），**不自动补**：微分算子是写法问题，排版不该替作者补他没写的内容（2026-09 明确决定，别再"补全"）。规范重排后「数学符号」只剩三条，这条从原来的第 5 条挪到第 3 条',
 			},
 		],
 	},

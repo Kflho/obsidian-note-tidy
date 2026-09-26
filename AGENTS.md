@@ -105,6 +105,7 @@ npm run build
 ## Versioning & releases
 
 - Bump `version` in `manifest.json` (SemVer) and update `versions.json` to map plugin version → minimum app version.
+- **每次发版都要把版本分支 merge 进 `main`**（`main` 是默认分支，插件市场只认默认分支上的代码）：默认流程就是 分支 push → merge 进 `main` → push `main` → 在 `main` 上打 tag（tag 必须落在 `main` 的历史里），不用每次问。
 - Create a GitHub release whose tag exactly matches `manifest.json`'s `version`. Do not use a leading `v`.
 - Attach `manifest.json`, `main.js`, and `styles.css` (if present) to the release as individual assets.
 - After the initial release, follow the process to add/update your plugin in the community catalog as required.
