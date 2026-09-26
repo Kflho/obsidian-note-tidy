@@ -5,7 +5,7 @@
  * - 公式排版管 `$…$` **里面**的 LaTeX 代码怎么写；
  * - 这里管 `$…$` **外面**，以及正文里 中文 / 英文 / 数字 / 标点 / 符号 之间的空格。
  *
- * 八条规则（与设置面板「排版格式」一一对应）：
+ * 九条规则（与设置面板「排版格式」一一对应）：
  * 1. **中文 ↔ 英文**：空一个字宽（文字格式 1）。行内代码、双链、链接、标签与英文等价
  *    ——「代码块和英文、数字等价，需要留空格」（标记命名 10）；GPT4、3D、v1.2.2、100kg
  *    这类**含字母的连写**也整体算一个英文单词，免得型号被从数字那一侧拆开。
@@ -23,7 +23,11 @@
  *    小数点 / 版本号（`1.2.2`、`12:30`）、省略号（`...`）不适用。
  * 7. **括号 `()`**：包裹符号自己不添空格（通用符号 3 的包裹符号子条目）—— 内侧不留空格，外侧也不主动加。
  * 8. **数字 ↔ 单位**：空一格（数学符号 2），默认关闭，单位须落在词表里。
- * 9. **符号自己的空格规则**（symbols.ts）：**空格只用来分隔不同语言的内容** ——
+ * 9. **章节 / 课次 / 附录这类标题标记与标题内容之间空一格**（文字格式 / 中文 1）：
+ *    `第一章矩阵` → `第一章 矩阵`、`第1课五十音` → `第1课 五十音`、`附录A矩阵` → `附录A 矩阵`。
+ *    只在一行里认出这几种标记（`第…章/节/课/讲/篇/部分`、`附录` + 序号）才补一格；
+ *    标记后面本来就跟着标点（`第一章、矩阵`）、或者标记后面没有内容（整行只有 `附录A`）时不动。
+ * 10. **符号自己的空格规则**（symbols.ts）：**空格只用来分隔不同语言的内容** ——
  *    `space` 一律读作"与西文内容（字母 / 数字 / 公式 / 行内代码）之间留一格"，
  *    邻居是中文、全角标点、另一个符号时都贴紧（已有的空格一并收掉）。
  *    依据是中文排版规范：clreq §6.3.3（汉字与西文字母、数字之间不多于 1/4 汉字宽的字距或空白，
@@ -81,6 +85,8 @@ export interface SpacingOptions {
 	halfToFullPunct: boolean;
 	/** 符号自己的空格规则（`,` `.` 后空一格、`| & →` 左右空一格、`^` 不空…） */
 	symbolPad: boolean;
+	/** 章节 / 课次 / 附录这类标题标记与它后面的标题内容之间空一格（`第一章矩阵` → `第一章 矩阵`） */
+	chapterTitle: boolean;
 }
 
 /** 默认值：文字的规则全开、可能误伤的规则先关（英文↔数字、数字↔单位） */
@@ -95,6 +101,7 @@ export const DEFAULT_SPACING_OPTIONS: SpacingOptions = {
 	digitUnit: false,
 	halfToFullPunct: true,
 	symbolPad: true,
+	chapterTitle: true,
 };
 
 /** data.json 里被手工改成非法值时收敛回合法取值 */
@@ -118,7 +125,8 @@ export function isSpacingActive(options: SpacingOptions): boolean {
 		|| options.bracketInner
 		|| options.digitUnit
 		|| options.halfToFullPunct
-		|| options.symbolPad;
+		|| options.symbolPad
+		|| options.chapterTitle;
 }
 
 /**
@@ -135,8 +143,11 @@ const LINE_MARKER_RE = /^(?:[-*+]|\d{1,9}[.)]|#{1,6}|>+)[ \t]+(?:\[[ xX]\][ \t]+
 function formatLine(line: string, options: SpacingOptions): string {
 	const marker = LINE_MARKER_RE.exec(line);
 	const prefix = marker ? marker[0] : '';
+	// 行首标记（`# `、`1. `）不参与空格判定，但要留在行文本里 ——
+	// piece 的位置就是行内下标，章节标题标记的判定要按同一份文本对位置（见 chapter.ts）
+	const body = prefix ? line.substring(prefix.length) : line;
 
-	const pieces = tokenizeLine(prefix ? line.substring(prefix.length) : line, options);
+	const pieces = tokenizeLine(body, options);
 	let out = '';
 	let previous: Piece | null = null;
 	let gap = '';
@@ -146,7 +157,7 @@ function formatLine(line: string, options: SpacingOptions): string {
 			gap += piece.text;
 			continue;
 		}
-		const decided = decideGap(previous, piece, gap, options);
+		const decided = decideGap(body, previous, piece, gap, options);
 		out += (decided === null ? gap : decided) + piece.text;
 		previous = piece;
 		gap = '';

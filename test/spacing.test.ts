@@ -40,7 +40,7 @@ function caseCheck(name: string, input: string, expected: string, options: Spaci
 	check(`${name}（再跑一次不变）`, fixSpacing(once, options), once);
 }
 
-// ------------------------------------------------------------ 1. 八条规则
+// ------------------------------------------------------------ 1. 十条规则
 function ruleTests(): void {
 	// 规则 1：中文 ↔ 英文
 	caseCheck("中英：补空格", "用anki卡片记笔记", "用 anki 卡片记笔记");
@@ -72,6 +72,42 @@ function ruleTests(): void {
 		"第 3 章",
 		"第 3 章",
 		{ ...DEFAULT_SPACING_OPTIONS, cjkDigit: "keep" }
+	);
+
+	// 规则 9：章节 / 课次 / 附录这类标题标记与标题内容之间（文字格式 / 中文 1）
+	caseCheck("标题：章 + 内容", "第一章矩阵", "第一章 矩阵");
+	caseCheck("标题：后面还有正文", "第一章矩阵的运算", "第一章 矩阵的运算");
+	caseCheck("标题：课", "第一课五十音", "第一课 五十音");
+	caseCheck("标题：节", "第二节向量", "第二节 向量");
+	caseCheck("标题：篇", "第一篇绪论", "第一篇 绪论");
+	caseCheck("标题：阿拉伯数字序号", "第1章矩阵", "第1章矩阵");
+	caseCheck("标题：序号两侧的空格归中数规则", "第 3 章矩阵", "第3章矩阵");
+	caseCheck("标题：已经空开的不动", "第一章 矩阵", "第一章 矩阵");
+	caseCheck("标题：已经空开的多格也不收", "第一章  矩阵", "第一章  矩阵");
+	caseCheck("标题：后面是标点时不补", "第一章：矩阵", "第一章：矩阵");
+	caseCheck("标题：后面是顿号时不补", "第一章、矩阵", "第一章、矩阵");
+	caseCheck("标题：后面是开括号时不补", "第一章（矩阵）", "第一章（矩阵）");
+	caseCheck("标题：标记后面没有内容时不补", "第一章", "第一章");
+	caseCheck("标题：行首只有标记时不补", "# 第一章", "# 第一章");
+	caseCheck("标题：标题行照常处理", "# 第一章矩阵", "# 第一章 矩阵");
+	caseCheck("标题：句中出现也补（正文里的引用）", "见第一章矩阵部分", "见第一章 矩阵部分");
+	caseCheck("标题：一行里两处标记", "第一章矩阵 和 第二章向量", "第一章 矩阵 和 第二章 向量");
+	caseCheck("标题：附录 + 字母序号", "附录A矩阵", "附录A 矩阵");
+	caseCheck("标题：附录 + 数字序号", "附录1矩阵", "附录1 矩阵");
+	caseCheck("标题：附录 + 汉字序号", "附录一矩阵", "附录一 矩阵");
+	caseCheck("标题：附录与序号之间空开的收掉", "附录 A 矩阵", "附录A 矩阵");
+	caseCheck("标题：附录后面的公式与英文照常", "附录A矩阵的$A$", "附录A 矩阵的 $A$");
+	caseCheck("标题：不写序号的附录认不出来（不猜）", "附录矩阵", "附录矩阵");
+	caseCheck("标题：附录 + 序号但没有内容时不补", "附录A", "附录A");
+	caseCheck("标题：附录 + 序号单独一行时不收词距", "附录 A", "附录 A");
+	caseCheck("标题：句子里的「的」说明那是正文（不补）", "第一章的用法", "第一章的用法");
+	caseCheck("标题：句中的附录不算标记", "附录里的内容", "附录里的内容");
+	caseCheck("标题：附录和正文不算标记", "附录和第一章", "附录和第一章");
+	caseCheck(
+		"标题：关闭后不动",
+		"第一章矩阵",
+		"第一章矩阵",
+		{ ...DEFAULT_SPACING_OPTIONS, chapterTitle: false }
 	);
 
 	// 规则 3：英文 ↔ 数字（默认不动）
@@ -267,6 +303,7 @@ function safetyTests(): void {
 		digitUnit: false,
 		halfToFullPunct: false,
 		symbolPad: false,
+		chapterTitle: false,
 	};
 	caseCheck("全部关闭时不动", "用anki卡片 ，( x ) 的 3 章", "用anki卡片 ，( x ) 的 3 章", allOff);
 }

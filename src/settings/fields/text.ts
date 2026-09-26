@@ -85,6 +85,12 @@ export const TEXT_SECTION: FieldSection = {
 					},
 					coerce: (value) => resolveSpacingMode(value, DEFAULT_SPACING_OPTIONS.mathText),
 				},
+				{
+					key: 'spacingChapterTitle',
+					name: '标题标记与标题内容之间',
+					desc: '按「第一章，第一课，附录1 等标题和标题内容之间需要加空格」：`第一章矩阵` → `第一章 矩阵`、`第1课五十音` → `第1课 五十音`、`附录A矩阵` → `附录A 矩阵`。认两种标记 —— `第` + 序号 + 章 / 课 / 节 / 讲 / 篇、`附录` + 序号（`附录A` `附录1` `附录一`，序号必填）；标记后面本来就跟着标点（`第一章、矩阵`）、或标记后面没有内容（整行只有 `第一章`）时不动，已经空开的也不动',
+					control: { type: 'toggle' },
+				},
 			],
 		},
 		{

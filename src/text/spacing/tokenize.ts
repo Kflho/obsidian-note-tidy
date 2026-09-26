@@ -4,6 +4,7 @@
  * 对应原 spacing.ts 的「字符分类」「token」「符号」三节；分词之后的间距判定见 ./gap。
  */
 import { collectMaskedRanges, isSpaceChar, readInlineMath } from '../inline-scan';
+import { appendixLabelPiece, chapterMarkers } from '../chapter-title';
 import {
 	CLOSE_QUOTE_RULE,
 	OPEN_QUOTE_RULE,
@@ -110,6 +111,9 @@ type PieceKind =
 export interface Piece {
 	kind: PieceKind;
 	text: string;
+	/** 这个 piece 在**行内**的起止位置（空格排版按位置判"标记与内容是否紧贴"，见 gap.ts） */
+	start?: number;
+	end?: number;
 	fp?: FpClass;
 	/** 处在书名号 / 引号内部：专有名词与引文原样保留，任何规则都不适用 */
 	title?: boolean;
@@ -469,12 +473,16 @@ function markAlphanumericWords(pieces: Piece[]): void {
 
 /** 把一个字符判成标点 / 括号 / 单位等单字符 piece；返回 null 表示交给后面的字母数字扫描 */
 function classifyChar(char: string, line: string, at: number): { piece: Piece; next: number } | null {
+	/** 记下这个 piece 的行内位置（`next` 就是它结束的位置，`°C` 这类两个字符的也一样） */
+	const at2 = (piece: Piece, next: number): { piece: Piece; next: number } =>
+		({ piece: { ...piece, start: at, end: next }, next });
+
 	if (FULL_PUNCT.has(char)) {
 		const fp: FpClass = FP_BRACKET_OPEN.has(char) ? 'bracketOpen'
 			: FP_ANGLE_OPEN.has(char) ? 'angleOpen'
 				: FP_QUOTE.has(char) ? 'quote'
 					: 'other';
-		return { piece: { kind: 'fpunct', text: char, fp, rule: SYMBOL_TABLE[char] }, next: at + 1 };
+		return at2({ kind: 'fpunct', text: char, fp, rule: SYMBOL_TABLE[char] }, at + 1);
 	}
 	// 小数点 / 版本号 / 时间里的标点当普通字符：`1.2.2`、`12:30` 不该被拆
 	if (HALF_PUNCT.has(char)) {
@@ -483,23 +491,29 @@ function classifyChar(char: string, line: string, at: number): { piece: Piece; n
 		const numeric = DIGIT_RE.test(previous) && DIGIT_RE.test(next);
 		// 省略号 `...`：前后都不加空格
 		const ellipsis = char === '.' && (line.charAt(at + 1) === '.' || previous === '.');
-		if (numeric || ellipsis) return { piece: { kind: 'other', text: char }, next: at + 1 };
-		return { piece: { kind: 'hpunct', text: char, rule: SYMBOL_TABLE[char] }, next: at + 1 };
+		if (numeric || ellipsis) return at2({ kind: 'other', text: char }, at + 1);
+		return at2({ kind: 'hpunct', text: char, rule: SYMBOL_TABLE[char] }, at + 1);
 	}
-	if (char === '(') return { piece: { kind: 'open', text: char }, next: at + 1 };
-	if (char === ')') return { piece: { kind: 'close', text: char }, next: at + 1 };
-	if (UNIT_CHARS.has(char)) return { piece: { kind: 'unit', text: char }, next: at + 1 };
+	if (char === '(') return at2({ kind: 'open', text: char }, at + 1);
+	if (char === ')') return at2({ kind: 'close', text: char }, at + 1);
+	if (UNIT_CHARS.has(char)) return at2({ kind: 'unit', text: char }, at + 1);
 	// `°C` / `°F`：度符号后面跟 C/F 才算单位
 	if (char === '°' && /[CF]/.test(line.charAt(at + 1))) {
-		return { piece: { kind: 'unit', text: line.substring(at, at + 2) }, next: at + 2 };
+		return at2({ kind: 'unit', text: line.substring(at, at + 2) }, at + 2);
 	}
-	// `→` `&` `^` 这些排版符号：has 自己的左右空格规则（`|` 要看邻居，留给后面的成串扫描）
+	// `→` `&` `^` 这些排版符号：都有自己的左右空格规则（`|` 要看邻居，留给后面的成串扫描）
 	const rule = char === '|' ? undefined : SYMBOL_TABLE[char];
-	if (rule) return { piece: { kind: 'other', text: char, rule }, next: at + 1 };
+	if (rule) return at2({ kind: 'other', text: char, rule }, at + 1);
 	return null;
 }
 
-/** 把一行切成 piece；空白单独成 piece，输出里的空格全部由规则决定 */
+/**
+ * 把一行切成 piece；空白单独成 piece，输出里的空格全部由规则决定。
+ *
+ * 切完之后还有两步"按内容再切一刀"（都要在索引敏感的处理之后做）：
+ * 章节 / 课次 / 附录这类标题标记与标题内容之间切成两块（`第一章矩阵` → `第一章` | `矩阵`），
+ * 让空格判定有位置可以补那一格；`附录` 与紧跟的序号并成一个 piece（`附录A` —— 序号不算独立的英文单词）。
+ */
 export function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 	const ranges = collectMaskedRanges(line);
 	const inCode = (at: number): boolean => ranges.some(([start, end]) => at >= start && at < end);
@@ -511,7 +525,7 @@ export function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 		// 掩码区间：整体当一个"英文单词"，里面一个字符都不动
 		const range = ranges[rangeIndex];
 		if (range && index >= range[0] && index < range[1]) {
-			pieces.push({ kind: 'word', text: line.substring(index, range[1]) });
+			pieces.push({ kind: 'word', text: line.substring(index, range[1]), start: index, end: range[1] });
 			index = range[1];
 			continue;
 		}
@@ -522,7 +536,7 @@ export function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 		if (isSpaceChar(char)) {
 			let end = index;
 			while (end < line.length && isSpaceChar(line.charAt(end))) end++;
-			pieces.push({ kind: 'space', text: line.substring(index, end) });
+			pieces.push({ kind: 'space', text: line.substring(index, end), start: index, end });
 			index = end;
 			continue;
 		}
@@ -530,11 +544,11 @@ export function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 		if (char === '$') {
 			const math = readInlineMath(line, index, inCode);
 			if (math) {
-				pieces.push({ kind: 'math', text: math.text });
+				pieces.push({ kind: 'math', text: math.text, start: index, end: math.next });
 				index = math.next;
 				continue;
 			}
-			pieces.push({ kind: 'other', text: char });
+			pieces.push({ kind: 'other', text: char, start: index, end: index + 1 });
 			index++;
 			continue;
 		}
@@ -552,7 +566,7 @@ export function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 				: DIGIT_RE.test(char) ? 'digit'
 					: null;
 		if (!kind) {
-			pieces.push({ kind: 'other', text: char });
+			pieces.push({ kind: 'other', text: char, start: index, end: index + 1 });
 			index++;
 			continue;
 		}
@@ -560,7 +574,7 @@ export function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 		const same = kind === 'cjk' ? CJK_RE : kind === 'latin' ? LATIN_RE : DIGIT_RE;
 		let end = index;
 		while (end < line.length && same.test(line.charAt(end)) && !inCode(end)) end++;
-		pieces.push({ kind, text: line.substring(index, end) });
+		pieces.push({ kind, text: line.substring(index, end), start: index, end });
 		index = end;
 	}
 
@@ -585,7 +599,93 @@ export function tokenizeLine(line: string, options: SpacingOptions): Piece[] {
 		convertFullPunct(pieces, languages);
 		convertHalfPunct(pieces, languages);
 	}
-	return mergeEmphasisMarkers(pieces);
+	return mergeEmphasisMarkers(
+		options.chapterTitle ? splitChapterTitles(mergeAppendixLabels(pieces)) : pieces
+	);
+}
+
+// -------------------------------------------------------- 章节标题标记的切分
+
+/**
+ * 把 `附录` 与紧跟其后的序号并成一个 piece（`附录A`、`附录1`、`附录一`）。
+ *
+ * 不并的话序号会按"中文 ↔ 英文 / 数字"拿到空格（`附录A矩阵` → `附录 A 矩阵`），
+ * 而标题标记是"一个整体"（文字格式 / 中文 1 的 `附录1` 就是一例）——
+ * 那一格该落在**标记与标题内容之间**，不是标记内部。序号与"附录"之间本来就空开的
+ * （`附录 A 矩阵`）也收掉：合并后 decision 只看见一个 piece，等于把那一格删了。
+ *
+ * 只在序号后面紧跟着内容时才并（`附录A`、`附录 A` 单独出现时保持原样）。
+ */
+function mergeAppendixLabels(pieces: Piece[]): Piece[] {
+	const out: Piece[] = [];
+
+	for (let i = 0; i < pieces.length; i++) {
+		const piece = pieces[i] as Piece;
+		const next = pieces[i + 1];
+		const spacing = pieces[i + 2];
+		const after = pieces[i + 3];
+
+		// `附录` 必须正好是这个 piece 的收尾（`和附录` 也算），不能是"附录X"里的一部分
+		if (piece.kind !== 'cjk' || !piece.text.endsWith('附录')) {
+			out.push(piece);
+			continue;
+		}
+		const label = (next as Piece | undefined)?.text ?? '';
+		const glued = next !== undefined && next.kind !== 'space' && appendixLabelPiece('附录' + label);
+		// 空开一格的写法（`附录 A 矩阵`）：序号后面还有内容时才并（`附录 A` 单独出现时保持原样）
+		const spaced = !glued && next !== undefined && next.kind !== 'space' && after !== undefined
+			&& spacing?.kind === 'space' && after.kind === 'cjk' && appendixLabelPiece('附录' + label);
+
+		if (glued || spaced) {
+			out.push({ ...piece, text: piece.text + label, end: next.end });
+			i += glued ? 1 : 2;
+			continue;
+		}
+		out.push(piece);
+	}
+
+	return out;
+}
+
+/**
+ * 在标题标记与标题内容之间切一刀：`第一章矩阵` → `第一章` | `矩阵`。
+ *
+ * 中文是"连成一段"切的（`第一章矩阵` 本来就是一个 cjk piece），不切的话
+ * 空格判定根本拿不到"标记后面"这个位置。切点取 `chapterMarkers` 给的标记结束位置，
+ * 只切 cjk piece —— `附录A矩阵` 里序号是独立的 latin piece，合并交给 mergeAppendixLabels。
+ */
+function splitChapterTitles(pieces: Piece[]): Piece[] {
+	const out: Piece[] = [];
+
+	for (const piece of pieces) {
+		if (piece.kind !== 'cjk' || piece.start === undefined) {
+			out.push(piece);
+			continue;
+		}
+		const boundaries = chapterMarkers(piece.text)
+			.map(marker => marker.boundary)
+			.filter(at => at > 0 && at < piece.text.length);
+		if (boundaries.length === 0) {
+			out.push(piece);
+			continue;
+		}
+
+		const slice = (from: number, to: number): Piece => ({
+			...piece,
+			text: piece.text.substring(from, to),
+			start: (piece.start as number) + from,
+			end: (piece.start as number) + to,
+		});
+
+		let from = 0;
+		for (const at of boundaries) {
+			out.push(slice(from, at));
+			from = at;
+		}
+		out.push(slice(from, piece.text.length));
+	}
+
+	return out;
 }
 
 // ------------------------------------------------------------------ 符号
