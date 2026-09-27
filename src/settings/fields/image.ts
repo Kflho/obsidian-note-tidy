@@ -78,7 +78,7 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'pngquantPath',
 				name: 'pngquant 可执行文件路径',
-				desc: '目标格式选 **PNG（pngquant）** 时才用。pngquant 是 GPL / 商业双许可的外部程序，本插件**不捆绑**它（社区插件不带二进制）—— 到 pngquant.org 下载后把它的完整路径填在这里（Windows 形如 D:\\tools\\pngquant\\pngquant.exe）。留空＝这一档整步不做，图片保持原样',
+				desc: '目标格式选 **PNG（pngquant）** 时才用。pngquant 是 GPL / 商业双许可的外部程序，本插件**不捆绑**它（社区插件不带二进制）—— 到 pngquant.org 下载后把它的完整路径填在这里（Windows 形如 D:\\tools\\pngquant\\pngquant.exe）。**已经在 PATH 里的话直接填 `pngquant` 就行**（本插件按系统规则找它，不必写全路径）。留空＝这一档整步不做，图片保持原样',
 				control: { type: 'text', placeholder: 'D:\\tools\\pngquant\\pngquant.exe' },
 				visible: (settings) => (settings.vaultConvertFormat ?? '').toLowerCase() === 'pngquant',
 			},
