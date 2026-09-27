@@ -20,27 +20,30 @@ import type { ImageNamingSettings } from './naming';
 export interface TransferSettings extends AttachmentLocationSettings, ImageNamingSettings {}
 
 /**
- * 处理一篇笔记里的外部绝对路径图片：复制进仓库 + 换成内部双链。
+ * 处理**一段文本**里的外部绝对路径图片：复制进仓库 + 换成内部双链。
+ *
+ * 这是导入功能的真正内核：`transferExternalImages` 读整篇笔记调它，再写回去；
+ * 「排版选中的内容」直接把选中的那段交给它（不必碰文件）。
  *
  * 单张图失败不影响其余图片（各自 try/catch，只打日志）。
  *
  * @param reservedPaths 批次内已预留的完整路径（整库处理时跨笔记共用）
  * @param reservedBasenames 仓库级 basename 注册表（整库处理时跨笔记共用）
- * @returns 内容是否真的改了（调用方据此决定要不要写盘）
+ * @returns 处理后的文本 + 内容是否真的改了
  */
-export async function transferExternalImages(
+export async function transferImagesInText(
 	app: App,
 	settings: TransferSettings,
 	file: TFile,
+	content: string,
 	reservedPaths?: Map<string, string>,
 	reservedBasenames?: Map<string, string>
-): Promise<boolean> {
-	let content = await app.vault.read(file);
+): Promise<{ content: string; changed: boolean }> {
 	const originalContent = content;
-
 	const matches = Array.from(content.matchAll(externalImageRe()));
 
-	if (matches.length === 0) return false;
+	if (matches.length === 0) return { content, changed: false };
+
 	const currentAttachFolder = await getTargetAttachmentFolder(app, settings, file);
 	const rp = reservedPaths ?? new Map<string, string>();
 	const rbn = reservedBasenames ?? new Map<string, string>();
@@ -80,8 +83,29 @@ export async function transferExternalImages(
 		}
 	}
 
-	if (content !== originalContent) {
-		await app.vault.modify(file, content);
+	return { content, changed: content !== originalContent };
+}
+
+/**
+ * 处理一篇笔记里的外部绝对路径图片：复制进仓库 + 换成内部双链。
+ *
+ * @returns 内容是否真的改了（调用方据此决定要不要写盘）
+ */
+export async function transferExternalImages(
+	app: App,
+	settings: TransferSettings,
+	file: TFile,
+	reservedPaths?: Map<string, string>,
+	reservedBasenames?: Map<string, string>
+): Promise<boolean> {
+	const content = await app.vault.read(file);
+
+	const { content: updated, changed } = await transferImagesInText(
+		app, settings, file, content, reservedPaths, reservedBasenames
+	);
+
+	if (changed) {
+		await app.vault.modify(file, updated);
 		return true;
 	}
 	return false;

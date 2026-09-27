@@ -94,6 +94,8 @@ export interface ImageTransferSettings {
 	imageMenuQuickSizeItem: boolean;
 	/** 在笔记右键菜单里显示「快速修复聊天记录（Note Tidy）」 */
 	imageMenuQuickFixItem: boolean;
+	/** 在笔记右键菜单里显示「排版选中内容（Note Tidy）」 */
+	imageMenuTypesetItem: boolean;
 	/** 在图片菜单里显示「管理右键菜单…（Note Tidy）」 */
 	imageMenuManageItem: boolean;
 	/** 在文件 / 文件夹的右键菜单里显示「图片功能」二级栏 */
@@ -163,6 +165,7 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	imageMenuCopyItem: true,
 	imageMenuQuickSizeItem: true,
 	imageMenuQuickFixItem: true,
+	imageMenuTypesetItem: true,
 	imageMenuManageItem: true,
 	fileMenuImageSubmenu: true,
 	fileMenuTextSubmenu: true,

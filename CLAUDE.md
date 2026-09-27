@@ -8,10 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Images**: transfers external-path images (e.g. `file:///D:\...`) into the vault as internal `![[...]]` links, renames garbled image files, sets image sizes, and re-links images copied across folders.
 - **Text**: typesets notes — plain-text math → `$…$`, LaTeX code layout, CJK/English/formula spacing, punctuation width by language, leading indentation, block markers, list numbering, heading levels, tag placement and sorting, content block sorting, and QQ/WeChat chat log reformatting.
-- **Quick chat-log fix**: one command / menu entry doing "transfer this note's external images" **and** "fix this note's layout" inside one batch task (`quick-fix-chat-log-current-note` → `tasks.quickFixChatLog`). With `autoFixChatLogOnPaste` (on by default) it also runs by itself after a chat log is pasted (`ui/paste-watch.ts`).
+- **Quick chat-log fix**: one command / menu entry doing "transfer this note's external images" **and** "fix this note's layout" inside one batch task (`quick-fix-chat-log-current-note` → `tasks.quickFixChatLog`). With `autoFixChatLogOnPaste` (on by default) pasting a chat log fixes **just the pasted range** by itself (`ui/paste-watch.ts` → `tasks.fixPastedRange`) — the rest of the note is never touched. The same range-limited path is available by hand: command `typeset-selection` / menu 「排版选中内容」 (`tasks.typesetSelection`).
 - **Status bar** (optional, off by default): shows how many images the current editor selection contains (`showSelectionImageCount`).
 - **Clipboard**: copies image *files* to the system clipboard (right-click an image, or the command) so they can be pasted into a folder — not just into QQ/Word. Multiple images at once by selecting them, and when the selection also contains text the text rides along as HTML so QQ/WeChat/Word paste "sentence + pictures"; an optional Ctrl+C takeover in the editor does the same without going through the menu (`takeOverCopyShortcut`, off by default).
-- **Context menus**: three menus (image / note / file explorer) can be inspected and have their entries switched on and off; this plugin only ever *inserts* its own items (复制图片 / 快速设置图片大小 / 快速修复聊天记录 / 管理右键菜单) and never takes a menu over.
+- **Context menus**: three menus (image / note / file explorer) can be inspected and have their entries switched on and off; this plugin only ever *inserts* its own items (复制图片 / 快速设置图片大小 / 快速修复聊天记录 / 排版选中内容 / 管理右键菜单) and never takes a menu over.
 
 ## Commands
 
@@ -57,7 +57,7 @@ The esbuild config (`esbuild.config.mjs`) bundles `src/main.ts` into `main.js` (
 ```
 src/
   main.ts               # 插件入口：只做生命周期与装配（读设置、把各部件接起来、注册命令与菜单）
-  commands.ts           # 16 条命令的注册（命令 ID 是稳定接口，test/commands.test.ts 逐条比对菜单）
+  commands.ts           # 17 条命令的注册（命令 ID 是稳定接口，test/commands.test.ts 逐条比对菜单）
   tasks.ts              # 任务编排：每种操作一份实现，命令面板 / 右键菜单 / 弹窗三条路都落到这里
   batch.ts              # 批量外壳：互斥锁 + 通知屏蔽 + 状态栏进度 + 出错兜底 + 结果通知
   rule-registry.ts      # 规则登记表：规范出处 ↔ 开关 ↔ 实现 ↔ 测试（不进 main.js，只有测试与文档用它）
@@ -103,7 +103,7 @@ src/
     menu-hidden.ts      # 隐藏名单（`作用域：标题`）的解析与生成（纯函数）
     menu-manage-modal.ts# 右键菜单管理面板：图片 / 笔记 / 文件夹三节，开关各项
     copy-shortcut.ts    # 可选的"接管编辑器里的 Ctrl+C"：选中图片时改走复制文件那条路
-    paste-watch.ts      # 粘贴聊天记录时自动执行「快速修复聊天记录」（editor-paste 只看不动，内容落地即催落盘再修）
+    paste-watch.ts      # 粘贴聊天记录时自动修好**刚粘进来的那一段**（editor-paste 只看粘在哪儿，编辑器一变化就把这段读回来排版写回）
     image-size-modal.ts # 图片大小弹窗
     confirm-rename-modal.ts # 批量重命名确认
     progress.ts         # 状态栏进度
@@ -112,7 +112,7 @@ src/
     notice-suppressor.ts# 批量期间屏蔽通知；收尾立刻弹结果，没到期的旧通知逐条藏住自己过期
 test/*.test.ts          # 每个纯函数模块一份测试（含幂等）；rules.test.ts 核对规则登记表与文档
 docs/规则登记表.md       # 由 src/rule-registry.ts 生成（node test/run-tests.mjs --update-rules-doc）
-main.js                 # Bundled output (committed — Obsidian plugins require it at root)
+main.js                 # Bundled output（.gitignore 忽略，不进仓库；由 build / CI 生成，release 时上传）
 manifest.json           # Plugin metadata
 styles.css              # Plugin CSS (notice suppression, size dialog, settings sub-headings)
 ```
@@ -211,13 +211,13 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 - **两步必须在同一个批量壳里**：`BatchRunner` 有互斥锁，分两次调用第二次会被"已有任务在执行"挡掉。顺序是先收图片再排版（排版会把聊天记录里的图片挪到消息尾部，收进来的 `![[…]]` 也一并排好）；
 - **结果按实际发生了什么汇报**：只有真的改了东西才说"修复完成"，什么都没改时提示"没有需要修复的内容"。
 
-粘贴自动修复（`autoFixChatLogOnPaste`，**默认开**）挂在官方的 `editor-paste` 上：
+粘贴自动修复（`autoFixChatLogOnPaste`，**默认开**）挂在官方的 `editor-paste` 上，**只修刚粘进来的那一段**：
 
-- **只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），只读剪贴板的纯文本；`evt.defaultPrevented` 为真说明别的插件已经接管了，我们就不看。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）；
-- **判定很窄**（`looksLikeChatLog`，与排版共用时间戳正则）：至少**两条**"消息头部"（时间戳前同一行有用户名，或整行是本插件写出的无用户名时间戳）。只认一条会把 `会议 14:30:25` 这种正文误判，而复制单条消息本来也不带时间戳头部；
-- **粘贴那一刻绝不动手**：`editor-paste` 是 Obsidian 剪贴板管理器的 paste 处理器发的，而真正往文档里插内容的是 CodeMirror 内置的处理器（排在它后面，一返回 true 就 break）—— 此刻读到的正文是粘贴之前的，修完写盘会被编辑器随后的保存覆盖（"改了又弹回去"）。所以只登记一笔（`PasteFixScheduler`）；
-- **但也不干等自动保存**：`vault` 的 `modify` 才是"能动手"的信号（那一刻磁盘上才是含粘贴内容的正文），可 Obsidian 的自动保存是**停手 2 秒后**（`TextFileView.requestSave` 的 debounce 就是 2000 毫秒）—— 干等它，用户看到的就是"粘完一两秒才修好"。所以中间加一步：内容一落进编辑器（`editor-change`）就 `MarkdownView.save()` 把这篇笔记立刻写盘，`modify` 随之而来（v1.3.12 前是干等，这就是那个"肉眼可见的延迟"）；
-- **等待表的三条规矩**：同一篇连着粘只留最后一次、同一笔只催一次落盘（粘完接着打字会连着触发 `editor-change`）；跑之前先把自己从表里删掉（我们自己的写盘也会触发 `modify`，不删就会自己触发自己）；插件卸载时 `dispose()` 清空，卸载后不再写仓库。编辑器迟迟不落盘时用 `PASTE_FALLBACK_MS` 兜底。
+- **只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），粘贴事件只用来看**粘在哪儿**；`evt.defaultPrevented` 为真说明别的插件已经接管了，我们就不看。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）；
+- **粘贴那一刻绝不动手**：`editor-paste` 是 Obsidian 剪贴板管理器的 paste 处理器发的，而真正往文档里插内容的是 CodeMirror 内置的处理器（排在它后面，一返回 true 就 break）—— 此刻读到的正文是粘贴之前的。所以只登记一笔（`PasteFixScheduler`：编辑器 + 笔记 + 粘贴起点）；
+- **`editor-change` 一到就动手**：从那笔登记的起点到当前光标之间，就是这次粘贴进文档的全部内容。把这一段读回来（`editor.getRange`），用 `looksLikeChatLog` 判定（至少**两条**"消息头部"；只认一条会把 `会议 14:30:25` 这种正文误判，而复制单条消息本来也不带时间戳头部），像才交给 `ImageTasks.fixPastedRange`：转换这段里的外部路径图片（`transferImagesInText`）+ 跑一遍排版流水线 + `editor.replaceRange` 写回。**只改这一段、不写盘**（走编辑器自己的保存路径，撤销一次即可回退）；
+- **为什么不修整篇**：整篇排版绕不开"一条消息的正文到哪儿结束"，而作者自己接在消息下面写的行与消息正文之间没有空行时只能算作正文 —— 2026-09 为这件事加过两条"看缩进猜作者"的规则，猜错两次后全部撤掉（见规则登记表 `structure.chat-log` 的取舍说明）。范围由"刚粘的那一段"（或用户选中的那一段：命令 `typeset-selection` / 菜单「排版选中内容」）确定，就不需要猜；
+- **等待表的三条规矩**：同一篇连着粘只留最后一笔、取出之后才回调（我们自己的 `replaceRange` 也会触发 `editor-change`，不摘就会自己触发自己）、插件卸载时 `dispose()` 清空。编辑器迟迟没有变化（这次粘贴被别的插件吞了、视图不是 Markdown 视图）时用 `PASTE_FALLBACK_MS` 把那笔等待丢掉 —— 宁可什么都不做，也绝不去动整篇。
 
 ### 右键菜单怎么插项、怎么管理（`ui/image-menu.ts` + `menu-injector.ts`）
 
@@ -226,7 +226,7 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 | 菜单 | 作用域 | 怎么加我们的项 | 我们的项 |
 | --- | --- | --- | --- |
 | 笔记里渲染出来的图片 | `image` | 菜单将要显示时插进去（`menu-injector.ts`） | 复制图片 / 快速设置图片大小 / 快速修复聊天记录 / 管理右键菜单 |
-| 笔记正文 | `note` | 官方的 `editor-menu` 事件，只追加 | 复制图片 / 快速设置图片大小 / 快速修复聊天记录 / 管理右键菜单 |
+| 笔记正文 | `note` | 官方的 `editor-menu` 事件，只追加 | 复制图片 / 快速设置图片大小 / 快速修复聊天记录 / 排版选中内容（有选区时）/ 管理右键菜单 |
 | 文件浏览器 | `folder` | 菜单将要显示时插进去 | 管理右键菜单（"图片功能 / 文本排版"二级栏原本就走 `file-menu`） |
 
 「管理右键菜单」**三个菜单里都给** —— 它就是这套管理功能的入口，哪个菜单里没有它，用户在那个菜单里就找不到北。

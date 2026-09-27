@@ -45,6 +45,9 @@ export const QUICK_SIZE_MENU_TITLE = '快速设置图片大小（Note Tidy）';
 /** 快速修复聊天记录那一项（转换本文件内的外部图片 + 修复排版，一步做完） */
 export const QUICK_FIX_MENU_TITLE = '快速修复聊天记录（Note Tidy）';
 
+/** 只排版选中内容那一项（转换选区里的外部图片 + 修复排版，笔记其余部分不动） */
+export const TYPESET_SELECTION_MENU_TITLE = '排版选中内容（Note Tidy）';
+
 /** 我们自己往菜单里加的一项 */
 export interface OwnMenuEntry {
 	title: string;
@@ -53,7 +56,7 @@ export interface OwnMenuEntry {
 }
 
 /** 本插件菜单项的键（设置里的开关、管理面板、命令审计都按它对齐） */
-export type OwnItemKey = 'copy' | 'quickSize' | 'quickFix' | 'manage' | 'imageSubmenu' | 'textSubmenu';
+export type OwnItemKey = 'copy' | 'quickSize' | 'quickFix' | 'typesetSelection' | 'manage' | 'imageSubmenu' | 'textSubmenu';
 
 /** 文件菜单里那两个二级栏的标题（`menus.ts` 用它加菜单，面板用它显示） */
 export const IMAGE_SUBMENU_TITLE = '图片功能';
@@ -67,6 +70,7 @@ export const OWN_ITEMS: Record<OwnItemKey, { title: string; icon: string; desc: 
 	copy: { title: '复制图片（Note Tidy）', icon: 'copy', desc: '复制图片文件，可粘贴到文件夹或聊天窗口' },
 	quickSize: { title: QUICK_SIZE_MENU_TITLE, icon: 'image', desc: '使用默认尺寸直接修改当前笔记的图片大小，不弹出设置窗口' },
 	quickFix: { title: QUICK_FIX_MENU_TITLE, icon: 'zap', desc: '转换本文件内引用的外部路径图片，并把整篇排版修一遍（空格 / 缩进 / 聊天记录 / 标签 / 公式）' },
+	typesetSelection: { title: TYPESET_SELECTION_MENU_TITLE, icon: 'wand-2', desc: '只排版选中的那段内容（含选区里的外部图片转换），笔记其余部分一个字符都不动' },
 	manage: { title: MANAGE_MENU_TITLE, icon: 'settings-2', desc: '打开本面板；关闭后可从命令面板打开' },
 	imageSubmenu: { title: IMAGE_SUBMENU_TITLE, icon: 'image', desc: '转换外部图片、重命名、整理位置、设置大小' },
 	textSubmenu: { title: TEXT_SUBMENU_TITLE, icon: 'message-square', desc: '修复笔记排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）' },
@@ -80,6 +84,8 @@ export const OWN_ITEM_SCOPES: Record<OwnItemKey, MenuScope[]> = {
 	copy: ['image', 'note'],
 	quickSize: ['image', 'note'],
 	quickFix: ['image', 'note'],
+	// 「排版选中内容」只在笔记正文菜单里：没有选区就没什么可排的
+	typesetSelection: ['note'],
 	manage: ['image', 'note', 'folder'],
 	imageSubmenu: ['folder'],
 	textSubmenu: ['folder'],
@@ -99,6 +105,7 @@ export const OWN_ITEM_COMMANDS: Record<OwnItemKey, string | null> = {
 	copy: 'copy-images-to-clipboard',
 	quickSize: 'quick-set-image-size-current-note',
 	quickFix: 'quick-fix-chat-log-current-note',
+	typesetSelection: 'typeset-selection',
 	manage: 'manage-image-menu',
 	imageSubmenu: null,
 	textSubmenu: null,
@@ -140,9 +147,13 @@ export function ownMenuEntries(options: {
 	refs: ImageRef[];
 	/** 有没有笔记可操作（"快速设置图片大小"与"快速修复聊天记录"要整篇笔记） */
 	hasFile: boolean;
+	/** 编辑器里有没有选中内容（"排版选中内容"要有选区才有意义；省略 = 没有） */
+	hasSelection?: boolean;
 	copy: () => void;
 	quickSize: () => void;
 	quickFix: () => void;
+	/** 「排版选中内容」的动作（只在笔记正文菜单里用到；省略 = 不插这一项） */
+	typesetSelection?: () => void;
 	manage: () => void;
 }): OwnMenuEntry[] {
 	const entries: OwnMenuEntry[] = [];
@@ -156,6 +167,14 @@ export function ownMenuEntries(options: {
 	}
 	if (insideNote && options.settings.imageMenuQuickFixItem !== false && options.hasFile) {
 		entries.push({ title: QUICK_FIX_MENU_TITLE, icon: OWN_ITEMS.quickFix.icon, action: options.quickFix });
+	}
+	if (options.scope === 'note' && options.settings.imageMenuTypesetItem !== false &&
+		options.hasFile && options.hasSelection && options.typesetSelection) {
+		entries.push({
+			title: TYPESET_SELECTION_MENU_TITLE,
+			icon: OWN_ITEMS.typesetSelection.icon,
+			action: options.typesetSelection,
+		});
 	}
 	if (options.settings.imageMenuManageItem !== false) {
 		entries.push({ title: MANAGE_MENU_TITLE, icon: OWN_ITEMS.manage.icon, action: options.manage });
@@ -280,14 +299,17 @@ export function registerImageMenu(
 			const file = info.file;
 			const picks = editorImagePicks(editor);
 			const refs = picks.refs;
+			const hasSelection = editor.getSelection().trim() !== '';
 			addOwnMenuItems(menu, ownMenuEntries({
 				scope: 'note',
 				settings: getSettings(),
 				refs,
 				hasFile: file !== null,
+				hasSelection,
 				copy: () => { if (file) void actions.copyImages(file, refs, picks.selection); },
 				quickSize: () => { if (file) void actions.quickSetImageSize(file); },
 				quickFix: () => { if (file) void actions.quickFixChatLog(file); },
+				typesetSelection: () => { if (file) void actions.typesetSelection(file, editor); },
 				manage: () => actions.openMenuManager(),
 			}));
 		})
@@ -310,9 +332,11 @@ export function registerImageMenu(
 				settings: getSettings(),
 				refs,
 				hasFile: file !== null,
+				hasSelection: false,
 				copy: () => { if (file) void actions.copyImages(file, refs); },
 				quickSize: () => { if (file) void actions.quickSetImageSize(file); },
 				quickFix: () => { if (file) void actions.quickFixChatLog(file); },
+				typesetSelection: () => { /* 图片 / 文件夹菜单里没有编辑器选区 */ },
 				manage: () => actions.openMenuManager(),
 			});
 			addOwnMenuItems(menu, entries);

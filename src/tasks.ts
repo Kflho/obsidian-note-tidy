@@ -1,4 +1,5 @@
 import { App, Notice, TFile } from 'obsidian';
+import type { Editor } from 'obsidian';
 import type { BatchContext, BatchRunner } from './batch';
 import { copyImageFiles } from './image/clipboard';
 import { resolveImageFiles } from './image/copy';
@@ -11,7 +12,7 @@ import { organizeNoteImages } from './image/organize';
 import { countImages, fixImageLinkFormats, renameGarbledImages, renameImagesToPreset } from './image/rename';
 import { applyImageSize, validateImageSize } from './image/size';
 import type { ImageSizeOptions } from './image/size';
-import { transferExternalImages } from './image/transfer';
+import { transferExternalImages, transferImagesInText } from './image/transfer';
 import { resolveIndent } from './text/chat-log';
 import type { ChatLogOptions } from './text/chat-log';
 import { getSpacingOptions } from './settings';
@@ -50,6 +51,10 @@ export interface TaskActions {
 	quickSetImageSize(file: TFile): Promise<void>;
 	/** 快速修复聊天记录：转换本文件内的外部图片 + 修复排版（两步一次做完） */
 	quickFixChatLog(file: TFile | null): Promise<void>;
+	/** 只排版**选中的那段内容**（转换选区里的外部图片 + 修复排版），笔记其余部分不动 */
+	typesetSelection(file: TFile, editor: Editor): Promise<void>;
+	/** 粘贴自动修复：只把刚粘进来的那一段 `[start, 光标处)` 排版 */
+	fixPastedRange(file: TFile, editor: Editor, start: number): Promise<boolean>;
 	/** 复制图片到系统剪贴板（可在文件夹里粘出文件，聊天窗口里贴出图片） */
 	copyImages(file: TFile, refs: ImageRef[], selection?: CopySelection | null): Promise<void>;
 	/** 打开「图片右键菜单」管理面板（看检测到的菜单项、开关哪些显示） */
@@ -443,6 +448,7 @@ export class ImageTasks implements TaskActions {
 				copy: settings.imageMenuCopyItem !== false,
 				quickSize: settings.imageMenuQuickSizeItem !== false,
 				quickFix: settings.imageMenuQuickFixItem !== false,
+				typesetSelection: settings.imageMenuTypesetItem !== false,
 				manage: settings.imageMenuManageItem !== false,
 				imageSubmenu: settings.fileMenuImageSubmenu !== false,
 				textSubmenu: settings.fileMenuTextSubmenu !== false,
@@ -515,6 +521,100 @@ export class ImageTasks implements TaskActions {
 				return `🎉 聊天记录快速修复完成（${done.join('，')}）。${this.describeLayoutSwitches()}`;
 			}
 		);
+	}
+
+	/**
+	 * 只排版**选中的那段内容**：转换选区里的外部图片 + 修复排版，笔记其余部分一个字符不动。
+	 *
+	 * 为什么要有这条：整篇排版绕不开一个取舍 —— 一条消息的正文到哪儿结束。
+	 * 作者自己接在消息下面写的行（`06集` 这类小标题、自己插的图）与消息正文之间
+	 * 没有空行时，整篇排版只能把它们算作正文（改不了，猜不出来）。
+	 * 选中一段再排版就没有这个歧义：**选中的是什么就排什么**。
+	 *
+	 * 排版结果用 `editor.replaceRange` 写回编辑器，因此**不走写盘**，
+	 * 也就不会碰到笔记里没选中的部分（撤销一次即可回退）。
+	 */
+	async typesetSelection(file: TFile, editor: Editor): Promise<void> {
+		const from = editor.posToOffset(editor.getCursor('from'));
+		const to = editor.posToOffset(editor.getCursor('to'));
+		if (to <= from || editor.getSelection().trim() === '') {
+			new Notice('ℹ️ 先选中要排版的内容，再运行这条命令。');
+			return;
+		}
+
+		await this.runner.run(
+			{
+				label: '✍️ 排版选中内容',
+				files: [file],
+				failureMessage: '❌ 排版选中内容时发生意外错误，请检查控制台。',
+			},
+			async (ctx) => {
+				const fixed = await this.typesetEditorRange(file, editor, from, to);
+				if (fixed === 'unchanged') {
+					ctx.progress.clear();
+					return 'ℹ️ 选中的内容没有需要修复的地方。';
+				}
+				if (fixed === 'skipped') {
+					ctx.progress.clear();
+					return 'ℹ️ 这段内容已经变了，没有改动它。';
+				}
+				ctx.progress.finish('✅ 排版完成');
+				return `🎉 选中内容已排版。${this.describeLayoutSwitches()}`;
+			}
+		);
+	}
+
+	/**
+	 * 粘贴自动修复：只把**刚粘进来的那一段** `[start, 光标处)` 排版。
+	 *
+	 * 那一段的范围是确定的（粘贴前的光标位置 → 粘贴后的光标位置），所以不需要猜
+	 * "哪几行是作者自己写的"，也不会碰到笔记的其它部分。
+	 *
+	 * @returns 是否真的改了（调用方据此决定要不要提示）
+	 */
+	async fixPastedRange(file: TFile, editor: Editor, start: number): Promise<boolean> {
+		const end = editor.posToOffset(editor.getCursor('to'));
+		const fixed = await this.typesetEditorRange(file, editor, start, end);
+		if (fixed === 'fixed') {
+			new Notice('⚡ 已修好刚粘贴的聊天记录。');
+		}
+		return fixed === 'fixed';
+	}
+
+	/**
+	 * 「排版选中内容」与粘贴自动修复共用的内核：把编辑器里 `[from, to)` 这一段排版。
+	 *
+	 * 两步与「快速修复聊天记录」一致：先把这段里 `file:///D:\…` 这类图片收进仓库，再排版。
+	 * 结果写回编辑器（不写盘）。
+	 *
+	 * 期间用户又改了这一段（或这段已被替换 / 删除）时**不动它**：拿旧的偏移去写回，
+	 * 只会把他刚打的字覆盖掉。
+	 */
+	private async typesetEditorRange(
+		file: TFile,
+		editor: Editor,
+		from: number,
+		to: number
+	): Promise<'fixed' | 'unchanged' | 'skipped'> {
+		if (to <= from) return 'skipped';
+
+		const fromPos = editor.offsetToPos(from);
+		const toPos = editor.offsetToPos(to);
+		const text = editor.getRange(fromPos, toPos);
+		if (!text.trim()) return 'skipped';
+
+		// ① 这段里的外部路径图片 → 收进仓库并换成内部链接
+		const transferred = await transferImagesInText(this.app, this.getSettings(), file, text);
+		// ② 文本排版（只作用在这段文字上）
+		const typeset = formatNoteText(transferred.content, this.getTextPipelineOptions());
+
+		if (!transferred.changed && typeset === text) return 'unchanged';
+
+		// 异步期间这段被改过就别写回（免得覆盖用户刚输入的内容）
+		if (editor.getRange(fromPos, toPos) !== text) return 'skipped';
+
+		editor.replaceRange(typeset, fromPos, toPos);
+		return 'fixed';
 	}
 
 	/**

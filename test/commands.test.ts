@@ -141,6 +141,10 @@ const EDITOR_OPERATIONS: Array<{ menu: RegExp; commands: string[] }> = [
 		commands: ["quick-fix-chat-log-current-note"],
 	},
 	{
+		menu: /^排版选中内容（Note Tidy）$/,
+		commands: ["typeset-selection"],
+	},
+	{
 		// 三个菜单里都有这一项：编辑器菜单这条由本表看着，图片 / 文件夹菜单那条是插进去的
 		menu: /^管理右键菜单…（Note Tidy）$/,
 		commands: ["manage-image-menu"],
@@ -177,7 +181,7 @@ const INJECTED_OPERATIONS: Array<{ scope: MenuScope; key: OwnItemKey }> = [
  */
 const EXPECTED_OWN_ITEMS: Record<string, string[]> = {
 	image: ["copy", "quickSize", "quickFix", "manage"],
-	note: ["copy", "quickSize", "quickFix", "manage"],
+	note: ["copy", "quickSize", "quickFix", "typesetSelection", "manage"],
 	folder: ["imageSubmenu", "manage", "textSubmenu"],
 };
 
@@ -300,24 +304,25 @@ function checkAgainst(label: string, leaves: string[], table: Array<{ menu: RegE
 }
 
 /** 编辑器替身：菜单注册只用 getValue / posToOffset / getCursor / getSelection 四个方法 */
-function fakeEditor(text: string, cursor: number): unknown {
+function fakeEditor(text: string, cursor: number, selection = ""): unknown {
 	return {
 		getValue: () => text,
 		posToOffset: (pos: { ch: number }) => pos.ch,
 		getCursor: () => ({ line: 0, ch: cursor }),
-		getSelection: () => "",
+		getSelection: () => selection,
 	};
 }
 
 /**
  * 触发一次编辑器右键菜单（编辑模式的图片入口）。
- * 文本里放一张图，光标停在它上面 —— 与用户右键点图片时的情形一致。
+ * 文本里放一张图、光标停在它上面、并选中一段文字 —— 与用户"选中一段内容后右键"的情形一致
+ * （「排版选中内容」只在有选区时出现，不给选区就核不到它）。
  */
 function collectEditorMenus(handlers: Map<string, FileMenuHandler[]>): string[] {
 	const menu = new Menu() as unknown as StubMenu;
 	const file = Object.assign(new TFile(), { extension: "md", name: "测试.md", path: "测试.md" });
 	const text = "正文\n![[图.png]]\n";
-	const editor = fakeEditor(text, text.indexOf("![[图.png]]") + 2);
+	const editor = fakeEditor(text, text.indexOf("![[图.png]]") + 2, "正文");
 
 	for (const handler of handlers.get("editor-menu") ?? []) {
 		(handler as unknown as (menu: StubMenu, editor: unknown, info: { file: TFile }) => void)(menu, editor, { file });
