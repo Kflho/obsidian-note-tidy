@@ -1,5 +1,5 @@
-import { TFile } from 'obsidian';
-import type { Editor, MarkdownFileInfo, MarkdownView, Plugin } from 'obsidian';
+import { MarkdownView, TFile } from 'obsidian';
+import type { App, Editor, MarkdownFileInfo, Plugin } from 'obsidian';
 import type { ImageTransferSettings } from '../settings';
 import type { TaskActions } from '../tasks';
 import { looksLikeChatLog } from '../text/chat-log';
@@ -13,22 +13,30 @@ import { looksLikeChatLog } from '../text/chat-log';
  * 不用自己接 DOM 的 paste，也不会像"接管 Ctrl+C"那样抢按键：我们**不阻止这次粘贴**，
  * 只是看一眼剪贴板里的纯文本像不像聊天记录。
  *
- * ## 为什么不在这时就动手
+ * ## 时机：粘贴那一刻不动手，落进编辑器那一刻催落盘，落盘了才动手
  *
- * 事件派发时粘贴的内容**还没落进文档**，此刻跑任务读到的是粘贴之前的正文 ——
- * 修完写盘，粘贴内容要么白修、要么被编辑器随后的保存覆盖回去。所以这里只记一笔，
- * 等这篇笔记**真正落盘**（编辑器保存触发 `vault` 的 `modify`）再修：那一刻读到的
- * 才是含这次粘贴内容的正文。万一编辑器迟迟不保存（用户一直没停手），
- * 兜底定时器（`PASTE_FALLBACK_MS`）也会跑一次 —— 宁可早修一次，也不要静悄悄地什么都不做。
+ * 一、**粘贴那一刻读到的正文还是旧的**。`editor-paste` 是 Obsidian 的剪贴板管理器在自己的
+ * paste 处理器里发出的，而真正往文档里插内容是 CodeMirror 内置的处理器（排在后面，一返回 true
+ * 就 break）—— 此刻读到的正文里还没有刚粘进来的东西。此刻修完写盘，要么白修，要么被编辑器
+ * 随后的保存覆盖回去（"改了又弹回去"）。
+ *
+ * 二、**不能干等 Obsidian 的自动保存**。`vault` 的 `modify` 确实是"能动手"的信号（那一刻磁盘上
+ * 才是含粘贴内容的正文），但 Obsidian 的自动保存是**停手 2 秒后**（`TextFileView.requestSave`
+ * 的 debounce 就是 2000 毫秒）—— 干等它，用户看到的就是"粘完一两秒才修好"。
+ * 所以中间加了一步：内容一落进编辑器（`editor-change`）就调 `view.save()` 把这篇笔记
+ * **立刻**写盘，`modify` 随之而来，修复几乎与粘贴同时发生。
+ *
+ * 三、**万一没人落盘**（这次粘贴被别的插件吞了、视图不是 Markdown 视图……）还有兜底定时器
+ * （`PASTE_FALLBACK_MS`）：宁可多跑一次"没有需要修复的内容"，也不要静悄悄地什么都不做。
  *
  * ## 判定与"真去修"分开
  *
  * - `looksLikeChatLog`（`text/chat-log.ts`）：像不像聊天记录，用的是排版引擎自己的尺子；
  * - `shouldAutoFixPaste`：开关 + 有笔记 + 像聊天记录，三条都满足才动手；
- * - `PasteFixScheduler`：谁在等落盘、什么时候真跑（定时器可注入，测试里手动控制）。
+ * - `PasteFixScheduler`：谁在等、什么时候催落盘、什么时候真跑（定时器可注入，测试里手动控制）。
  */
 
-/** 等落盘的兜底时长：编辑器一直没保存就按这个时间先跑一次 */
+/** 等落盘的兜底时长：编辑器一直没把这次粘贴写下去就按这个时间先跑一次 */
 export const PASTE_FALLBACK_MS = 5000;
 
 /** 该不该因为这次粘贴自动修复：开关开着、有笔记、粘贴内容像聊天记录 */
@@ -40,6 +48,8 @@ export function shouldAutoFixPaste(options: { enabled: boolean; text: string; ha
 export interface PasteFixSchedulerOptions {
 	/** 真正去修（任务的 `quickFixChatLog`） */
 	run: (file: TFile) => void;
+	/** 催这篇笔记立刻落盘（`MarkdownView.save()`），落盘后才有 `modify` 可等 */
+	flush: (file: TFile) => void;
 	/** 等不到落盘时的兜底时长，默认 `PASTE_FALLBACK_MS` */
 	fallbackMs?: number;
 	/** 定时器（测试里换成手动控制） */
@@ -50,19 +60,24 @@ export interface PasteFixSchedulerOptions {
 /**
  * "粘贴之后修哪篇笔记"的等待表。
  *
- * 同一篇笔记连着粘两次只留最后一次（编辑器会把两次粘贴一起存盘，跑一次就够）；
- * 真跑之前先把这一条从表里删掉 —— 我们自己写盘也会触发 `modify`，
+ * 一笔等待走过三步：`schedule`（粘贴，只登记）→ `onEditorChange`（内容落地，催落盘）
+ * → `onModified`（落盘，真去修）。
+ *
+ * 同一篇笔记连着粘两次只留最后一笔（编辑器会把两次粘贴一起存盘，跑一次就够）；
+ * 真跑之前先把这一笔从表里删掉 —— 我们自己写盘也会触发 `modify`，
  * 不删就会自己把自己再触发一次。
  */
 export class PasteFixScheduler {
-	private readonly pending = new Map<string, { file: TFile; timer: number }>();
+	private readonly pending = new Map<string, { file: TFile; timer: number; flushed: boolean }>();
 	private readonly run: (file: TFile) => void;
+	private readonly flush: (file: TFile) => void;
 	private readonly fallbackMs: number;
 	private readonly setTimer: (handler: () => void, ms: number) => number;
 	private readonly clearTimer: (id: number) => void;
 
 	constructor(options: PasteFixSchedulerOptions) {
 		this.run = options.run;
+		this.flush = options.flush;
 		this.fallbackMs = options.fallbackMs ?? PASTE_FALLBACK_MS;
 		this.setTimer = options.setTimer ?? ((handler, ms) => window.setTimeout(handler, ms));
 		this.clearTimer = options.clearTimer ?? ((id) => { window.clearTimeout(id); });
@@ -73,11 +88,25 @@ export class PasteFixScheduler {
 		return this.pending.size;
 	}
 
-	/** 记下"这篇笔记刚粘了聊天记录"：等它落盘后再修 */
+	/** 记下"这篇笔记刚粘了聊天记录"：等内容落地、落盘，再修 */
 	schedule(file: TFile): void {
 		this.forget(file.path);
 		const timer = this.setTimer(() => { this.fire(file.path); }, this.fallbackMs);
-		this.pending.set(file.path, { file, timer });
+		this.pending.set(file.path, { file, timer, flushed: false });
+	}
+
+	/**
+	 * 编辑器里的内容真的变了（粘贴落进去了）：催它立刻落盘，别再等那 2 秒的自动保存。
+	 * 同一笔只催一次 —— 用户粘完接着打字会连着触发，催第二遍没有意义。
+	 *
+	 * @returns 是否真的催了（没有这笔等待、或已经催过，都返回 false）
+	 */
+	onEditorChange(file: TFile): boolean {
+		const entry = this.pending.get(file.path);
+		if (!entry || entry.flushed) return false;
+		entry.flushed = true;
+		this.flush(entry.file);
+		return true;
 	}
 
 	/** 文件落盘了：正是等着的那篇就立刻修（返回是否命中） */
@@ -102,12 +131,29 @@ export class PasteFixScheduler {
 		this.run(entry.file);
 	}
 
-	/** 撤销一条等待（连同它的兜底定时器） */
+	/** 撤销一笔等待（连同它的兜底定时器） */
 	private forget(path: string): void {
 		const entry = this.pending.get(path);
 		if (!entry) return;
 		this.pending.delete(path);
 		this.clearTimer(entry.timer);
+	}
+}
+
+/**
+ * 催这篇笔记立刻落盘。
+ *
+ * 同一篇笔记可能开着好几个视图（分屏），干净的那几份 `save()` 自己会早退（内容没变不写盘），
+ * 所以不用挑哪一份是"刚粘过的那份"。
+ *
+ * 失败不用我们操心：Obsidian 会打日志并弹"保存失败"的通知，这里再吵一次只会重复。
+ */
+function saveViewsOf(app: App, file: TFile): void {
+	for (const leaf of app.workspace.getLeavesOfType('markdown')) {
+		const view = leaf.view;
+		if (view instanceof MarkdownView && view.file?.path === file.path) {
+			void view.save().catch(() => undefined);
+		}
 	}
 }
 
@@ -121,7 +167,10 @@ export function registerPasteAutoFix(
 	actions: TaskActions,
 	getSettings: () => ImageTransferSettings
 ): void {
-	const scheduler = new PasteFixScheduler({ run: (file) => { void actions.quickFixChatLog(file); } });
+	const scheduler = new PasteFixScheduler({
+		run: (file) => { void actions.quickFixChatLog(file); },
+		flush: (file) => { saveViewsOf(plugin.app, file); },
+	});
 	plugin.register(() => { scheduler.dispose(); });
 
 	// ① 粘贴：只看剪贴板里的纯文本，不像聊天记录就一个字节都不碰（这次粘贴照常进行）
@@ -142,7 +191,15 @@ export function registerPasteAutoFix(
 
 	plugin.registerEvent(plugin.app.workspace.on('editor-paste', handlePaste));
 
-	// ② 落盘：编辑器把这次粘贴写进文件之后才动手（这时正文里才有刚粘的内容）
+	// ② 粘贴落进编辑器：催这篇笔记立刻写盘（默认要等停手 2 秒，见模块头注释）
+	const handleEditorChange = (_editor: Editor, info: MarkdownView | MarkdownFileInfo): void => {
+		const file = info.file ?? null;
+		if (file) scheduler.onEditorChange(file);
+	};
+
+	plugin.registerEvent(plugin.app.workspace.on('editor-change', handleEditorChange));
+
+	// ③ 落盘：编辑器把这次粘贴写进文件之后才动手（这时正文里才有刚粘的内容）
 	plugin.registerEvent(
 		plugin.app.vault.on('modify', (file) => {
 			if (file instanceof TFile) scheduler.onModified(file);

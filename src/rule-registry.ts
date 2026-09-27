@@ -929,7 +929,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 					symbols: ['registerPasteAutoFix', 'shouldAutoFixPaste', 'PasteFixScheduler', 'PASTE_FALLBACK_MS'],
 				},
 				tests: ['test/paste-watch.test.ts', 'test/chat-log.test.ts'],
-				note: '挂在官方的 `editor-paste` 上：只看剪贴板里的纯文本，**不阻止这次粘贴**（不像「接管 Ctrl+C」那样抢按键）。判定用 `chat-log.ts` 的 `looksLikeChatLog` —— 至少两条"消息头部"（时间戳前同一行有用户名，或整行就是本插件写出的无用户名时间戳）才算；只认一条会把 `会议 14:30:25` 这种正文误判，而复制单条消息本来也不带时间戳头部，所以宁可漏也不误伤。**不动手的时机很重要**：`editor-paste` 派发时粘贴的内容还没落进文档，此刻读到的正文是粘贴之前的 —— 所以只登记一笔，等这篇笔记落盘（`vault` 的 `modify`，编辑器保存触发）再跑「快速修复聊天记录」（转换本文件内的外部图片 + 修一遍排版）；编辑器迟迟不保存时由 `PASTE_FALLBACK_MS` 兜底。等待表见 `PasteFixScheduler`：同一篇连着粘只修一次，跑之前先从表里删掉（我们自己的写盘也会触发 `modify`，不删就会自己触发自己），插件卸载时清空',
+				note: '挂在官方的 `editor-paste` 上：只看剪贴板里的纯文本，**不阻止这次粘贴**（不像「接管 Ctrl+C」那样抢按键）。判定用 `chat-log.ts` 的 `looksLikeChatLog` —— 至少两条"消息头部"（时间戳前同一行有用户名，或整行就是本插件写出的无用户名时间戳）才算；只认一条会把 `会议 14:30:25` 这种正文误判，而复制单条消息本来也不带时间戳头部，所以宁可漏也不误伤。**不动手的时机很重要**：`editor-paste` 派发时粘贴的内容还没落进文档（Obsidian 的剪贴板管理器只发这个事件，插入是 CodeMirror 内置处理器随后做的），此刻读到的正文是粘贴之前的 —— 所以只登记一笔；但也不干等自动保存（`TextFileView.requestSave` 的 debounce 是 2 秒，干等就是"粘完一两秒才修好"），内容一落进编辑器（`editor-change`）就调 `MarkdownView.save()` 让这篇笔记立刻落盘，落盘触发的 `modify` 再跑「快速修复聊天记录」（转换本文件内的外部图片 + 修一遍排版）；编辑器迟迟不落盘时由 `PASTE_FALLBACK_MS` 兜底。等待表见 `PasteFixScheduler`：同一篇连着粘只修一次、同一笔只催一次落盘，跑之前先从表里删掉（我们自己的写盘也会触发 `modify`，不删就会自己触发自己），插件卸载时清空',
 			},
 		],
 	},

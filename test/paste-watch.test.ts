@@ -3,13 +3,14 @@
  *
  * 运行：npm test
  *
- * 盯四件事：
+ * 盯五件事：
  *   1. 判定：开关 + 有笔记 + 像聊天记录，三条都满足才动手（错一条都不动）
- *   2. 时机：粘贴那一刻**不动手**（那时正文里还没有粘进来的内容），等这篇笔记落盘后再修
- *   3. 等待表：同一篇连着粘只跑一次、兜底定时器、卸载后清干净
- *   4. 接线：`registerPasteAutoFix` 真的把 `editor-paste` 与 `vault.modify` 接上了
+ *   2. 时机：粘贴那一刻**不动手**（那时正文里还没有粘进来的内容），落盘之后再修
+ *   3. 不干等：内容一落进编辑器就催这篇笔记立刻落盘（否则要等 Obsidian 停手 2 秒的自动保存）
+ *   4. 等待表：同一篇连着粘只跑一次、兜底定时器、卸载后清干净
+ *   5. 接线：`registerPasteAutoFix` 把 `editor-paste` / `editor-change` / `vault.modify` 都接上了
  */
-import { TFile } from "obsidian";
+import { MarkdownView, TFile } from "obsidian";
 import type { Plugin } from "obsidian";
 import type { ImageTransferSettings } from "../src/settings/model";
 import { DEFAULT_SETTINGS } from "../src/settings/model";
@@ -96,8 +97,10 @@ function fakeTimers(): {
 function schedulerTests(): void {
 	const timers = fakeTimers();
 	const ran: string[] = [];
+	const flushed: string[] = [];
 	const scheduler = new PasteFixScheduler({
 		run: (file) => { ran.push(file.path); },
+		flush: (file) => { flushed.push(file.path); },
 		setTimer: timers.setTimer,
 		clearTimer: timers.clearTimer,
 	});
@@ -111,9 +114,19 @@ function schedulerTests(): void {
 	checkEqual("等待表里有一篇", scheduler.size, 1);
 	checkEqual("兜底时长用默认值", timers.lastDelay(), PASTE_FALLBACK_MS);
 
-	// 别的笔记落盘不算数
+	// 别的笔记有动静都不算数
+	checkEqual("别的笔记内容变了不催落盘", scheduler.onEditorChange(other), false);
 	checkEqual("别的笔记落盘不触发", scheduler.onModified(other), false);
 	checkEqual("等待表还在", scheduler.size, 1);
+	checkEqual("也没催过谁的落盘", flushed, []);
+
+	// 内容真的落进编辑器：催这篇立刻落盘（但还不修 —— 磁盘上还是旧正文）
+	checkEqual("内容落地催落盘", scheduler.onEditorChange(note), true);
+	checkEqual("催的是这一篇", flushed, ["聊天记录.md"]);
+	checkEqual("催落盘时先不修", ran, []);
+	checkEqual("催落盘不算完，还在等落盘", scheduler.size, 1);
+	checkEqual("同一笔只催一次（粘完接着打字会连着触发）", scheduler.onEditorChange(note), false);
+	checkEqual("还是只催了一次", flushed, ["聊天记录.md"]);
 
 	// 这篇落盘了：立刻修，并且不再等兜底
 	checkEqual("这篇落盘触发", scheduler.onModified(note), true);
@@ -131,7 +144,7 @@ function schedulerTests(): void {
 	checkEqual("同一篇连着粘只留一条等待", scheduler.size, 1);
 	checkEqual("旧定时器撤掉，只剩一个", timers.count(), 1);
 	timers.fireAll();
-	checkEqual("兜底也能修（编辑器迟迟没保存时）", ran, ["聊天记录.md", "聊天记录.md"]);
+	checkEqual("兜底也能修（编辑器迟迟没落盘时）", ran, ["聊天记录.md", "聊天记录.md"]);
 	checkEqual("跑完等待表清空", scheduler.size, 0);
 
 	// 卸载：清掉等待与定时器，卸载之后一个字节都不写
@@ -148,16 +161,31 @@ function wiringTests(): void {
 	installDomStubs();
 
 	const pasteHandlers: Array<(evt: ClipboardEvent, editor: unknown, info: { file: TFile | null }) => void> = [];
+	const changeHandlers: Array<(editor: unknown, info: { file: TFile | null }) => void> = [];
 	const modifyHandlers: Array<(file: unknown) => void> = [];
 	const cleanups: Array<() => void> = [];
 	const note = fileOf("聊天记录.md");
+	const saved: string[] = [];
 	const settings: ImageTransferSettings = { ...DEFAULT_SETTINGS };
 	const ran: string[] = [];
+
+	// 编辑器视图替身：flush 要能认出"这篇笔记开着"并调它的 save()
+	// （真实定义里 MarkdownView 的构造函数要一个 leaf，替身类不用；这里按替身来造实例）
+	const ViewClass = MarkdownView as unknown as new () => MarkdownView;
+	const view = Object.assign(new ViewClass(), {
+		file: note,
+		save: async (): Promise<void> => { saved.push(note.path); },
+	});
 
 	const plugin = {
 		app: {
 			workspace: {
-				on: (_event: string, callback: never) => { pasteHandlers.push(callback); return { event: _event }; },
+				on: (event: string, callback: never) => {
+					if (event === "editor-paste") pasteHandlers.push(callback);
+					if (event === "editor-change") changeHandlers.push(callback);
+					return { event };
+				},
+				getLeavesOfType: (type: string) => (type === "markdown" ? [{ view }] : []),
 			},
 			vault: {
 				on: (_event: string, callback: never) => { modifyHandlers.push(callback); return { event: _event }; },
@@ -174,36 +202,49 @@ function wiringTests(): void {
 		const evt = { clipboardData: { getData: () => text } } as unknown as ClipboardEvent;
 		for (const handler of pasteHandlers) handler(evt, {}, { file: note });
 	};
+	const change = (): void => {
+		for (const handler of changeHandlers) handler({}, { file: note });
+	};
 	const save = (): void => {
 		for (const handler of modifyHandlers) handler(note);
 	};
 
-	checkTrue("editor-paste 与 vault.modify 都接上了", pasteHandlers.length === 1 && modifyHandlers.length === 1,
-		`paste ${pasteHandlers.length} / modify ${modifyHandlers.length}`);
+	checkTrue("editor-paste / editor-change / vault.modify 都接上了",
+		pasteHandlers.length === 1 && changeHandlers.length === 1 && modifyHandlers.length === 1,
+		`paste ${pasteHandlers.length} / change ${changeHandlers.length} / modify ${modifyHandlers.length}`);
 
-	// 像聊天记录：粘贴时不写，等落盘后修一次
+	// 像聊天记录：粘贴时不写，等内容落地催一次落盘，落盘后才修
 	paste(CHAT_LOG);
 	checkEqual("粘贴时不立刻写", ran, []);
+	change();
+	checkEqual("内容落地催这篇笔记落盘", saved, ["聊天记录.md"]);
+	checkEqual("催落盘时还没修", ran, []);
 	save();
 	checkEqual("落盘后自动修一次", ran, ["聊天记录.md"]);
 
 	// 普通粘贴：什么都不发生
 	paste(PLAIN_TEXT);
+	change();
 	save();
 	checkEqual("普通粘贴不触发", ran, ["聊天记录.md"]);
+	checkEqual("普通粘贴也不催落盘", saved, ["聊天记录.md"]);
 
 	// 开关关掉：什么都不发生
 	settings.autoFixChatLogOnPaste = false;
 	paste(CHAT_LOG);
+	change();
 	save();
 	checkEqual("开关关掉后不触发", ran, ["聊天记录.md"]);
+	checkEqual("开关关掉后也不催落盘", saved, ["聊天记录.md"]);
 
-	// 卸载：等待清空，不再写仓库
+	// 卸载：等待清空，不再写仓库、也不再催落盘
 	settings.autoFixChatLogOnPaste = true;
 	paste(CHAT_LOG);
 	for (const cleanup of cleanups) cleanup();
+	change();
 	save();
 	checkEqual("卸载后不再动手", ran, ["聊天记录.md"]);
+	checkEqual("卸载后也不再催落盘", saved, ["聊天记录.md"]);
 }
 
 // -------------------------------------------------------------------- 运行

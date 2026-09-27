@@ -83,7 +83,7 @@ The layout is configurable (see **Settings** below):
 
 **Quick chat-log fix** — one entry in the command palette and in the right-click menus that does both jobs at once: transfer the external-path images referenced by this note, then fix the note's layout (spaces / indent / chat log / tags / formulas). Chat logs pasted out of QQ / WeChat usually carry `file:///D:\…` images and messy spacing, so one click leaves them clean.
 
-**Fix on paste** (on by default, **Settings → 排版格式 → 聊天记录**) runs that same command automatically when what you paste looks like a chat log — at least **two** message headers (a username before a timestamp), so mentioning `会议 14:30:25` in prose does not trigger it and copying a single message (which carries no header) does not either. It deliberately waits: the text is not in the document yet while the paste event fires, so the fix runs once the note has been saved, which means it rewrites the note *including* what you just pasted (with a 5-second fallback if the editor never saves). Turn the switch off and nothing is touched automatically — the command and the menu entries still work.
+**Fix on paste** (on by default, **Settings → 排版格式 → 聊天记录**) runs that same command automatically when what you paste looks like a chat log — at least **two** message headers (a username before a timestamp), so mentioning `会议 14:30:25` in prose does not trigger it and copying a single message (which carries no header) does not either. It deliberately does not act while the paste event fires (the text is not in the document yet), but it does not wait for Obsidian's own autosave either — that one only fires 2 seconds after you stop typing. The note is flushed to disk the moment the paste lands in the editor, so the rewritten note *including* what you just pasted is there almost immediately (with a 5-second fallback if nothing ever saves). Turn the switch off and nothing is touched automatically — the command and the menu entries still work.
 
 ### 4. Set image size in one click
 
@@ -355,7 +355,7 @@ Chat log formatting:
 - **Body indent** — tab, 2 spaces, 4 spaces, or none
 - **Image position in mixed messages** — image above the text, below the text, or keep the original order
 - **Blank line between messages** — only available when username, date and time are all turned off; inserts an empty line between adjacent messages so they stay visually distinct
-- **Fix on paste** — on by default. When what you paste in the editor looks like a chat log (at least two "username + timestamp" message headers), the **quick chat-log fix** runs automatically: transfer this note's external-path images, then fix its layout. The fix waits until the paste has been saved, so it rewrites the note *including* the pasted text; turn it off and pasting never changes anything by itself
+- **Fix on paste** — on by default. When what you paste in the editor looks like a chat log (at least two "username + timestamp" message headers), the **quick chat-log fix** runs automatically: transfer this note's external-path images, then fix its layout. It does not act on the paste event itself (the text is not in the document yet), but the note is flushed to disk as soon as the paste lands, so the fix applies to the note *including* the pasted text without a perceptible wait; turn it off and pasting never changes anything by itself
 
 All defaults reproduce the previous layout exactly, so existing notes are not reformatted until you change a setting.
 
@@ -404,7 +404,7 @@ Chat log:
 - **Body indent** — tab, 2 spaces, 4 spaces, or none
 - **Image position in mixed messages** — image above the text, below the text, or keep the original order
 - **Blank line between messages** — only available when username, date and time are all turned off; inserts an empty line between adjacent messages so they stay visually distinct
-- **Fix on paste** — on by default; pasting a chat log (two or more message headers) runs the quick chat-log fix by itself once the note has been saved
+- **Fix on paste** — on by default; pasting a chat log (two or more message headers) runs the quick chat-log fix by itself as soon as the paste lands in the editor (no wait for the 2-second autosave)
 
 - **Show image count for the selection** — off by default. When on, selecting text in the editor shows how many images the selection contains in the bottom-right status bar (`🖼 选中 3 张图片`). Only embeds count (`![[photo.png]]`, `![alt](photo.png)`, including sizes / aliases / fragments and `avif` / `svg`); a plain link to an image file does not, and neither do links inside fenced code blocks or inline code. The cell stays empty while nothing is selected or the selection has no images.
 
@@ -489,6 +489,11 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 3. Reload Obsidian and enable **Note Tidy** (the old entry can be removed)
 
 ## Changelog
+
+### v1.3.12
+- Fixed: **no more visible delay after pasting a chat log** — the automatic fix used to wait for the editor's own autosave, and Obsidian saves 2 seconds after you stop typing (`TextFileView.requestSave` debounces by 2000 ms), so the layout visibly changed a second or two after the paste. The note is now flushed to disk as soon as the paste lands in the editor (`editor-change` → `MarkdownView.save()`), and the resulting `modify` event drives the same fix as before; detection, fallback and the "never take the paste over" rule are unchanged
+- Fixed: **batch result notices were 5 seconds late** — per-file spam notices are hidden during a batch, and the old code then waited 5 seconds for them to expire before un-hiding *and* showing the summary, so every task notice arrived 5 seconds late. Un-hiding now happens at once and the summary appears immediately; the notices that have not expired yet are hidden individually (`note-tidy-suppressed`) and disappear on their own (with a 6-second safety net so a notice that never auto-hides cannot be hidden forever)
+- Internal: `NoticeSuppressor` cleans up on unload (`dispose()`), only tags `.notice` and no longer touches the persistent `.notice-container` (the v1.1.4 bug), and the debug logging on the batch path is gone; new `test/notice-suppressor.test.ts` (17 checks: suppression, release timing, leftovers, container, unload) and `test/paste-watch.test.ts` grew to 42
 
 ### v1.3.11
 - New: **quick chat-log fix** — transfers the external-path images this note references *and* fixes its layout (spaces / indent / chat log / tags / formulas) in one go. It is a command, an entry in the note / image right-click menus, and an entry in the file explorer's **文本排版** submenu (single notes only). Both steps run inside one batch task (images first, then layout), and the result notice says what was actually changed
