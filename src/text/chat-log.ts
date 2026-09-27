@@ -28,6 +28,8 @@ export interface ChatLogOptions {
 	blankLineBetweenMessages: boolean;
 	/** 相邻消息的时间戳与粘贴顺序不一致时，是否按时间先后输出（见 sortAdjacentMessages） */
 	sortByTime: boolean;
+	/** 是否去掉正文里的 `@昵称` 提及（见 stripMentions） */
+	stripMentions: boolean;
 }
 
 /** 默认行为与旧版本完全一致：用户名/日期/时间全显示、Tab 缩进、不调整图片顺序、不加空行 */
@@ -39,7 +41,45 @@ export const DEFAULT_CHAT_LOG_OPTIONS: ChatLogOptions = {
 	imageOrder: 'keep',
 	blankLineBetweenMessages: false,
 	sortByTime: true,
+	// 删正文是不可逆的改动，默认不开；要用的在设置里打开
+	stripMentions: false,
 };
+
+/**
+ * 正文里的 @ 提及：`@昵称`（QQ / 微信 复制出来的回复标记）。
+ *
+ * - 半角 `@` 与全角 `＠` 都认；
+ * - 前面不能是字母数字等下划线以外的"词字符" —— 否则 `foo@bar.com` 里的 `@bar.com` 会被误当成提及
+ *   （行首、空白、标点后面都算提及的位置）。用后顾断言看**原文**，所以
+ *   `@张三 @李四 大家好` 这种连着写的也能两个都匹配上；
+ * - 昵称取"连续的非空白字符"（昵称里带空格的情况没法从纯文本判断，只能取到空格为止）；
+ * - 提及后面的空白一并吃掉，前面那格留着当分隔（`你好 @张三 再见` → `你好 再见`）。
+ */
+const MENTION_RE = /(?<![\w@＠])[@＠][^\s@＠]+[ \t\u00A0\u2005]*/g;
+
+/**
+ * 去掉正文里的 `@昵称` 提及（聊天记录排版的可选步骤，默认关）。
+ *
+ * 逐行处理：提及被删掉后整行变空的（例如一条消息的正文就是 `@张三`），整行也一并去掉 ——
+ * 否则会留下只剩缩进的空行。原本就是空行的行保持原样（那是作者写的段落间隔）。
+ *
+ * @param text 消息正文（可多行）
+ * @returns 去过提及的正文；没有提及或不需要改动时原样返回
+ */
+export function stripMentions(text: string): string {
+	if (!text || !/[@＠]/.test(text)) return text;
+
+	const lines = text.split('\n').map(line => {
+		const before = line;
+		const after = line.replace(MENTION_RE, '').trim();
+		return { before, after };
+	});
+
+	// 原本就空的行留着，被提及"清空"的行丢掉
+	const kept = lines.filter(item => item.after !== '' || item.before === '');
+	const result = kept.map(item => item.after).join('\n');
+	return result === text ? text : result;
+}
 
 /** 时间戳锚点（与旧实现一致） */
 const TIME_ANCHOR_RE =
@@ -239,6 +279,51 @@ function reorderImages(lines: string[], order: 'above' | 'below'): string[] {
 	if (images.length === 0 || texts.length === 0) return lines;
 
 	return order === 'above' ? [...images, ...texts] : [...texts, ...images];
+}
+
+/**
+ * 正文里出现"顶格的整行"时，上一条消息的正文到此为止。
+ *
+ * 场景：聊天记录排过一遍之后，正文是带缩进的；作者随后在消息下面接着写自己的东西
+ * （`06集` 这类小标题、临时笔记）。这些行与消息正文之间常常没有空行，
+ * 照旧一起当成消息正文的话，作者自己的标题就会被重新缩进、变成"某条消息的内容"。
+ *
+ * 判据只看缩进结构：**正文区域里先出现过带缩进的行，之后又出现一行顶格的**，
+ * 就从那一行开始截断（那一行原样留在正文之外，不进消息，也不被改动）。
+ * 刚从 QQ 粘进来的原文整段都是顶格的（区域里没有"带缩进的行"），所以不受影响 ——
+ * 这条规则只在"已经排过版"的内容上生效。
+ *
+ * 缩进选项是「不缩进」时整条规则不生效：那时正文本来就没有缩进，
+ * 既没有判据，排出来的结果也不会有任何可辨认的结构（规则会自相矛盾）。
+ *
+ * @param content 笔记原文
+ * @param start 正文区域起点（时间戳之后）
+ * @param end 原先算出的正文终点
+ * @returns 截断后的正文终点；没有这种行时原样返回 end
+ */
+function bodyEndsBeforeNoteLine(content: string, start: number, end: number): number {
+	let lineStart = start;
+	let sawIndented = false;
+
+	while (lineStart < end) {
+		let lineEnd = content.indexOf('\n', lineStart);
+		if (lineEnd === -1 || lineEnd > end) lineEnd = end;
+
+		const line = content.substring(lineStart, lineEnd);
+		if (line.trim() !== '') {
+			if (/^[ \t]/.test(line)) {
+				sawIndented = true;
+			} else if (sawIndented) {
+				// 退到这一行前面的换行：作者写的这一行（以及其后所有内容）原样保留
+				return lineStart - 1;
+			}
+		}
+
+		if (lineEnd >= end) break;
+		lineStart = lineEnd + 1;
+	}
+
+	return end;
 }
 
 /**
@@ -612,9 +697,19 @@ export function formatChatLog(
 			}
 		}
 
-		// 4. 提取正文，按需调整图文顺序并施加缩进
+		// 4. 提取正文，按需去掉 @ 提及、调整图文顺序并施加缩进
+		//
+		// 先按缩进结构收一次口：正文里先有带缩进的行、后面又冒出顶格的行时，
+		// 那是作者自己接在消息下面写的内容（`06集` 之类），不能跟着消息一起缩进。
+		// 缩进选项是「不缩进」时没有这个判据，跳过（见 bodyEndsBeforeNoteLine）
+		if (options.indent !== '') {
+			boundary = bodyEndsBeforeNoteLine(rawContent, searchStart, boundary);
+		}
+
 		const bodyRaw = rawContent.substring(anchor.end, boundary);
-		const bodyClean = bodyRaw.replace(/^[:：]\s*/, "").trim();
+		let bodyClean = bodyRaw.replace(/^[:：]\s*/, "").trim();
+		// @ 提及是 QQ / 微信 的回复标记，昵称在笔记里指不到具体的人 —— 开了开关就删掉
+		if (options.stripMentions) bodyClean = stripMentions(bodyClean);
 
 		if (bodyClean) {
 			let lines = bodyClean.split('\n').map(line => line.trim());

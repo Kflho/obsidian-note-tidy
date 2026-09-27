@@ -248,6 +248,12 @@ export const TEXT_SECTION: FieldSection = {
 					control: { type: 'toggle' },
 				},
 				{
+					key: 'chatStripMentions',
+					name: '去掉 @ 提及',
+					desc: '删掉消息正文里的 `@昵称`（QQ / 微信 的回复标记）：昵称在你的笔记里指不到具体的人，留着只是噪音。同一行的其它文字保留，整行只有提及的连整行去掉。只作用于排版时的聊天记录正文，已经排过版的旧内容不会追溯删除',
+					control: { type: 'toggle' },
+				},
+				{
 					key: 'chatBlankLineBetweenMessages',
 					name: '消息之间插入空行',
 					desc: '仅在用户名、日期、时间全部关闭时可用；有头部信息时头部本身已起分隔作用',
