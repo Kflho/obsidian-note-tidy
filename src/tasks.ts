@@ -6,13 +6,33 @@ import { resolveImageFiles } from './image/copy';
 import { buildRichContent } from './image/rich-copy';
 import type { CopySelection } from './image/rich-copy';
 import type { ImageRef } from './image/scan';
-import { buildBasenameIndex } from './image/links';
+import { buildBasenameIndex, collectLinkedImageFiles } from './image/links';
 import { buildVaultBasenameMap } from './image/naming';
+import {
+	ConversionHint,
+	convertVaultImage,
+	findImageConverter,
+	formatLabel,
+	readConverterPreset,
+	selectConvertibleImages,
+	vaultConvertOverride,
+} from './image/image-converter-bridge';
+import type { ConverterHandle, ConverterPreset } from './image/image-converter-bridge';
 import { organizeNoteImages } from './image/organize';
 import { countImages, fixImageLinkFormats, renameGarbledImages, renameImagesToPreset } from './image/rename';
 import { applyImageSize, validateImageSize } from './image/size';
 import type { ImageSizeOptions } from './image/size';
-import { transferExternalImages, transferImagesInText } from './image/transfer';
+import {
+	CLEAR_UNUSED_IMAGES_COMMAND,
+	chooseKeeper,
+	collectImageTargets,
+	findIdenticalGroups,
+	groupByFolderAndSize,
+	isManagedImageExtension,
+	rewriteImageReferences,
+} from './image/dedupe';
+import type { ImageEntry } from './image/dedupe';
+import { discardImportedFiles, transferExternalImages, transferImagesInText } from './image/transfer';
 import { resolveIndent } from './text/chat-log';
 import type { ChatLogOptions } from './text/chat-log';
 import { dedentBy, keepEdgeNewlines, placeBlockAt, resolveRangeIndent } from './text/context-indent';
@@ -62,12 +82,21 @@ export interface TaskActions {
 	openMenuManager(): void;
 	/** 修复排版（空格 / 缩进 / 聊天记录 / 标签 / 公式） */
 	typeset(files: TFile[], where: string): Promise<void>;
+	/** 把全库"不是目标格式"的图片交给 Image Converter 转换（命令面板入口） */
+	convertEntireVault(): Promise<void>;
+	/** 转换当前笔记里引用的图片（命令面板入口）：想先在一篇笔记上试就用它 */
+	convertNoteImages(file: TFile | null): Promise<void>;
+	/** 整理图片：合并内容相同的重复副本 + 清理没人引用的附件（命令面板与左侧栏图标入口） */
+	tidyImages(confirm?: boolean): Promise<void>;
 }
 
 /** 提示里列图片名：最多三个，其余用"…"带过（提示太长会挡住屏幕上的内容） */
 function summarizeNames(names: string[]): string {
 	return names.length > 3 ? `${names.slice(0, 3).join('、')}…` : names.join('、');
 }
+
+/** 转换前确认弹窗里那句警告（当前笔记 / 全库共用） */
+const CONVERT_WARNING = '⚠️ 转换会重写这些图片文件并改扩展名（例如 png → webp），笔记里的链接由 Obsidian 自动更新；动图（gif）与已经是目标格式的图片不会被动。';
 
 export class ImageTasks implements TaskActions {
 	constructor(
@@ -79,10 +108,26 @@ export class ImageTasks implements TaskActions {
 		private readonly saveSettings: () => Promise<void>
 	) {}
 
+	/**
+	 * 「装了 image converter 就能自动转格式」的提醒：**一次会话只说一次**。
+	 *
+	 * 没装它的时候功能不会坏 —— 图片照样导进仓库，只是保持 png/jpg。默认又开着
+	 * 「导入的图片交给 Image Converter 转格式」，一句不说会让人以为转换功能失效了。
+	 */
+	private readonly conversionHint = new ConversionHint(message => { new Notice(message); });
+
+	/** 要导入图片了：没装 image converter 就提醒一句（开关关着就不提） */
+	private hintIfNoConverter(): void {
+		if (this.getSettings().handOffImportedImages === false) return;
+		if (findImageConverter(this.app)) return;
+		this.conversionHint.maybeShow();
+	}
+
 	// ------------------------------------------------------------------ 外部图片转换
 
 	/** 转换当前笔记里的外部图片（命令面板入口） */
 	async transferCurrentNote(file: TFile | null): Promise<void> {
+		this.hintIfNoConverter();
 		await this.runner.run(
 			{
 				label: '📷 外部图片转换',
@@ -104,6 +149,7 @@ export class ImageTasks implements TaskActions {
 
 	/** 转换整个仓库的外部图片（命令面板入口） */
 	async transferEntireVault(): Promise<void> {
+		this.hintIfNoConverter();
 		const files = this.app.vault.getMarkdownFiles();
 		const reservedPaths = new Map<string, string>();
 		const reservedBasenames = buildVaultBasenameMap(this.app);
@@ -132,6 +178,7 @@ export class ImageTasks implements TaskActions {
 
 	/** 转换外部图片（右键菜单入口） */
 	async transferExternal(files: TFile[], where: string): Promise<void> {
+		this.hintIfNoConverter();
 		const settings = this.getSettings();
 		const reservedPaths = new Map<string, string>();
 		const reservedBasenames = buildVaultBasenameMap(this.app);
@@ -239,6 +286,312 @@ export class ImageTasks implements TaskActions {
 			total += await countImages(this.app, file, index, settings, force);
 		}
 		return total;
+	}
+
+	// ------------------------------------------------------------------ 图片格式转换
+
+	/**
+	 * 把全库"不是目标格式"的图片交给 Image Converter 转换（命令面板入口）。
+	 *
+	 * 为什么要有这条：装了 Image Converter 的人本来就想让图片统一成 webp，
+	 * 但它的自动转换只认"剪贴板里带图片文件"的粘贴 —— 从别处导入的、早年攒下的
+	 * png/jpg 它一个都看不到（2026-09 用户库里 108 张非 webp 就是这么来的）。
+	 *
+	 * 想先在一篇笔记上试，用 `convertNoteImages`（范围小、看得清效果）。
+	 */
+	async convertEntireVault(): Promise<void> {
+		const ready = this.prepareConversion();
+		if (!ready) return;
+
+		const targets = selectConvertibleImages(this.app.vault.getFiles(), ready.values);
+		if (targets.length === 0) {
+			new Notice(`ℹ️ 全库图片都已经是 ${ready.label} 了（动图 gif 与不支持转换的格式会跳过）。`);
+			return;
+		}
+
+		new ConfirmRenameModal(this.app, targets.length, async () => {
+			await this.runConversion(targets, ready);
+		}, {
+			title: '确认转换图片格式',
+			message: `发现 ${targets.length} 张图片不是 ${ready.label}，确认转换？`,
+			warning: CONVERT_WARNING,
+			confirmLabel: '确认转换',
+		}).open();
+	}
+
+	/**
+	 * 转换**当前笔记里引用的**图片（命令面板入口）：想先在一篇笔记上看看效果时用它。
+	 *
+	 * 只认笔记里 `![[…]]` 嵌入的图片（与重命名 / 整理图片位置同一套解析），
+	 * 同名有歧义的一律跳过 —— 宁可少转一张，也不去改错文件。
+	 */
+	async convertNoteImages(file: TFile | null): Promise<void> {
+		if (!file) {
+			new Notice('⚠️ 无法获取当前文件，请确保您打开了一篇笔记！');
+			return;
+		}
+
+		const ready = this.prepareConversion();
+		if (!ready) return;
+
+		const index = buildBasenameIndex(this.app);
+		const linked = await collectLinkedImageFiles(this.app, file, index);
+		const targets = selectConvertibleImages(linked, ready.values);
+		if (targets.length === 0) {
+			new Notice(`ℹ️ 这篇笔记里没有需要转换的图片（都已经是 ${ready.label}，动图与不支持的格式会跳过）。`);
+			return;
+		}
+
+		new ConfirmRenameModal(this.app, targets.length, async () => {
+			await this.runConversion(targets, ready);
+		}, {
+			title: '确认转换图片格式',
+			message: `这篇笔记里有 ${targets.length} 张图片不是 ${ready.label}，确认转换？`,
+			warning: CONVERT_WARNING,
+			confirmLabel: '确认转换',
+		}).open();
+	}
+
+	/**
+	 * 转换前的统一准备：拿到 Image Converter 的转码器与当前预设。
+	 *
+	 * **没装 / 预设读不出来时只提示、什么都不做** —— 这两条命令全靠它转码，
+	 * 但绝不能因为缺它就把仓库里的图片怎么样（图片照旧导入那条路见 `hintIfNoConverter`）。
+	 */
+	private prepareConversion(): { handle: ConverterHandle; values: ConverterPreset; override?: string; label: string } | null {
+		const handle = findImageConverter(this.app);
+		if (!handle) {
+			new Notice('⚠️ 这条命令靠 image converter 转换格式：请先安装并启用它（社区插件市场搜 "image converter"）。');
+			return null;
+		}
+
+		const override = vaultConvertOverride(this.getSettings().vaultConvertFormat);
+		const preset = readConverterPreset(handle.settings, override);
+		if (!preset) {
+			new Notice('⚠️ 读不出 image converter 的转换预设：请在它里面配一个（例如 webp），或在设置里把「目标格式」改成具体格式。');
+			return null;
+		}
+		return { handle, values: preset.values, override, label: formatLabel(preset.values.outputFormat) };
+	}
+
+	/**
+	 * 逐张转换并汇报（当前笔记 / 全库共用）。
+	 *
+	 * 顺序是 **转码 → 改名（换扩展名）→ 写回内容**，改名走 Obsidian 原生的
+	 * `fileManager.renameFile`，全库链接（wikilink / Markdown / canvas）自动跟着更新 ——
+	 * 这也是 Image Converter 自己批量转换时的同一套顺序。单张出错不拖垮整批。
+	 */
+	private async runConversion(
+		targets: TFile[],
+		ready: { handle: ConverterHandle; override?: string; label: string }
+	): Promise<void> {
+		const { handle, override, label } = ready;
+		await this.runner.run(
+			{
+				label: `🖼️ 转换为 ${label}`,
+				files: targets,
+				failureMessage: '❌ 图片格式转换中断，请检查控制台。',
+			},
+			async (ctx) => {
+				let converted = 0;
+				let skipped = 0;
+				let failed = 0;
+
+				for (let i = 0; i < targets.length; i++) {
+					const file = targets[i];
+					if (file) {
+						try {
+							const name = await convertVaultImage(this.app, file, handle, override);
+							if (name) converted++;
+							else skipped++;
+						} catch (e) {
+							// 单张出错不拖垮整批：继续跑，最后一起汇报
+							failed++;
+							console.error(`❌ [ImageTransfer] 转换失败：${file.path}`, e);
+						}
+					}
+					ctx.progress.step(i + 1);
+				}
+
+				if (converted > 0) {
+					ctx.progress.finish('✅ 转换完成');
+					let message = `🎉 已把 ${converted} 张图片转换为 ${label}。`;
+					if (skipped > 0) message += `另有 ${skipped} 张没转成（已是 ${label} 或没省下空间），按原样留着。`;
+					if (failed > 0) message += `⚠️ 有 ${failed} 张出错，详情见控制台。`;
+					return message;
+				}
+				ctx.progress.clear();
+				if (failed > 0) {
+					return `⚠️ 没有图片转换成功，有 ${failed} 张出错，详情见控制台。`;
+				}
+				return `ℹ️ 没有图片需要转换（可能都已经是 ${label}，或转完没省下空间）。`;
+			}
+		);
+	}
+
+	// ------------------------------------------------------------------ 整理图片（合并 + 清理）
+
+	/**
+	 * 整理图片：**合并重复副本**（内容完全相同、又在同一个文件夹里）+ **清理没人引用的附件**。
+	 *
+	 * 为什么限定"同一个文件夹"：同目录里的孪生文件是"同一张图粘了两次"，纯浪费；
+	 * 而跨目录的同图是本插件「整理图片位置」**特意**给每篇笔记拷的副本
+	 * （笔记走到哪儿都自带图片）—— 删了反而破坏设计。详见 `image/dedupe.ts`。
+	 *
+	 * 合并部分顺序不能反：先把笔记里的引用改写到留下的那张，再把多余的副本删掉。
+	 * 最后（装了的话）顺手执行一次 Clear Unused Images，把"没人引用的附件"一并收走。
+	 *
+	 * @param confirm 是否先弹确认框。命令面板那条要（`true`，默认）；
+	 *   左侧栏图标是"一键整理"，直接跑（`false`）—— 删的都是内容相同的副本，
+	 *   而且走回收站，随时可还原
+	 */
+	async tidyImages(confirm = true): Promise<void> {
+		const images = this.app.vault.getFiles().filter(file => isManagedImageExtension(file.extension));
+		const docs: Array<{ file: TFile; text: string }> = [];
+		const counts = new Map<string, number>();
+
+		if (images.length >= 2) {
+			// 引用计数：所有笔记 + canvas 各读一遍、一次统计完 —— "留哪张"看的就是它
+			const canvases = this.app.vault.getFiles().filter(file => file.extension === 'canvas');
+			for (const doc of [...this.app.vault.getMarkdownFiles(), ...canvases]) {
+				let text: string;
+				try {
+					text = await this.app.vault.read(doc);
+				} catch (err) {
+					console.error(`⚠️ 读取失败，跳过这篇的引用统计：${doc.path}`, err);
+					continue;
+				}
+				docs.push({ file: doc, text });
+				for (const name of collectImageTargets(text)) {
+					counts.set(name, (counts.get(name) ?? 0) + 1);
+				}
+			}
+		}
+
+		// 先按 目录 + 字节数 粗分组（不读盘），再逐组读字节确认"内容真的相同"
+		const entries: ImageEntry[] = images.map(file => ({
+			path: file.path,
+			name: file.name,
+			folder: file.parent?.path ?? '',
+			size: file.stat.size,
+		}));
+		const plans: Array<{ keeper: ImageEntry; drops: ImageEntry[] }> = [];
+		for (const bucket of groupByFolderAndSize(entries)) {
+			const identical = await findIdenticalGroups(bucket, async path => {
+				const file = this.app.vault.getAbstractFileByPath(path);
+				if (!(file instanceof TFile)) throw new Error(`找不到 ${path}`);
+				return this.app.vault.readBinary(file);
+			});
+			for (const group of identical) {
+				if (group.length < 2) continue;
+				const keeper = chooseKeeper(group, name => counts.get(name.toLowerCase()) ?? 0);
+				plans.push({ keeper, drops: group.filter(entry => entry.path !== keeper.path) });
+			}
+		}
+
+		const drops = plans.flatMap(plan => plan.drops);
+		// 真正要删的文件（顺手把 TFile 拿在手上：批量壳要它、删除也要它）
+		const dropFiles: TFile[] = drops
+			.map(entry => this.app.vault.getAbstractFileByPath(entry.path))
+			.filter((file): file is TFile => file instanceof TFile);
+		const megabytes = dropFiles.reduce((sum, file) => sum + file.stat.size, 0) / (1024 * 1024);
+
+		const run = async (): Promise<void> => {
+			await this.runner.run(
+				{
+					label: '🧩 整理图片',
+					files: dropFiles,
+					failureMessage: '❌ 整理图片中断，请检查控制台。',
+				},
+				async (ctx) => {
+					// ① 先把引用改写到留下的那张 —— 顺序反了就会留下断链
+					let touchedNotes = 0;
+					for (const doc of docs) {
+						let updated = doc.text;
+						for (const plan of plans) {
+							for (const drop of plan.drops) {
+								updated = rewriteImageReferences(updated, drop.name, plan.keeper.name);
+							}
+						}
+						if (updated === doc.text) continue;
+						await this.app.vault.modify(doc.file, updated);
+						touchedNotes++;
+					}
+
+					// ② 多余的副本进回收站（走用户设置的删除方式）
+					let removed = 0;
+					for (let i = 0; i < dropFiles.length; i++) {
+						const file = dropFiles[i];
+						if (file) {
+							try {
+								await this.app.fileManager.trashFile(file);
+								removed++;
+							} catch (err) {
+								console.error(`❌ [ImageTransfer] 合并失败：${file.path}`, err);
+							}
+						}
+						ctx.progress.step(i + 1);
+					}
+
+					// ③ 装了 Clear Unused Images 就顺手执行一次：清掉"没人引用的附件"
+					const cleared = this.runClearUnusedImages();
+
+					if (removed === 0 && !cleared) {
+						ctx.progress.clear();
+						return 'ℹ️ 没有需要整理的图片（没有内容相同的重复副本，也没有可用的清理插件）。';
+					}
+					if (removed > 0) ctx.progress.finish('✅ 整理完成');
+					else ctx.progress.clear();
+
+					let message = removed > 0
+						? `🎉 已整理：合并掉 ${removed} 张重复图片（${plans.length} 组`
+						: '🎉 已整理：';
+					if (removed > 0 && touchedNotes > 0) message += `，改写了 ${touchedNotes} 篇笔记的引用`;
+					if (removed > 0) message += '）。';
+					if (cleared) {
+						message += removed > 0
+							? '并已执行一次 clear unused images，清理没人引用的附件。'
+							: '已执行一次 clear unused images，清理没人引用的附件。';
+					}
+					return message;
+				}
+			);
+		};
+
+		if (!confirm) {
+			await run();
+			return;
+		}
+
+		new ConfirmRenameModal(this.app, dropFiles.length, run, {
+			title: '确认整理图片',
+			message: dropFiles.length > 0
+				? `发现 ${plans.length} 组内容完全相同的图片（同一文件夹内），将合并掉 ${dropFiles.length} 张、回收约 ${megabytes.toFixed(1)} MB。`
+				: '没有发现内容相同的重复副本；整理仍会执行一次"清理没人引用的附件"。',
+			warning: '⚠️ 合并掉的是内容一模一样的副本（会进回收站）；笔记里指向它们的链接会改写到留下的那一张，显示效果不变。跨文件夹的同图不动 —— 那是「整理图片位置」特意给每篇笔记拷的副本。',
+			confirmLabel: '确认整理',
+		}).open();
+	}
+
+	/**
+	 * 顺手执行 Clear Unused Images（`oz-clear-unused-images`）的「清理未使用图片」。
+	 *
+	 * 走官方的 `app.commands.executeCommandById`：它没装 / 没启用时返回 false，
+	 * 什么都不做（不抛错、也不影响合并结果）。
+	 *
+	 * @returns 是否真的执行了
+	 */
+	private runClearUnusedImages(): boolean {
+		if (this.getSettings().autoClearUnusedImages === false) return false;
+		const commands = (this.app as unknown as {
+			commands?: { executeCommandById?: (id: string) => boolean };
+		}).commands;
+		try {
+			return commands?.executeCommandById?.(CLEAR_UNUSED_IMAGES_COMMAND) === true;
+		} catch (err) {
+			console.error('⚠️ 调用 clear unused images 失败（不影响合并结果）', err);
+			return false;
+		}
 	}
 
 	// ------------------------------------------------------------------ 图片位置与大小
@@ -496,6 +849,7 @@ export class ImageTasks implements TaskActions {
 	 * 收进来的 `![[…]]` 也一并按规矩排好。
 	 */
 	async quickFixChatLog(file: TFile | null): Promise<void> {
+		this.hintIfNoConverter();
 		await this.runner.run(
 			{
 				label: '⚡ 快速修复聊天记录',
@@ -543,6 +897,7 @@ export class ImageTasks implements TaskActions {
 			new Notice('ℹ️ 先选中要排版的内容，再运行这条命令。');
 			return;
 		}
+		this.hintIfNoConverter();
 
 		await this.runner.run(
 			{
@@ -578,6 +933,7 @@ export class ImageTasks implements TaskActions {
 	 * @returns 是否真的改了（调用方据此决定要不要提示）
 	 */
 	async fixPastedRange(file: TFile, editor: Editor, start: number): Promise<boolean> {
+		this.hintIfNoConverter();
 		const end = editor.posToOffset(editor.getCursor('to'));
 		const fixed = await this.typesetEditorRange(file, editor, start, end);
 		if (fixed === 'fixed') {
@@ -592,11 +948,13 @@ export class ImageTasks implements TaskActions {
 	 * 两步与「快速修复聊天记录」一致：先把这段里 `file:///D:\…` 这类图片收进仓库，再排版。
 	 * 结果写回编辑器（不写盘）。
 	 *
-	 * 另外做两件"只在这条路上说得清"的事（都在 `text/context-indent.ts`）：
+	 * 另外做三件"只在这条路上说得清"的事（前两件在 `text/context-indent.ts`）：
 	 *
 	 * - **跟随上下文缩进**：按起点那一行的续行前缀（光标处的空白 / `>` 链）给整段每一行加前缀，
 	 *   在列表项里粘贴不再"第一行缩进、其余顶格"；上下文自己对不上时整块顶格；
-	 * - **接缝不变**：排版结果首尾的换行数还原成这一段原来的样子，粘贴块与上下文之间不再多出空行。
+	 * - **接缝不变**：排版结果首尾的换行数还原成这一段原来的样子，粘贴块与上下文之间不再多出空行；
+	 * - **写不进就回滚**：这一段在异步期间被改过（或编辑器拒绝写入）时，把**刚导入的文件**删掉 ——
+	 *   链接没写上、文件留在库里就是孤儿附件（见 `discardImportedFiles`）。
 	 *
 	 * 期间用户又改了这一段（或这段已被替换 / 删除）时**不动它**：拿旧的偏移去写回，
 	 * 只会把他刚打的字覆盖掉。
@@ -632,11 +990,26 @@ export class ImageTasks implements TaskActions {
 		// ③ 整块落到光标那一层（块的缩进就是光标处那一层，不再往上加；见 placeBlockAt）
 		const result = keepEdgeNewlines(pasted, placeBlockAt(typeset, indent.prefix));
 
-		if (!transferred.changed && result === text) return 'unchanged';
+		if (!transferred.changed && result === text) {
+			// 什么都没写成：刚导入的文件一个都不能留（见 discardImportedFiles）
+			await discardImportedFiles(this.app, transferred.created);
+			return 'unchanged';
+		}
 
-		if (editor.getRange(fromPos, toPos) !== text) return 'skipped';
+		// 异步期间这一段被改过（用户又打字 / 别的插件插了东西）：宁可不动，
+		// 也不能拿旧偏移去覆盖他刚打的字 —— 但刚导入的图片必须回收：
+		// 链接写不进去，它们就永远没人引用（2026-09 那 40 个孤儿附件就是这么攒出来的）。
+		if (editor.getRange(fromPos, toPos) !== text) {
+			await discardImportedFiles(this.app, transferred.created);
+			return 'skipped';
+		}
 
-		editor.replaceRange(result, fromPos, toPos);
+		try {
+			editor.replaceRange(result, fromPos, toPos);
+		} catch (err) {
+			await discardImportedFiles(this.app, transferred.created);
+			throw err;
+		}
 		return 'fixed';
 	}
 

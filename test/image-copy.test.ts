@@ -20,6 +20,7 @@ import {
 	vaultPathFromResourceUrl,
 } from "../src/image/copy";
 import type { ImageRef } from "../src/image/scan";
+import { buildBasenameIndex, collectLinkedImageFiles } from "../src/image/links";
 
 // -------------------------------------------------------------------- 断言
 let checks = 0;
@@ -47,6 +48,8 @@ interface FakeAppOptions {
 	/** 传给 metadataCache.getFirstLinkpathDest 的映射：链接目标 → 文件路径 */
 	native?: Record<string, string>;
 	adapter?: Record<string, unknown>;
+	/** 笔记内容（按路径给）：`collectLinkedImageFiles` 要读它 */
+	contents?: Record<string, string>;
 }
 
 function makeApp(options: FakeAppOptions): App {
@@ -57,6 +60,7 @@ function makeApp(options: FakeAppOptions): App {
 		vault: {
 			getFiles: () => files,
 			getAbstractFileByPath: (p: string) => byPath.get(p) ?? null,
+			read: async (file: TFile) => options.contents?.[file.path] ?? "",
 			adapter: options.adapter ?? {},
 		},
 		metadataCache: {
@@ -155,6 +159,32 @@ async function resolveTests(): Promise<void> {
 	checkEqual("外部路径找不到就跳过", external, []);
 }
 
+// ------------------------------------------- 4. 笔记里嵌的图片（格式转换要用）
+/**
+ * `collectLinkedImageFiles`：把一篇笔记里 `![[…]]` 嵌的图片解析成文件清单。
+ * 「Image converter：把当前笔记的图片转换为指定格式」靠它确定范围。
+ */
+async function linkedImageTests(): Promise<void> {
+	const app = makeApp({
+		files: ["笔记.md", "att/a.png", "att/b.png", "x/dup.png", "y/dup.png", "别的.md"],
+		native: { "a.png": "att/a.png" },
+		contents: {
+			"笔记.md": [
+				"![[a.png]]",           // 原生解析得到
+				"![[b.png]]",           // 原生解析不到，但全库唯一同名 → 也能拿到
+				"![[a.png|300]]",       // 同一张再嵌一次：去重
+				"![[dup.png]]",         // 全库两张同名 → 有歧义，跳过
+				"![[别的.md]]",          // 不是图片
+				"![[不存在.png]]",       // 找不到
+			].join("\n"),
+		},
+	});
+	const index = buildBasenameIndex(app);
+	const found = await collectLinkedImageFiles(app, mkFile("笔记.md"), index);
+	checkEqual("只留下能确定的图片（去重、跳过歧义与非图片）",
+		found.map(file => file.path), ["att/a.png", "att/b.png"]);
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 纯函数 ===");
 pureTests();
@@ -162,6 +192,8 @@ console.log("=== 绝对路径 ===");
 absolutePathTests();
 console.log("=== 解析清单 ===");
 await resolveTests();
+console.log("=== 笔记里嵌的图片 ===");
+await linkedImageTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {
