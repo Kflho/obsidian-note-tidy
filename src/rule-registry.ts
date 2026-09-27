@@ -259,6 +259,19 @@ export const RULE_SECTIONS: RuleSection[] = [
 				tests: ['test/image-size.test.ts'],
 			},
 			{
+				id: 'image.paste-size',
+				name: '粘贴进来的图片自动套用默认尺寸（与「快速设置图片大小」同一套参数）',
+				spec: null,
+				status: 'done',
+				switchKeys: ['autoSetImageSizeOnPaste', 'imageSizeWidth', 'imageSizeHeight', 'imageSizeOverwrite'],
+				impl: {
+					file: 'src/image/size.ts',
+					symbols: ['applyImageSize', 'pastedImageSizeOptions', 'validateImageSize', 'toSizeString'],
+				},
+				tests: ['test/image-size.test.ts', 'test/paste-watch.test.ts', 'test/context-indent.test.ts'],
+				note: '粘进来的多半是聊天截图，尺寸该与笔记里其它图一致 —— 2026-09 用户要的"开启后粘贴的图片自动变成预设大小"。范围与文本修复**完全同一套**（`[粘贴起点, 光标处)`，见 `cross.auto-fix-paste`），只改这一段、不写盘、撤销一次回退；三种粘贴都算：Obsidian 自己存下的截图、Image Converter 转完插进来的图、粘贴文本里带的图片链接（`![[图.png]]` 与 `![](图.png)` 都认，后者尺寸写在 alt 槽位）。**与文本修复共用一次写回**：那一段像聊天记录时由 `ImageTasks.fixPastedRange` 内部顺手套上（`typesetEditorRange` 的 `sizeOptions` 参数），不像时由 `ImageTasks.sizePastedRange` 单独做 —— 两条路都在 `text/pipeline` 之后再动链接，尺寸只改别名，与排版互不干扰；「排版选中内容」那条路**不套尺寸**（手动改尺寸有专门的命令与菜单项，见 `image.size`）。两条与文本修复不同的规矩：① **别的插件接管了这次粘贴也要跟**（Image Converter 处理图片文件时会 `preventDefault`，但图片是它存进仓库、链接是它插进正文的 —— 那正是要套尺寸的图片；文本修复那边则不凑热闹）；② **要盯着看一会儿**：一次粘贴可能分几次落进编辑器（粘贴多张图时逐张存盘 / 转码，每存好一张才插一条链接），所以用 `PasteSizeWatcher` 观望 5 秒（每次变化重新计时）+ 总寿命 20 秒，每变一次就再看一眼 —— 幂等（已有尺寸的不再动）所以重复跑没有副作用，`sizePastedRange` 还会先看这一段里有没有 `![` 再决定要不要扫正则。三档不动手，都收在 `pastedImageSizeOptions` 里：开关关着、**宽度留空**（那一档在 `image.size` 里是"移除已有尺寸"，粘贴时自动删尺寸不是这个功能该干的事）、尺寸填错（与「快速设置图片大小」共用 `validateImageSize`）',
+			},
+			{
 				id: 'image.external-path',
 				name: '弹性路径解析：URL 编码、Markdown 转义、大小写不一致都能找到文件',
 				spec: null,
@@ -992,10 +1005,13 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: ['autoFixChatLogOnPaste'],
 				impl: {
 					file: 'src/ui/paste-watch.ts',
-					symbols: ['registerPasteAutoFix', 'shouldAutoFixPaste', 'PasteFixScheduler', 'PASTE_FALLBACK_MS'],
+					symbols: [
+						'registerPasteAutoFix', 'shouldAutoFixPaste', 'PasteFixScheduler', 'PASTE_FALLBACK_MS',
+						'PasteSizeWatcher', 'PASTE_SIZE_IDLE_MS', 'PASTE_SIZE_MAX_MS',
+					],
 				},
 				tests: ['test/paste-watch.test.ts', 'test/chat-log.test.ts', 'test/context-indent.test.ts'],
-				note: '挂在官方的 `editor-paste` 上：只看一眼"粘在哪儿"，**不阻止这次粘贴**（不像「接管 Ctrl+C」那样抢按键）。`editor-paste` 派发时粘贴的内容还没落进文档（Obsidian 的剪贴板管理器只发这个事件，插入是 CodeMirror 内置处理器随后做的），所以那时只登记 `{编辑器, 笔记, 粘贴起点}`；内容一落进编辑器（`editor-change`）就把"粘贴起点 → 光标处"这一段读回来，用 `looksLikeChatLog` 判定（至少两条"消息头部"，只认一条会把 `会议 14:30:25` 这种正文误判）—— 像才动手。**只修这一段**：转换这段里的外部路径图片（`transferImagesInText`）+ 跑一遍排版流水线，然后 `editor.replaceRange` 写回编辑器 —— 不写盘（走编辑器自己的保存路径）、撤销一次即可回退、笔记其余部分一个字符都不动。排版时缩进跟随上下文（在列表项里粘贴就与列表项对齐）、首尾换行数保持粘贴前的样子，见 `cross.range-indent`。这样就不必猜"一条消息的正文到哪儿结束"（见 `structure.chat-log` 的取舍说明）。等待表见 `PasteFixScheduler`：按笔记路径记、一篇只留最后一笔、取出之后才回调（我们自己的 `replaceRange` 也会触发 `editor-change`，不摘就会自己触发自己），编辑器迟迟没变化时由 `PASTE_FALLBACK_MS` 把那笔等待丢掉（宁可不动手，也绝不去动整篇），插件卸载时清空',
+				note: '挂在官方的 `editor-paste` 上：只看一眼"粘在哪儿"，**不阻止这次粘贴**（不像「接管 Ctrl+C」那样抢按键）。`editor-paste` 派发时粘贴的内容还没落进文档（Obsidian 的剪贴板管理器只发这个事件，插入是 CodeMirror 内置处理器随后做的），所以那时只登记 `{编辑器, 笔记, 粘贴起点}`；内容一落进编辑器（`editor-change`）就把"粘贴起点 → 光标处"这一段读回来，用 `looksLikeChatLog` 判定（至少两条"消息头部"，只认一条会把 `会议 14:30:25` 这种正文误判）—— 像才动手。**只修这一段**：转换这段里的外部路径图片（`transferImagesInText`）+ 跑一遍排版流水线，然后 `editor.replaceRange` 写回编辑器 —— 不写盘（走编辑器自己的保存路径）、撤销一次即可回退、笔记其余部分一个字符都不动。排版时缩进跟随上下文（在列表项里粘贴就与列表项对齐）、首尾换行数保持粘贴前的样子，见 `cross.range-indent`。这样就不必猜"一条消息的正文到哪儿结束"（见 `structure.chat-log` 的取舍说明）。等待表见 `PasteFixScheduler`：按笔记路径记、一篇只留最后一笔、取出之后才回调（我们自己的 `replaceRange` 也会触发 `editor-change`，不摘就会自己触发自己），编辑器迟迟没变化时由 `PASTE_FALLBACK_MS` 把那笔等待丢掉（宁可不动手，也绝不去动整篇），插件卸载时清空。**同一条 `editor-paste` / `editor-change` 线上还挂着粘贴图片套尺寸那一笔**（`PasteSizeWatcher`，见 `image.paste-size`）：两笔共用"从粘贴起点到光标"这个范围判定，文本那一笔一笔只做一次，尺寸那一笔是观望式（粘贴多张图会分几次落进编辑器）；文本修复合适时由它内部把尺寸一并做掉（一次写回），不合适时尺寸那一笔自己上 —— 顺序是先文本、后尺寸，避免两次写回互相覆盖',
 			},
 		],
 	},

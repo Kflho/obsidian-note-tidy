@@ -20,7 +20,7 @@ import {
 import type { ConverterHandle, ConverterPreset } from './image/image-converter-bridge';
 import { organizeNoteImages } from './image/organize';
 import { countImages, fixImageLinkFormats, renameGarbledImages, renameImagesToPreset } from './image/rename';
-import { applyImageSize, validateImageSize } from './image/size';
+import { applyImageSize, pastedImageSizeOptions, validateImageSize } from './image/size';
 import type { ImageSizeOptions } from './image/size';
 import {
 	CLEAR_UNUSED_IMAGES_COMMAND,
@@ -76,6 +76,8 @@ export interface TaskActions {
 	typesetSelection(file: TFile, editor: Editor): Promise<void>;
 	/** 粘贴自动修复：只把刚粘进来的那一段 `[start, 光标处)` 排版 */
 	fixPastedRange(file: TFile, editor: Editor, start: number): Promise<boolean>;
+	/** 粘贴进来的那一段里的图片按默认尺寸加上 `|宽x高`（只改这一段，不写盘） */
+	sizePastedRange(editor: Editor, start: number): Promise<boolean>;
 	/** 复制图片到系统剪贴板（可在文件夹里粘出文件，聊天窗口里贴出图片） */
 	copyImages(file: TFile, refs: ImageRef[], selection?: CopySelection | null): Promise<void>;
 	/** 打开「图片右键菜单」管理面板（看检测到的菜单项、开关哪些显示） */
@@ -1012,16 +1014,61 @@ export class ImageTasks implements TaskActions {
 	 * 排版时缩进跟随上下文（在列表项里粘贴就与列表项对齐）、首尾换行数保持粘贴前的样子，
 	 * 见 `typesetEditorRange` 与 `text/context-indent.ts`。
 	 *
+	 * 这一段里的图片顺手按默认尺寸加上 `|宽x高`（同一趟、同一次写回，见
+	 * `pastedImageSizeOptions`）—— 粘进来的多半是聊天截图，尺寸该与笔记里其它图一致。
+	 *
 	 * @returns 是否真的改了（调用方据此决定要不要提示）
 	 */
 	async fixPastedRange(file: TFile, editor: Editor, start: number): Promise<boolean> {
 		this.hintIfNoConverter();
 		const end = editor.posToOffset(editor.getCursor('to'));
-		const fixed = await this.typesetEditorRange(file, editor, start, end);
+		const fixed = await this.typesetEditorRange(
+			file,
+			editor,
+			start,
+			end,
+			pastedImageSizeOptions(this.getSettings())
+		);
 		if (fixed === 'fixed') {
 			new Notice('⚡ 已修好刚粘贴的聊天记录。');
 		}
 		return fixed === 'fixed';
+	}
+
+	/**
+	 * 粘贴进来的那一段里的图片：按设置里的默认尺寸加上 `|宽x高`。
+	 *
+	 * 范围与文本修复完全同一套（`[粘贴起点, 光标处)`），**只改这一段、不写盘**，
+	 * 撤销一次即可回退。三种粘贴都走它：Obsidian 存下的截图、Image Converter 转完插进来的图、
+	 * 粘贴文本里带的图片链接。
+	 *
+	 * 为什么单独留一条路（而不是只放在 `fixPastedRange` 里）：一次粘贴**可能分几次落进编辑器**
+	 * —— 粘贴多张图时逐张存盘 / 转码，每存好一张才插一条链接，而文本修复那边一笔只做一次。
+	 * 粘贴过后的几秒里，这段范围每变一次就再看一眼（见 `ui/paste-watch.ts` 的观望表）；
+	 * 已经有尺寸的图片不会再动，所以重复跑是幂等的。
+	 *
+	 * @returns 是否真的改了
+	 */
+	async sizePastedRange(editor: Editor, start: number): Promise<boolean> {
+		const options = pastedImageSizeOptions(this.getSettings());
+		if (!options) return false;
+
+		const end = editor.posToOffset(editor.getCursor('to'));
+		if (end <= start) return false;
+
+		const fromPos = editor.offsetToPos(start);
+		const toPos = editor.offsetToPos(end);
+		const text = editor.getRange(fromPos, toPos);
+		// 这一段里连图片链接都没有：省掉一次正则扫描（粘贴后每敲一个字都会走到这里）
+		if (!text.includes('![')) return false;
+
+		const result = applyImageSize(text, options);
+		if (result.changed === 0 || result.content === text) return false;
+		// 期间这一段被改过（用户又打字 / 别的插件插了东西）：拿旧偏移写回只会覆盖他刚打的字
+		if (editor.getRange(fromPos, toPos) !== text) return false;
+
+		editor.replaceRange(result.content, fromPos, toPos);
+		return true;
 	}
 
 	/**
@@ -1040,12 +1087,17 @@ export class ImageTasks implements TaskActions {
 	 *
 	 * 期间用户又改了这一段（或这段已被替换 / 删除）时**不动它**：拿旧的偏移去写回，
 	 * 只会把他刚打的字覆盖掉。
+	 *
+	 * @param sizeOptions 顺带给这一段里的图片套的尺寸（只有粘贴那条路会给，见
+	 *   `pastedImageSizeOptions`；给 `null` = 这一趟不管尺寸，「排版选中内容」就是这一档）。
+	 *   尺寸写在链接里，与排版各改各的，合并在**同一次写回**里 —— 撤销一次两步一起回退。
 	 */
 	private async typesetEditorRange(
 		file: TFile,
 		editor: Editor,
 		from: number,
-		to: number
+		to: number,
+		sizeOptions: ImageSizeOptions | null = null
 	): Promise<'fixed' | 'unchanged' | 'skipped'> {
 		if (to <= from) return 'skipped';
 
@@ -1070,7 +1122,11 @@ export class ImageTasks implements TaskActions {
 		// ② 文本排版（只作用在这段文字上）
 		const typeset = formatNoteText(transferred.content, this.getTextPipelineOptions());
 		// ③ 整块落到光标那一层（块的缩进就是光标处那一层，不再往上加；见 placeBlockAt）
-		const result = keepEdgeNewlines(pasted, placeBlockAt(typeset, indent.prefix));
+		const placed = placeBlockAt(typeset, indent.prefix);
+		// ④ 粘贴那条路顺带给图片套上默认尺寸：只动链接里的尺寸别名，与 ② 的排版互不干扰，
+		//    合并在一次写回里（撤销一次两步一起回退）
+		const typed = sizeOptions ? applyImageSize(placed, sizeOptions).content : placed;
+		const result = keepEdgeNewlines(pasted, typed);
 
 		if (!transferred.changed && result === text) {
 			// 什么都没写成：刚导入的文件一个都不能留（见 discardImportedFiles）

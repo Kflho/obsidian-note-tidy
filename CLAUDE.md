@@ -87,10 +87,12 @@ src/
     links.ts            # 链接解析与同名歧义（同名不猜）
     naming.ts           # 命名预设、唯一路径、仓库文件名表
     external-path.ts    # 弹性路径解析（URL 编码 / Markdown 转义 / 大小写）
-    transfer.ts         # 外部图片导入
+    transfer.ts         # 外部图片导入（可交接 Image Converter 转格式）
     rename.ts           # 乱码改名 / 全量改名 / 链接格式归一
-    size.ts             # 图片大小批改
+    size.ts             # 图片大小批改 + 「粘贴的图片自动套尺寸」的取参（pastedImageSizeOptions）
     organize.ts         # 图片位置整理
+    dedupe.ts           # 「整理图片」的合并部分：同目录逐字节相同的副本只留一张 + 引用改写
+    image-converter-bridge.ts # 借 Image Converter 的转码器与预设：导入交接 / 两条转换命令 / 整理图片那一步
     attachment-folder.ts# 附件夹定位与按需创建
     constants.ts        # 扩展名表与嵌入链接正则
     scan.ts             # 图片嵌入扫描（`![[图.png]]` / `![说明](图.png)` + 位置），状态栏与复制共用
@@ -104,7 +106,7 @@ src/
     menu-hidden.ts      # 隐藏名单（`作用域：标题`）的解析与生成（纯函数）
     menu-manage-modal.ts# 右键菜单管理面板：图片 / 笔记 / 文件夹三节，开关各项
     copy-shortcut.ts    # 可选的"接管编辑器里的 Ctrl+C"：选中图片时改走复制文件那条路
-    paste-watch.ts      # 粘贴聊天记录时自动修好**刚粘进来的那一段**（editor-paste 只看粘在哪儿，编辑器一变化就把这段读回来排版写回）
+    paste-watch.ts      # 粘贴时自动动手：文本修复（一笔一次）+ 粘贴图片套尺寸（观望式，见 sizePastedRange）
     image-size-modal.ts # 图片大小弹窗
     confirm-rename-modal.ts # 批量重命名确认
     progress.ts         # 状态栏进度
@@ -214,12 +216,19 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 粘贴自动修复（`autoFixChatLogOnPaste`，**默认开**）挂在官方的 `editor-paste` 上，**只修刚粘进来的那一段**：
 
-- **只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），粘贴事件只用来看**粘在哪儿**；`evt.defaultPrevented` 为真说明别的插件已经接管了，我们就不看。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）；
+- **只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），粘贴事件只用来看**粘在哪儿**。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）。`evt.defaultPrevented` 为真说明别的插件已经接管了这次粘贴：**文本修复不凑热闹**（插进来的不一定是剪贴板里那些内容），**但图片套尺寸那一笔要跟**（Image Converter 处理图片文件时正是 `preventDefault` 自己来 —— 图片是它存进仓库、链接是它插进正文的，那正是要套尺寸的图片）；
 - **粘贴那一刻绝不动手**：`editor-paste` 是 Obsidian 剪贴板管理器的 paste 处理器发的，而真正往文档里插内容的是 CodeMirror 内置的处理器（排在它后面，一返回 true 就 break）—— 此刻读到的正文是粘贴之前的。所以只登记一笔（`PasteFixScheduler`：编辑器 + 笔记 + 粘贴起点）；
 - **`editor-change` 一到就动手**：从那笔登记的起点到当前光标之间，就是这次粘贴进文档的全部内容。把这一段读回来（`editor.getRange`），用 `looksLikeChatLog` 判定（至少**两条**"消息头部"；只认一条会把 `会议 14:30:25` 这种正文误判，而复制单条消息本来也不带时间戳头部），像才交给 `ImageTasks.fixPastedRange`：转换这段里的外部路径图片（`transferImagesInText`）+ 跑一遍排版流水线 + `editor.replaceRange` 写回。**只改这一段、不写盘**（走编辑器自己的保存路径，撤销一次即可回退）；
 - **为什么不修整篇**：整篇排版绕不开"一条消息的正文到哪儿结束"，而作者自己接在消息下面写的行与消息正文之间没有空行时只能算作正文 —— 2026-09 为这件事加过两条"看缩进猜作者"的规则，猜错两次后全部撤掉（见规则登记表 `structure.chat-log` 的取舍说明）。范围由"刚粘的那一段"（或用户选中的那一段：命令 `typeset-selection` / 菜单「排版选中内容」）确定，就不需要猜；
 - **缩进跟随光标、接缝不许多出空行**（`text/context-indent.ts`，2026-09 用户报的"会产生空行、缩进也不一致"）：流水线只看这一段的文字，不知道它落在笔记的哪一层。所以写回前做两件事 —— 取起点那一行的**续行前缀**（行首空白与 `>` 链）当整块前缀逐行加上（在列表项里按回车后粘贴，整块对齐到列表项，不再"第一行缩进、其余顶格"），以及用 `keepEdgeNewlines` 把这一段首尾的换行数还原成粘贴前的样子（聊天记录排版总会补一个收尾换行，不还原就会在粘贴块与下文之间多出一个空行）。**缩进只认光标**：光标缩进多少排完就是多少，不去看上下相邻行（"上下都顶格所以你不许缩进"这层判断加过又按用户要求撤掉）；前缀前面已经有正文时给不出参照，保持顶格。**顺序是先剥后加**：排版前 `dedentBy` 剥掉这一段原本那一层，排完版再 `applyIndentPrefix` 加前缀 —— 反过来会连正文自己那格一起剥掉（光标缩进与「消息正文缩进」都用 tab 时，"1 层粘贴还是 1 层"）。这两条对「排版选中内容」同样生效；
 - **等待表的三条规矩**：同一篇连着粘只留最后一笔、取出之后才回调（我们自己的 `replaceRange` 也会触发 `editor-change`，不摘就会自己触发自己）、插件卸载时 `dispose()` 清空。编辑器迟迟没有变化（这次粘贴被别的插件吞了、视图不是 Markdown 视图）时用 `PASTE_FALLBACK_MS` 把那笔等待丢掉 —— 宁可什么都不做，也绝不去动整篇。
+
+**粘贴图片自动套尺寸**（`autoSetImageSizeOnPaste`，**默认开**）与上面同一条线，范围判定完全一样，但两处不同，都是被"粘贴图片"这件事逼出来的：
+
+- **什么时候动手**：那一段像聊天记录时由 `fixPastedRange` 内部顺带做掉（`typesetEditorRange` 的 `sizeOptions` 参数，与排版**共用一次写回**，撤销一次两步一起回退）；不像时由 `ImageTasks.sizePastedRange` 单独做 —— 粘一张截图本来就没有"像不像聊天记录"这一说。尺寸只改链接里的别名（`![[图.png|100]]` / `![100](图.png)`），排在流水线之后，与排版互不干扰；
+- **别的插件接管了这次粘贴也要跟**：Image Converter 处理图片文件时会 `preventDefault`，图片照样进仓库、链接照样插进正文，那正是要套尺寸的图片（文本修复那边则不凑热闹）；
+- **要盯着看一会儿**（`PasteSizeWatcher`）：一次粘贴可能分几次落进编辑器（粘贴多张图逐张存盘 / 转码，每存好一张才插一条链接），所以粘贴后每变一次就把 `[起点, 光标处)` 再看一眼 —— 幂等（已有尺寸的不再动），安静 5 秒（`PASTE_SIZE_IDLE_MS`）丢掉、总寿命 20 秒（`PASTE_SIZE_MAX_MS`）封顶，免得用户随手打字把它一直续下去；
+- **三档不动手**（都收在 `image/size.ts` 的 `pastedImageSizeOptions` 里）：开关关着、**宽度留空**（那一档在「设置图片大小」里是"移除已有尺寸"，粘贴时自动删尺寸不是这个功能该干的事）、尺寸填错（与「快速设置图片大小」共用 `validateImageSize`）。「排版选中内容」那条路**不套尺寸** —— 手动改尺寸有专门的命令与菜单项。
 
 ### 右键菜单怎么插项、怎么管理（`ui/image-menu.ts` + `menu-injector.ts`）
 

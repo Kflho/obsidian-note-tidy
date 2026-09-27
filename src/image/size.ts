@@ -71,6 +71,35 @@ export function validateImageSize(width: string, height: string): string | null 
 }
 
 /**
+ * 「粘贴的图片自动套用默认尺寸」要用的选项；**这一档不该动手时返回 `null`**。
+ *
+ * 不动的三条理由（前两条都是"用户没打算让它自动干这个"）：
+ *
+ * 1. 开关关着（`autoSetImageSizeOnPaste`）；
+ * 2. **宽度留空** —— 那一档在「设置图片大小」里的意思是"移除已有尺寸"，
+ *    粘贴时自动去删尺寸不是这个功能该做的事（要删就手动跑一次）；
+ * 3. 尺寸填错了（与「快速设置图片大小」共用同一个 `validateImageSize`，不给用户改坏链接的机会）。
+ *
+ * 参数只要这四个字段（结构类型）：设置对象里有旧版本没有的字段也无所谓。
+ */
+export function pastedImageSizeOptions(settings: {
+	autoSetImageSizeOnPaste?: boolean;
+	imageSizeWidth: string;
+	imageSizeHeight: string;
+	imageSizeOverwrite: boolean;
+}): ImageSizeOptions | null {
+	if (settings.autoSetImageSizeOnPaste !== true) return null;
+	if (settings.imageSizeWidth.trim() === '') return null;
+	if (validateImageSize(settings.imageSizeWidth, settings.imageSizeHeight) !== null) return null;
+
+	return {
+		width: settings.imageSizeWidth,
+		height: settings.imageSizeHeight,
+		overwriteExisting: settings.imageSizeOverwrite !== false,
+	};
+}
+
+/**
  * 目标尺寸字符串：`100`、`100x200`；空字符串表示移除已有尺寸。
  */
 export function toSizeString(width: string, height: string): string {

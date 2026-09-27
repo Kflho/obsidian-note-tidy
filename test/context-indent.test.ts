@@ -372,6 +372,34 @@ async function wiringTests(): Promise<void> {
 		check(`真接线_制表符缩进_${label}`, tabEditor.value(),
 			[`${prefix}你好`, `${prefix}在的`, ""].join("\n"));
 	}
+
+	// ③ 粘贴进来的图片顺手套上默认尺寸（与排版**同一次写回**）：聊天记录里的图片带着 |100
+	const chatWithImage = "张三 2024/1/5 14:30:25\n![[图.png]]\n你好";
+	const imageEditor = createEditor(`${chatWithImage}\n`);
+	imageEditor.setCursor(chatWithImage.length);
+	check("真接线_带图的聊天记录报为已修复", await tasks.fixPastedRange(file, imageEditor.editor, 0), true);
+	check("真接线_聊天记录里的图片带上默认尺寸", imageEditor.value().includes("![[图.png|100]]"), true);
+	// 排版与套尺寸合在同一次写回里：图片按「消息正文缩进」落在 tab 那一层，正文在它下面
+	check("真接线_排版照样做完了（图片在正文前，且带着尺寸）",
+		imageEditor.value(), "\t![[图.png|100]]\n你好\n");
+
+	// ④ 只有图片、没有聊天记录：走 sizePastedRange 那条路（文本修复那一步不该动它）
+	const imageOnly = "![[图.png]]";
+	const sizeOnlyEditor = createEditor(imageOnly);
+	sizeOnlyEditor.setCursor(imageOnly.length);
+	check("真接线_只给图片套尺寸", await tasks.sizePastedRange(sizeOnlyEditor.editor, 0), true);
+	check("真接线_图片加上了默认尺寸", sizeOnlyEditor.value(), "![[图.png|100]]");
+	// 再跑一次：已经有尺寸，什么都不改（幂等 —— 观望表会重复调用它）
+	check("真接线_重复跑不再改动", await tasks.sizePastedRange(sizeOnlyEditor.editor, 0), false);
+	check("真接线_内容一字不变", sizeOnlyEditor.value(), "![[图.png|100]]");
+
+	// ⑤ 关掉「粘贴图片时自动套用尺寸」：一条都不碰
+	settings.autoSetImageSizeOnPaste = false;
+	const offEditor = createEditor("![[图.png]]");
+	offEditor.setCursor("![[图.png]]".length);
+	check("真接线_开关关掉就不动手", await tasks.sizePastedRange(offEditor.editor, 0), false);
+	check("真接线_开关关掉内容不变", offEditor.value(), "![[图.png]]");
+	settings.autoSetImageSizeOnPaste = true;
 }
 
 // -------------------------------------------------------------------- 运行
