@@ -108,6 +108,8 @@ const BASE_SETTINGS: TransferSettings = {
 	imageNamePreset: 'img_{ss}',
 	vaultConvertFormat: 'webp',
 	convertQuality: '75',
+	pngquantPath: '',
+	pngquantQuality: '65-80',
 };
 
 // window.moment 的替身。

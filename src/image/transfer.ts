@@ -22,11 +22,13 @@ import type { ImageNamingSettings } from './naming';
 export interface TransferSettings extends AttachmentLocationSettings, ImageNamingSettings {
 	/**
 	 * 导入的图片顺手转成目标格式（`vaultConvertFormat` + `convertQuality`，见 `image/convert.ts`）。
-	 * 解不开的格式 / 转完更大的图按原格式导入，不影响图片进库。`undefined` 当作开。
+	 * 解不开的格式按原格式导入，不影响图片进库。`undefined` 当作开。
 	 */
 	convertImportedImages?: boolean;
 	vaultConvertFormat: string;
 	convertQuality: string;
+	pngquantPath: string;
+	pngquantQuality: string;
 }
 
 /**
@@ -125,7 +127,12 @@ export async function transferImagesInText(
 	// 转换计划在整批里只算一次：目标格式认不出来（手改坏了 data.json）就是"不转"
 	const plan = settings.convertImportedImages === false
 		? null
-		: convertPlanFrom(settings.vaultConvertFormat, settings.convertQuality);
+		: convertPlanFrom(
+			settings.vaultConvertFormat,
+			settings.convertQuality,
+			settings.pngquantPath,
+			settings.pngquantQuality
+		);
 
 	for (const match of matches) {
 		const fullMatch = match[0];

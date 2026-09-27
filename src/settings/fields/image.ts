@@ -53,20 +53,21 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'vaultConvertFormat',
 				name: '「转换图片格式」的目标格式',
-				desc: '命令「把整个仓库 / 当前笔记的图片转换为指定格式」按它决定转成什么，「整理图片」开着「整理时转换图片格式」时也用这一项。转码用的是插件自带的编码器（浏览器 canvas），不依赖别的插件；动图（gif）与已经是目标格式的图片一律跳过，转换后扩展名会变（如 png → webp），链接由 Obsidian 自己更新',
+				desc: '命令「把整个仓库 / 当前笔记的图片转换为指定格式」按它决定转成什么，「整理图片」开着「整理时转换图片格式」时也用这一项。转码用的是插件自带的编码器（浏览器 canvas），不依赖别的插件；选 **PNG（pngquant）** 时改交给你自己装的 pngquant 压 PNG（有损调色板量化，专治 PNG 体积，只接 .png 源）。动图（gif）与已经是目标格式的图片一律跳过；转换后扩展名会变（如 png → webp），链接由 Obsidian 自己更新，转出来比原来大也照用',
 				control: {
 					type: 'dropdown',
 					options: {
 						webp: 'WEBP（推荐）',
 						jpg: 'JPEG',
 						png: 'PNG',
+						pngquant: 'PNG（pngquant 压缩）',
 					},
 				},
 			},
 			{
 				key: 'convertQuality',
 				name: '转换质量',
-				desc: '1–100，默认 75。JPEG / WEBP 用它决定压缩程度（PNG 无损，忽略这一项）。调低省空间、小字更容易糊',
+				desc: '1–100，默认 75。JPEG / WEBP 用它决定压缩程度（PNG 无损、PNGQUANT 用下面那一档，都忽略它）。调低省空间、小字更容易糊',
 				control: { type: 'text', placeholder: '75' },
 				coerce: (value) => {
 					const num = Number(typeof value === 'string' ? value.trim() : NaN);
@@ -75,9 +76,23 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 				},
 			},
 			{
+				key: 'pngquantPath',
+				name: 'pngquant 可执行文件路径',
+				desc: '目标格式选 **PNG（pngquant）** 时才用。pngquant 是 GPL / 商业双许可的外部程序，本插件**不捆绑**它（社区插件不带二进制）—— 到 pngquant.org 下载后把它的完整路径填在这里（Windows 形如 D:\\tools\\pngquant\\pngquant.exe）。留空＝这一档整步不做，图片保持原样',
+				control: { type: 'text', placeholder: 'D:\\tools\\pngquant\\pngquant.exe' },
+				visible: (settings) => (settings.vaultConvertFormat ?? '').toLowerCase() === 'pngquant',
+			},
+			{
+				key: 'pngquantQuality',
+				name: 'pngquant 质量档',
+				desc: '`min-max` 两档，默认 `65-80`：pngquant 用最少的颜色去够到 max，够不到 min 就**放弃压缩**（它退出码 99，我们按原图留着）。与 Image Converter 那一项同名同义',
+				control: { type: 'text', placeholder: '65-80' },
+				visible: (settings) => (settings.vaultConvertFormat ?? '').toLowerCase() === 'pngquant',
+			},
+			{
 				key: 'convertImportedImages',
 				name: '导入的图片转成目标格式',
-				desc: '把收进仓库的外部图片顺手转成上面的目标格式（例如 png/jpg → webp），链接直接写成转换后的文件名。转码用插件自带的编码器，不依赖别的插件；解不开的格式（HEIC / TIFF 这类）与转完更大的图片按原格式导入，不影响图片进库',
+				desc: '把收进仓库的外部图片顺手转成上面的目标格式（例如 png/jpg → webp），链接直接写成转换后的文件名。转码用插件自带的编码器，不依赖别的插件；解不开的格式（HEIC / TIFF 这类）按原格式导入，不影响图片进库。转完比原来大也照用转换结果 —— 判据是"这张图已经统一成目标格式了"',
 				control: { type: 'toggle' },
 			},
 			{
@@ -125,7 +140,7 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'tidyConvertFormat',
 				name: '整理时转换图片格式',
-				desc: '执行「整理图片」时，顺手把还不是目标格式的图片转成目标格式（目标格式取上面「转换图片格式」那一项，默认 webp）。转码用插件自带的编码器，不依赖别的插件；动图（gif）、已经是目标格式的图片、转完没省下空间的图片一律保持原样',
+				desc: '执行「整理图片」时，顺手把还不是目标格式的图片转成目标格式（目标格式取上面「转换图片格式」那一项，默认 webp）。转码用插件自带的编码器，不依赖别的插件；动图（gif）与已经是目标格式的图片保持原样，其余一律照用转换结果（比原来大也照用 —— 判据是格式统一）',
 				control: { type: 'toggle' },
 			},
 			{

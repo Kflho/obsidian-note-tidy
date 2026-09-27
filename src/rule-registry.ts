@@ -124,7 +124,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 				name: '图片格式转换：插件自带的 canvas 编码器（导入 / 粘贴 / 两条命令 /「整理图片」共用）',
 				spec: null,
 				status: 'done',
-				switchKeys: ['convertImportedImages', 'vaultConvertFormat', 'convertQuality', 'tidyConvertFormat'],
+				switchKeys: ['convertImportedImages', 'vaultConvertFormat', 'convertQuality', 'tidyConvertFormat', 'pngquantPath', 'pngquantQuality'],
 				impl: {
 					file: 'src/image/convert.ts',
 					symbols: [
@@ -134,7 +134,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 					],
 				},
 				tests: ['test/image-convert.test.ts', 'test/image-transfer.test.ts', 'test/image-tidy.test.ts', 'test/commands.test.ts'],
-				note: '**不依赖任何别的插件**：解码 → 画到 canvas → `canvas.toBlob(mime, quality/100)`，这是浏览器自带的编码器（也是 Image Converter 转 webp/jpg/png 用的那一句）。以前这一层是借它的转码器（`imageProcessor.processImage` + 它的预设），2026-09 拆掉的理由有两条：① 它的转码器是**实例级状态**、经不起两次调用叠在一起，而它自己的粘贴处理又是并发跑的（`handlePaste` 里 `files.map(async …)`），一批图各算各的输出名、同一秒算出来的名字撞在一起，后写的直接 `File already exists` 丢图（用户实测"粘两张只剩第一张"）；② 借它就得跟着它的预设走（目标格式、质量都在它那儿），它一关插件我们这边转格式就整条失效。四个入口共用同一个计划（`convertPlanFrom`：`vaultConvertFormat` + `convertQuality`，默认 webp / 75）：① **导入外部图片时顺手转**（`convertImportedImages`，默认开）；② **粘贴进来的图片**（见 `image.paste-images`）；③ 命令 `convert-images-current-note` / `convert-images-entire-vault`（「把当前笔记 / 整个仓库的图片转换为指定格式」，当前笔记那条用来先在一篇上试）；④ **「整理图片」里的转换那一步**（`tidyConvertFormat`，默认开）—— 它在"合并重复副本"之后跑：马上要被合并掉的副本不必白转一趟。三条硬规矩：① **`.gif` 一律不转**（canvas 转出来只有一帧，动图会被拍成静图，那是不可逆的损坏）；② 已经是目标格式的不再压一遍（避免代际失真）；③ **转完更大就留原图**（截图这类本来就压过的图，转 webp 常常更大）。另外三条工程上的取舍：**先转换、再落盘**（不产生谁也指不到的中间 png，也不需要删除步骤）；**名字按最终扩展名生成**（`plannedExtension` 先问一句"这张图最终是什么格式"，命名只认"文件最终会有的名字"，撞了它自己往后推一秒 —— 按源扩展名生成会让同一秒里的 png 与 jpg 各占一个名字，而两张最终都叫 `xxx.webp`，见 `image.unique-name`）；**解不开的格式按原样留着**（HEIC / TIFF 这类 Chromium 原生不认的，`decodeImage` 两条路都试过才放弃，图片一个字节都不会丢）。它比我们多的能力（AVIF 走 ffmpeg、pngquant、非破坏性缩放）我们不做：要做那些的用户继续用 Image Converter 自己，两边互不干涉',
+				note: '**不依赖任何别的插件**：解码 → 画到 canvas → `canvas.toBlob(mime, quality/100)`，这是浏览器自带的编码器（也是 Image Converter 转 webp/jpg/png 用的那一句）。以前这一层是借它的转码器（`imageProcessor.processImage` + 它的预设），2026-09 拆掉的理由有两条：① 它的转码器是**实例级状态**、经不起两次调用叠在一起，而它自己的粘贴处理又是并发跑的（`handlePaste` 里 `files.map(async …)`），一批图各算各的输出名、同一秒算出来的名字撞在一起，后写的直接 `File already exists` 丢图（用户实测"粘两张只剩第一张"）；② 借它就得跟着它的预设走（目标格式、质量都在它那儿），它一关插件我们这边转格式就整条失效。四个入口共用同一个计划（`convertPlanFrom`：`vaultConvertFormat` + `convertQuality`，默认 webp / 75）：① **导入外部图片时顺手转**（`convertImportedImages`，默认开）；② **粘贴进来的图片**（见 `image.paste-images`）；③ 命令 `convert-images-current-note` / `convert-images-entire-vault`（「把当前笔记 / 整个仓库的图片转换为指定格式」，当前笔记那条用来先在一篇上试）；④ **「整理图片」里的转换那一步**（`tidyConvertFormat`，默认开）—— 它在"合并重复副本"之后跑：马上要被合并掉的副本不必白转一趟。三条硬规矩：① **`.gif` 一律不转**（canvas 转出来只有一帧，动图会被拍成静图，那是不可逆的损坏）；② 已经是目标格式的不再压一遍（避免代际失真）；③ **比原来大也照用** —— 目标格式统一本身就是目的：用户判定"这张图优化过没有"看的就是**它是不是 webp**（2026-09 用户明确要的："对齐到 webp，这是我目前判定是否优化过的判据"）。另外三条工程上的取舍：**先转换、再落盘**（不产生谁也指不到的中间 png，也不需要删除步骤）；**名字按最终扩展名生成**（`plannedExtension` 先问一句"这张图最终是什么格式"，命名只认"文件最终会有的名字"，撞了它自己往后推一秒 —— 按源扩展名生成会让同一秒里的 png 与 jpg 各占一个名字，而两张最终都叫 `xxx.webp`，见 `image.unique-name`）；**解不开的格式按原样留着**（HEIC / TIFF 这类 Chromium 原生不认的，`decodeImage` 两条路都试过才放弃，图片一个字节都不会丢）。它比我们多的能力（AVIF 走 ffmpeg、pngquant、非破坏性缩放）我们不做：要做那些的用户继续用 Image Converter 自己，两边互不干涉',
 			},
 			{
 				id: 'image.paste-images',
@@ -148,6 +148,19 @@ export const RULE_SECTIONS: RuleSection[] = [
 				},
 				tests: ['test/paste-images.test.ts', 'test/paste-watch.test.ts'],
 				note: '编辑器里粘贴**图片文件**时，`editor-paste` 里先看剪贴板有没有图片（`imageFilesFromClipboard`：`items` 里 `kind === "file"` 且认得出是图片的；没有 `items` 才退回 `files`，两条路不合并否则会存两遍）。有就 `preventDefault` 自己接管，一次粘贴一批图全归我们：**一张一张**存进附件夹（`ImageTasks.pasteImages` → `savePastedImages` → `importImageBytes`，名字走 `image.unique-name` 那套不撞名的规矩、格式走 `image.convert`），再把剪贴板的文字与 `![[链接]]` 写进正文（`buildPasteText`：**文字在前、图片在后**，各占一行 —— `text/plain` 里没有图片占位符，相对位置给不出来），最后照"别人家的粘贴"同一套判据修一遍：文字像聊天记录就走 `fixPastedRange`（顺带套尺寸，一次写回），不像就只套尺寸（`image.paste-size`）。**为什么要接管**：这件事以前交给 Image Converter 的自动粘贴，但它那边是**并发**跑的（`handlePaste` / `handleDrop` 里都是 `files.map(async …)`）：一批图各算各的输出名，同一秒算出来的名字撞在一起，后写的那个直接 `File already exists` 丢图（2026-09 用户实测"粘两张只剩第一张"）；它既没有开关、也不看 `defaultPrevented`，所以我们只能让它别再管 —— **它的「Never process filenames」填 `*`**（那一项只作用于它的自动粘贴 / 拖放，右键 Process image 与批量功能都还在），设置面板里这一项的说明里写着。两个前提缺一不可：这次粘贴**没人管**（`evt.defaultPrevented` 为真说明别的插件已经在存这些图了，我们不重复处理 —— 尺寸那一笔仍旧跟着，见 `image.paste-size`）、开关 `takeOverImagePaste` 开着。关掉开关就回到"别人家的粘贴"那条老路（观察者 + 文本修复 + 尺寸观望表）',
+			},
+			{
+				id: 'image.pngquant',
+				name: 'PNG（pngquant）：把 PNG 交给用户自己装的 pngquant 压（有损调色板量化）',
+				spec: null,
+				status: 'done',
+				switchKeys: ['pngquantPath', 'pngquantQuality'],
+				impl: {
+					file: 'src/image/pngquant.ts',
+					symbols: ['runPngquant', 'DEFAULT_PNGQUANT_QUALITY'],
+				},
+				tests: ['test/pngquant.test.ts', 'test/image-convert.test.ts'],
+				note: '**只调用户自己装的那份，不捆绑、不下载**：pngquant 是 GPL / 商业双许可的外部可执行文件（[pngquant.org](https://pngquant.org/)），把一个 GPL 二进制打进 0-BSD 的社区插件里既改变整个分发包的许可，也过不了插件审查（平台相关二进制）。Image Converter 也是这么划界的 —— 它只给一个「pngquant executable path」设置项，二进制用户自己下。调用方式照抄它（实测它的实现）：`pngquant --quality <min-max> -`，PNG 从 stdin 进、压缩后的 PNG 从 stdout 出；质量档是 `min-max` 字符串（默认 `65-80`）而不是我们那套 0–100 单值。**退出码非 0 一律当"别用这次结果"**：质量够不到 min 时 pngquant 会原样吐 24-bit PNG 并 `exit 99`（官方文档明说），那正是"压不动"的信号，我们按原图留着 —— 与 Image Converter 的 `code !== 0 → 抛错 → 原图` 同一个结果。三条边界：① 计划阶段就要求**可执行文件路径非空**，留空＝这一档整步不做（不去 PATH 里瞎找）；② **只接 PNG 源**（它只吃 PNG，喂 jpg 进去只会报错退出，`shouldConvertFile` 里挡掉），并且不套"已是目标格式就不转"——压 PNG 正是它的活；③ 输出仍是 `.png`，所以库里已有的图**名字不变**，`convertVaultImage` 会跳过改名那一步、直接写回内容（拿同一路径去 `renameFile` 只会得到一次多余的报错）',
 			},
 			{
 				id: 'image.attachment-folder',

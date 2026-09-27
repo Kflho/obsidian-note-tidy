@@ -422,7 +422,7 @@ export class ImageTasks implements TaskActions {
 				if (converted > 0) {
 					ctx.progress.finish('✅ 转换完成');
 					let message = `🎉 已把 ${converted} 张图片转换为 ${label}。`;
-					if (skipped > 0) message += `另有 ${skipped} 张没转成（已是 ${label} 或没省下空间），按原样留着。`;
+					if (skipped > 0) message += `另有 ${skipped} 张没转（已是 ${label}、动图，或这张解不开 / 名字被占着），按原样留着。`;
 					if (failed > 0) message += `⚠️ 有 ${failed} 张出错，详情见控制台。`;
 					return message;
 				}
@@ -430,7 +430,7 @@ export class ImageTasks implements TaskActions {
 				if (failed > 0) {
 					return `⚠️ 没有图片转换成功，有 ${failed} 张出错，详情见控制台。`;
 				}
-				return `ℹ️ 没有图片需要转换（可能都已经是 ${label}，或转完没省下空间）。`;
+				return `ℹ️ 没有图片需要转换（可能都已经是 ${label}，或这些图解不开 / 名字被占着）。`;
 			}
 		);
 	}
@@ -598,7 +598,7 @@ export class ImageTasks implements TaskActions {
 					if (parts.length === 0) {
 						ctx.progress.clear();
 						if (convertSkipped > 0) {
-							return `ℹ️ 没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但转完没省下空间，按原样留着）。`;
+							return `ℹ️ 没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但这些图解不开 / 名字被占着，按原样留着）。`;
 						}
 						return `ℹ️ 没有需要整理的图片（没有内容相同的重复副本，也没有需要转换格式的图片${convertHint ? `；${convertHint}` : ''}）。`;
 					}
@@ -608,7 +608,7 @@ export class ImageTasks implements TaskActions {
 
 					let message = `🎉 已整理：${parts.join('，')}。`;
 					if (convertSkipped > 0) {
-						message += `另有 ${convertSkipped} 张没转成（已经是 ${ready?.label ?? ''} 或没省下空间），按原样留着。`;
+						message += `另有 ${convertSkipped} 张没转（已经是 ${ready?.label ?? ''}、动图，或这张解不开 / 名字被占着），按原样留着。`;
 					}
 					if (convertFailed > 0) message += `⚠️ 有 ${convertFailed} 张转换出错，详情见控制台。`;
 					if (convertHint) message += `（${convertHint}）`;
