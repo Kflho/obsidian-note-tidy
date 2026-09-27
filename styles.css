@@ -23,6 +23,12 @@ body .note-tidy-suppressed {
 	letter-spacing: 0.05em;
 }
 
+/* 左侧栏的「整理图片」图标：设置里关掉时隐藏它（图标本身不重建，
+   所以开关一改就能立刻生效；用 !important 压过 Obsidian 对 ribbon 项的 display 规则） */
+.side-dock-ribbon-action.note-tidy-ribbon-hidden {
+	display: none !important;
+}
+
 /* 图片大小弹窗：改动预览列表 */
 .ait-size-preview {
 	margin-top: 0.5em;

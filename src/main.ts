@@ -23,6 +23,8 @@ export default class ImageTransferPlugin extends Plugin {
 	settings!: ImageTransferSettings;
 	private tasks!: ImageTasks;
 	private selectionCount!: SelectionImageCount;
+	/** 左侧栏的「整理图片」图标（设置里关掉时只是隐藏，不重建） */
+	private ribbonEl: HTMLElement | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -57,6 +59,14 @@ export default class ImageTransferPlugin extends Plugin {
 		// 粘贴聊天记录时自动执行「快速修复聊天记录」（设置里可关）
 		registerPasteAutoFix(this, this.tasks, () => this.settings);
 
+		// 左侧栏的「整理图片」图标：**一键整理**（合并重复副本 + 清理没人引用的附件）。
+		// 图标沿用 Clear Unused Images 那个 `image-file` —— 想用它替代对方的按钮时，
+		// 位置与图标都不变，只是干的事变成了"合并 + 清理"。
+		this.ribbonEl = this.addRibbonIcon('image-file', '整理图片（合并重复副本 + 清理没人引用的附件）', () => {
+			void this.tasks.tidyImages(false);
+		});
+		this.refreshRibbonIcon();
+
 		this.addSettingTab(new ImageTransferSettingTab(this.app, this));
 
 		new Notice(`Note Tidy v${this.manifest.version} 已加载`);
@@ -71,6 +81,14 @@ export default class ImageTransferPlugin extends Plugin {
 		await this.saveData(this.settings);
 		// 面板里可能刚改了状态栏那个开关：立刻按新设置刷一次，不用等用户下次动选区
 		this.refreshSelectionCount();
+		// 左侧栏图标同理：开关一改立刻生效，不必重载插件
+		this.refreshRibbonIcon();
+	}
+
+	/** 按设置显示 / 隐藏左侧栏那个「整理图片」图标 */
+	private refreshRibbonIcon(): void {
+		if (!this.ribbonEl) return;
+		this.ribbonEl.toggleClass('note-tidy-ribbon-hidden', this.settings.tidyImagesRibbonIcon === false);
 	}
 
 	/** 按编辑器里当前的选区刷新状态栏那一格（拿不到编辑器时当作"没有选中"） */

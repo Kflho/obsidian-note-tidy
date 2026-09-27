@@ -38,6 +38,30 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 		}
 	});
 
+	plugin.addCommand({
+		id: 'convert-images-entire-vault',
+		name: 'Image converter：把整个仓库的图片转换为指定格式',
+		callback: async () => {
+			await tasks.convertEntireVault();
+		}
+	});
+
+	plugin.addCommand({
+		id: 'convert-images-current-note',
+		name: 'Image converter：把当前笔记的图片转换为指定格式',
+		editorCallback: async (_editor: Editor, ctx: MarkdownView | MarkdownFileInfo) => {
+			await tasks.convertNoteImages(currentFile(ctx));
+		}
+	});
+
+	plugin.addCommand({
+		id: 'tidy-images',
+		name: '整理图片（合并重复副本 + 清理没人引用的附件）',
+		callback: async () => {
+			await tasks.tidyImages(true);
+		}
+	});
+
 	// ---------------------------------------------------------- 图片重命名
 	plugin.addCommand({
 		id: 'rename-all-images-entire-vault',

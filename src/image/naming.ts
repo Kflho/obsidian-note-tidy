@@ -89,6 +89,19 @@ export function buildVaultBasenameMap(app: App): Map<string, string> {
 }
 
 /**
+ * 附件夹里的完整仓库路径（根目录统一处理成不带前导斜杠）。
+ *
+ * 单独抽出来是因为"先算名字、再决定最终文件名"的地方有两处：正常导入用它拼目标路径，
+ * 交接给 Image Converter 转换后（`img.png` → `img.webp`）也要用同一套规则重算一次。
+ */
+export function vaultPathFor(folder: string, fileName: string): string {
+	// 先自己收掉首尾斜杠，别指望 normalizePath 兜底：根目录（`/`）与"没有附件夹"（`''`）
+	// 必须拼出同一种形态，否则"这个路径有没有被占用"的检查会两处对不上
+	const clean = folder.replace(/^\/+|\/+$/g, '');
+	return normalizePath(clean === '' ? fileName : `${clean}/${fileName}`);
+}
+
+/**
  * 生成唯一的目标路径。四层检查确保仓库内所有图片 basename 唯一：
  * ①目标路径是否已有文件  ②批次内是否已预留完整路径
  * ③批次内是否已预留 basename  ④pre-scan 得到的仓库 basename 映射（由调用方传入）
@@ -109,9 +122,7 @@ export async function generateUniqueTargetPath(
 	let attempts = 0;
 	while (attempts < MAX_ATTEMPTS) {
 		const newFileName = formatImageName(preset, ext, currentTime);
-		const targetVaultPath = normalizePath(
-			currentAttachFolder === "/" ? `/${newFileName}` : `${currentAttachFolder}/${newFileName}`
-		);
+		const targetVaultPath = vaultPathFor(currentAttachFolder, newFileName);
 		// ①目标路径是否已有文件
 		if (app.vault.getAbstractFileByPath(targetVaultPath)) {
 			currentTime.add(1, 'seconds'); attempts++; continue;

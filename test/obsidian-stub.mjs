@@ -111,6 +111,7 @@ export class Plugin {
 		this.commands = [];
 		this.settingTabs = [];
 		this.statusBarItems = [];
+		this.ribbonItems = [];
 		this.editorExtensions = [];
 		this.events = [];
 	}
@@ -121,6 +122,18 @@ export class Plugin {
 	addStatusBarItem() {
 		const el = { setText() {}, addClass() {}, removeClass() {}, setAttribute() {} };
 		this.statusBarItems.push(el);
+		return el;
+	}
+	/** 左侧栏图标：记下图标名、提示语与点击回调（返回的元素支持 toggleClass） */
+	addRibbonIcon(icon, title, callback) {
+		const el = {
+			classes: new Set(),
+			toggleClass(name, on) {
+				if (on === false) this.classes.delete(name);
+				else this.classes.add(name);
+			},
+		};
+		this.ribbonItems.push({ icon, title, callback, el });
 		return el;
 	}
 	addSettingTab(tab) {

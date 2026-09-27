@@ -112,9 +112,31 @@ export const RULE_SECTIONS: RuleSection[] = [
 				spec: null,
 				status: 'done',
 				switchKeys: ['attachmentLocation', 'customAttachmentFolder'],
-				impl: { file: 'src/image/transfer.ts', symbols: ['transferExternalImages'] },
+				impl: {
+					file: 'src/image/transfer.ts',
+					symbols: ['transferExternalImages', 'transferImagesInText', 'discardImportedFiles'],
+				},
 				tests: [],
-				note: '依赖 Obsidian 的 vault / fileManager API，没有单测；附件夹定位另有 image.attachment-folder 一条',
+				note: '依赖 Obsidian 的 vault / fileManager API，没有单测；附件夹定位另有 image.attachment-folder 一条。导入是"先复制文件、再写回链接"两步，中间隔着异步（收图 / 转码 / 排版）——**写回失败时要把刚导入的文件回滚掉**（`discardImportedFiles`）：链接没写上、文件留在库里就是谁也指不到的孤儿附件（2026-09 用户库里 40 张就是这么攒出来的，见 `cross.range-indent` 那条路）',
+			},
+			{
+				id: 'image.hand-off-converter',
+				name: '导入 / 全库的图片交给 Image Converter 转换格式（用它当前的转换预设）',
+				spec: null,
+				status: 'done',
+				switchKeys: ['handOffImportedImages', 'vaultConvertFormat'],
+				impl: {
+					file: 'src/image/image-converter-bridge.ts',
+					symbols: [
+						'convertImageBytes', 'convertVaultImage', 'findImageConverter',
+						'readConverterPreset', 'matchesAnyPattern', 'targetExtension',
+						'convertedFileName', 'looksLikeFormat', 'shouldUseConverted',
+						'shouldConvertFile', 'selectConvertibleImages', 'vaultConvertOverride',
+						'formatLabel', 'ConversionHint',
+					],
+				},
+				tests: ['test/image-converter-bridge.test.ts', 'test/image-transfer.test.ts', 'test/commands.test.ts'],
+				note: 'Image Converter（xRyul）只在**剪贴板里带图片文件**的粘贴上自动转换：它的 `editor-paste` 钩子看到 `kind === "file"` 的图片项才动手（而且它一旦接手就 `preventDefault`，正文文字它是不管的）。我们处理的是正文里的 `file:///D:\\…` **文本路径**与仓库里已有的图片，它的钩子看不到，于是图片进了库却一直是 png/jpg（2026-09 用户报的"图片进了库但没转 webp"，全库 108 张非 webp 都是这么来的）。两条入口：① 导入外部图片时顺手交接（`handOffImportedImages`，默认开）；② 命令 `convert-images-current-note` / `convert-images-entire-vault`（「Image converter：把当前笔记 / 整个仓库的图片转换为指定格式」，目标格式看 `vaultConvertFormat`，默认 webp；当前笔记那条用来先在一篇上试）。做法：只借它的**转码器与当前预设**（`imageProcessor.processImage` + `settings.conversionPresets[selectedConversionPreset]`），改名与写链接由我们自己做 —— 因此不必先保存笔记、不会触发它"全库正则替换链接"（`updateLinksInAllNotes` 是 `vault.read` + `vault.modify`，对还没落盘的编辑器改动只会帮倒忙），也不碰系统剪贴板、不往撤销历史里塞东西；全库那条走 Obsidian 自己的 `fileManager.renameFile`，链接（wikilink / Markdown / canvas）自动跟着更新。导入那条**先转换、再落盘**：转好了才按目标格式写一个文件（不产生谁也指不到的中间 png，也不需要删除步骤）。三条硬规矩：① 预设里的 `skipConversionPatterns`（例如 `WEBP(Exclude gif)` 的 `*.gif`）；② **`.gif` 一律不转** —— canvas 转出来只有一帧，动图会被拍成静图，那是不可逆的损坏；③ 已经是目标格式的不再压一遍（避免代际失真）。另有它的 `revertToOriginalIfLarger` + `minimumCompressionSavingsInKB`（没省够就用原图，默认 30 KB）照抄。**没装 Image Converter 时功能不坏**：图片照旧导入，只是保持原格式，并每次会话提示一次去装它（`ConversionHint`，避免反复唠叨）；全库那条只提示安装、一个文件都不动。**任何一步失败都退回原格式**，图片一定丢不了',
 			},
 			{
 				id: 'image.attachment-folder',
@@ -206,6 +228,23 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: ['attachmentLocation', 'customAttachmentFolder', 'renameLinkFormat'],
 				impl: { file: 'src/image/organize.ts', symbols: ['organizeNoteImages'] },
 				tests: ['test/image-organizer.test.ts'],
+			},
+			{
+				id: 'image.tidy',
+				name: '整理图片：合并内容相同的重复副本 + 清理没人引用的附件（命令 + 左侧栏图标）',
+				spec: null,
+				status: 'done',
+				switchKeys: ['autoClearUnusedImages', 'tidyImagesRibbonIcon'],
+				impl: {
+					file: 'src/image/dedupe.ts',
+					symbols: [
+						'groupByFolderAndSize', 'findIdenticalGroups', 'chooseKeeper',
+						'rewriteImageReferences', 'countImageReferences', 'collectImageTargets',
+						'isManagedImageExtension', 'sameBytes', 'CLEAR_UNUSED_IMAGES_COMMAND',
+					],
+				},
+				tests: ['test/image-dedupe.test.ts', 'test/commands.test.ts'],
+				note: '两个入口，同一个任务 `ImageTasks.tidyImages`：① 命令 `tidy-images`（「整理图片（合并重复副本 + 清理没人引用的附件）」）—— 先弹确认框；② **左侧栏图标**（`tidyImagesRibbonIcon`，默认开）—— **一键整理**、不弹确认框（删的都是内容完全相同的副本，且进回收站，随时可还原；图标沿用 Clear Unused Images 的 `image-file`，方便用户直接换掉那个按钮）。**只合并同一文件夹里的**：同目录的孪生文件是"同一张图粘了两次"（时间戳差几秒），纯浪费；跨目录的同图是 `image.organize` 特意给每篇笔记拷的副本（笔记走到哪儿都自带图片），删了反而破坏设计。判定"内容相同"分两步：先按 **目录 + 字节数** 粗分组（不读盘），再在组内**逐字节比对** —— 不用哈希（省掉 crypto 依赖，也没有"碰撞把两张不同的图判成一张"的理论风险）。留哪张看**引用次数**（一样多取名字最小的，保证结果可复现），顺序固定为**先改写引用、再删副本**（反了就会留下断链）；改写覆盖 `![[名]]`（含 `|尺寸`）、`[[名]]`、`![](.../名)` 与 canvas 的 `"file"`，按名字替换并用 `(?<![\\w.-])…(?![\\w.])` 卡住词边界（挡住长名字的一部分）。副本走 `fileManager.trashFile`（用户设置的删除方式）。最后若 `autoClearUnusedImages` 打开，就用官方的 `app.commands.executeCommandById("oz-clear-unused-images:clear-images-obsidian")` 让 **Clear Unused Images** 清一遍"没人引用的附件"（互补：我们合并重复、它清理孤儿；它默认删到 `.trash` 可还原）—— 那个插件没装 / 没启用时该调用返回 false，什么都不做，也不影响合并结果',
 			},
 			{
 				id: 'image.size',

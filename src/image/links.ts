@@ -1,4 +1,5 @@
 import { App, TFile } from 'obsidian';
+import { MANAGED_IMAGE_EXT_RE, wikiEmbedRe } from './constants';
 
 /**
  * 图片链接共用的解析工具。
@@ -102,6 +103,32 @@ export function resolveImageLink(
 
 /** 链接目标的路径形式 */
 export type LinkFormat = 'full' | 'filename';
+
+/**
+ * 一篇笔记里**实际嵌入的图片文件**（去重；同名有歧义的一律跳过）。
+ *
+ * 只认 `![[…]]` 嵌入 —— 与重命名、整理图片位置那几条路走的是同一套解析
+ * （`resolveImageLink`），所以"笔记里显示的是哪张图"跟这里拿到的就是同一张。
+ */
+export async function collectLinkedImageFiles(
+	app: App,
+	file: TFile,
+	index: Map<string, TFile[]>
+): Promise<TFile[]> {
+	const content = await app.vault.read(file);
+	const found: TFile[] = [];
+	const seen = new Set<string>();
+
+	for (const match of content.matchAll(wikiEmbedRe())) {
+		const rawLink = match[1]?.trim();
+		if (!rawLink || !MANAGED_IMAGE_EXT_RE.test(rawLink)) continue;
+		const linked = resolveImageLink(app, file.path, rawLink, index).file;
+		if (!linked || seen.has(linked.path)) continue;
+		seen.add(linked.path);
+		found.push(linked);
+	}
+	return found;
+}
 
 /**
  * 决定链接里写文件名还是完整路径。

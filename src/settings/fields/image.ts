@@ -50,6 +50,26 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 					},
 				},
 			},
+			{
+				key: 'vaultConvertFormat',
+				name: '「转换全库图片格式」的目标格式',
+				desc: '命令「将整个仓库中的图片转换为指定格式」按它决定转成什么。「跟随预设」＝按 Image Converter 当前选中的转换预设；其余选项直接点名格式（质量与缩放仍照预设）。动图（gif）与已经是目标格式的图片一律跳过，转换后扩展名会变（如 png → webp），链接由 Obsidian 自己更新',
+				control: {
+					type: 'dropdown',
+					options: {
+						preset: '跟随 Image Converter 的预设',
+						webp: 'WEBP（推荐）',
+						jpg: 'JPEG',
+						png: 'PNG',
+					},
+				},
+			},
+			{
+				key: 'handOffImportedImages',
+				name: '导入的图片交给 Image Converter 转格式',
+				desc: '把收进仓库的外部图片顺手交给 Image Converter 转换（用它当前选中的转换预设，例如 png/jpg → webp），链接直接写成转换后的文件名。它的自动转换只认"剪贴板里带图片文件"的粘贴，看不到本插件导入的 file:///D:\\… 文本路径，所以不交接的话图片会一直保持原格式。它没安装 / 没启用 / 转换失败时按原格式导入，不影响图片进库',
+				control: { type: 'toggle' },
+			},
 		],
 	},
 	{
@@ -72,6 +92,24 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 				key: 'imageSizeOverwrite',
 				name: '覆盖已有尺寸',
 				desc: '关闭后只给还没有尺寸的图片补上，已有尺寸的图片保持不动',
+				control: { type: 'toggle' },
+			},
+		],
+	},
+	{
+		type: 'group',
+		heading: '图片整理',
+		fields: [
+			{
+				key: 'tidyImagesRibbonIcon',
+				name: '左侧栏放一个「整理图片」图标',
+				desc: '在左侧栏（ribbon）加一个图标，点一下就是「整理图片」：合并内容相同的重复副本 + 清理没人引用的附件 —— 一键完成，不再弹确认框（删的都是内容一模一样的副本，且进回收站可还原）。命令面板里的「整理图片」入口仍会先让你确认',
+				control: { type: 'toggle' },
+			},
+			{
+				key: 'autoClearUnusedImages',
+				name: '整理时清理没人引用的附件',
+				desc: '执行「整理图片」时顺手跑一次 Clear Unused Images 插件（oz-clear-unused-images）的「清理未使用图片」命令 —— 我们负责合并"内容相同的重复副本"，它负责"没有任何笔记引用的附件"，正好互补。它默认删到仓库的 .trash 里，可还原；没装那个插件时这一步自动跳过，不影响合并',
 				control: { type: 'toggle' },
 			},
 		],

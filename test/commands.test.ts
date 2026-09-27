@@ -69,6 +69,7 @@ interface RecordedPlugin {
 	commands: RecordedCommand[];
 	settingTabs: unknown[];
 	statusBarItems: unknown[];
+	ribbonItems: Array<{ icon: string; title: string; callback: () => void }>;
 	editorExtensions: unknown[];
 }
 
@@ -155,7 +156,15 @@ const EDITOR_OPERATIONS: Array<{ menu: RegExp; commands: string[] }> = [
  * 没有右键菜单入口的命令（目前是空的：设置 / 命令面板里的面板类命令将来若有，
  * 又没有菜单入口，就登记在这里 —— 免得漏掉一个"注册了却没人用"的命令）。
  */
-const PANEL_COMMANDS: string[] = [];
+const PANEL_COMMANDS: string[] = [
+	// 图片格式转换：命令面板入口（没有右键菜单项 —— 它要重写图片文件并改扩展名，
+	// 一律先弹确认框，不该在文件夹右键里变成"一键改一堆文件"）
+	"convert-images-entire-vault",
+	"convert-images-current-note",
+	// 整理图片：命令面板入口（左侧栏那个"一键整理"图标走的是同一个任务，
+	// 只是不弹确认框 —— 见下面的 ribbon 检查）
+	"tidy-images",
+];
 
 /**
  * **注入**进图片 / 文件夹菜单的那些项 → 命令 ID。
@@ -426,6 +435,13 @@ async function audit(): Promise<void> {
 	checkTrue("状态栏注册了两格", plugin.statusBarItems.length === 2, `实际注册 ${plugin.statusBarItems.length} 格`);
 	// 选区监听是 CodeMirror 扩展：Obsidian 的公开事件里没有"选区变化"
 	checkTrue("选区监听扩展已注册", plugin.editorExtensions.length === 1, `实际注册 ${plugin.editorExtensions.length} 个`);
+	// 左侧栏的「整理图片」图标：一键整理（合并 + 清理），点击回调要真的在
+	checkTrue("左侧栏注册了「整理图片」图标", plugin.ribbonItems.length === 1, `实际注册 ${plugin.ribbonItems.length} 个`);
+	const ribbon = plugin.ribbonItems[0];
+	checkList("左侧栏图标：图标名与提示语",
+		[ribbon?.icon ?? "", ribbon?.title.includes("整理图片") ? "标题含整理图片" : ribbon?.title ?? ""],
+		["image-file", "标题含整理图片"]);
+	checkTrue("左侧栏图标：点击回调已接上", typeof ribbon?.callback === "function", String(typeof ribbon?.callback));
 }
 
 // ------------------------------------------------- 5. 整库批处理：单篇失败不拖垮整批
@@ -553,6 +569,56 @@ async function quickFixTests(): Promise<void> {
 	}
 }
 
+// ------------------------------- 7. 图片格式转换：没装 image converter 时的退路
+/**
+ * 没装 image converter 时功能**不该坏**：
+ * - 「Image converter：把整个仓库的图片转换为指定格式」只提示去装，一个文件都不动；
+ * - 导入外部图片那条路照旧可用，只是保持原格式，并在动手前提示一次（同一会话不重复唠叨）。
+ */
+async function noConverterTests(): Promise<void> {
+	installDomStubs();
+
+	const contents = new Map<string, string>([["笔记.md", "正文，没有外部图片"]]);
+	const { app, contents: store, files } = createApp({ contents });
+
+	const manifest = { id: "note-tidy", name: "test", version: "0.0.0" } as PluginManifest;
+	const plugin = new ImageTransferPlugin(app, manifest);
+	await plugin.onload();
+
+	const tasks = (plugin as unknown as {
+		tasks: {
+			convertEntireVault: () => Promise<void>;
+			transferCurrentNote: (file: TFile) => Promise<void>;
+		};
+	}).tasks;
+	const note = files[0];
+	if (!note) throw new Error("测试仓库里应该有 1 篇笔记");
+
+	// ① 整库转换：只提示安装，别的一个字都不动
+	noticeLog.messages.length = 0;
+	await tasks.convertEntireVault();
+	checkTrue("没装插件：整库转换提示去安装",
+		noticeLog.messages.some(message => message.includes("请先安装")),
+		`实际提示：${noticeLog.messages.join(" | ")}`);
+	checkTrue("没装插件：整库转换不动笔记", store.get("笔记.md") === "正文，没有外部图片", `实际内容：${store.get("笔记.md")}`);
+
+	// ② 导入路径：提示一次去装，且同一会话不重复
+	noticeLog.messages.length = 0;
+	await tasks.transferCurrentNote(note);
+	checkTrue("没装插件：导入时提示一次",
+		noticeLog.messages.filter(message => message.includes("没检测到 image converter")).length === 1,
+		`实际提示：${noticeLog.messages.join(" | ")}`);
+	checkTrue("没装插件：导入照样能跑完",
+		noticeLog.messages.some(message => message.includes("没有发现需要转换")),
+		`实际提示：${noticeLog.messages.join(" | ")}`);
+
+	noticeLog.messages.length = 0;
+	await tasks.transferCurrentNote(note);
+	checkTrue("没装插件：同一会话不重复提示",
+		noticeLog.messages.filter(message => message.includes("没检测到 image converter")).length === 0,
+		`实际提示：${noticeLog.messages.join(" | ")}`);
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 命令注册审计 ===");
 await audit();
@@ -562,6 +628,9 @@ await batchTests();
 
 console.log("=== 快速修复聊天记录 ===");
 await quickFixTests();
+
+console.log("=== 没装 image converter 时的退路 ===");
+await noConverterTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {
