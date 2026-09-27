@@ -242,6 +242,12 @@ export const TEXT_SECTION: FieldSection = {
 					},
 				},
 				{
+					key: 'chatSortByTime',
+					name: '相邻消息按时间排序',
+					desc: '粘贴顺序与时间戳不一致时（一次选多条复制，后一条先落地），按时间先后输出相邻消息。只调整中间没夹着其它正文的消息；一段里时间戳形状不一致（有的写了日期、有的只有时分秒）就不动',
+					control: { type: 'toggle' },
+				},
+				{
 					key: 'chatBlankLineBetweenMessages',
 					name: '消息之间插入空行',
 					desc: '仅在用户名、日期、时间全部关闭时可用；有头部信息时头部本身已起分隔作用',

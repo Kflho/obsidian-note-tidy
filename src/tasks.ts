@@ -566,6 +566,8 @@ export class ImageTasks implements TaskActions {
 			indent: resolveIndent(settings.chatIndent),
 			imageOrder: settings.chatImageOrder,
 			blankLineBetweenMessages: settings.chatBlankLineBetweenMessages,
+			// 老 data.json 里没有这个字段 —— 当成开（默认值），用户不用手动打开就能拿到修复
+			sortByTime: settings.chatSortByTime !== false,
 		};
 	}
 

@@ -26,6 +26,8 @@ export interface ChatLogOptions {
 	imageOrder: ChatImageOrder;
 	/** 头部信息全部关闭时，是否在相邻消息之间插入空行作为分隔 */
 	blankLineBetweenMessages: boolean;
+	/** 相邻消息的时间戳与粘贴顺序不一致时，是否按时间先后输出（见 sortAdjacentMessages） */
+	sortByTime: boolean;
 }
 
 /** 默认行为与旧版本完全一致：用户名/日期/时间全显示、Tab 缩进、不调整图片顺序、不加空行 */
@@ -36,6 +38,7 @@ export const DEFAULT_CHAT_LOG_OPTIONS: ChatLogOptions = {
 	indent: '\t',
 	imageOrder: 'keep',
 	blankLineBetweenMessages: false,
+	sortByTime: true,
 };
 
 /** 时间戳锚点（与旧实现一致） */
@@ -239,10 +242,147 @@ function reorderImages(lines: string[], order: 'above' | 'below'): string[] {
 }
 
 /**
+ * 输出块：一条消息算一块（可以按时间排序），消息之间的零散文本各算一块。
+ * 排序只发生在"相邻消息"之间，见 sortAdjacentMessages。
+ */
+interface OutputBlock {
+	kind: 'text' | 'message';
+	text: string;
+	/** 这条消息的时间排序键；null = 时间戳不完整，不参与排序 */
+	key: number | null;
+	/** 时间戳里写了日期（键是"年月日时分秒"），false 表示只有"时分秒" */
+	hasDate: boolean;
+	/** 这条消息没有头部行（用户名/日期/时间全关），只有正文 */
+	bodyOnly: boolean;
+	/** 这条消息真的输出了正文 */
+	hasBody: boolean;
+}
+
+/**
+ * 消息的时间排序键：`年月日时分秒`（或只有日期时的 `时分秒`）拼成一个大整数，直接比大小。
+ *
+ * 只认**同一形状**的时间戳：整段消息都写了日期（`09-27 19:41:38`，年份按当前年补）
+ * 或者整段都只有时分秒，才比得出先后；一段里混着两种形状就不排 ——
+ * 缺日期的那种跨天无从判断，猜错了就是把作者的消息搬乱。
+ *
+ * @param withDate 这条消息的时间戳里是否有日期
+ */
+function messageSortKey(dateVal: string, normalizedTime: string, withDate: boolean): number | null {
+	const timeParts = normalizedTime.split(':');
+	if (timeParts.length !== 3) return null;
+	const timeNumbers = [Number(timeParts[0]), Number(timeParts[1]), Number(timeParts[2])];
+	// 时分秒最多两位（补零后是 2 位）；不是数字就当这条消息没有键
+	if (timeNumbers.some(n => !Number.isInteger(n) || n < 0 || n > 99)) return null;
+
+	let numbers = timeNumbers;
+	if (withDate) {
+		const dateParts = dateVal.split('/');
+		if (dateParts.length !== 3) return null;
+		const year = Number(dateParts[0]);
+		const month = Number(dateParts[1]);
+		const day = Number(dateParts[2]);
+		// 年份是四位（`2024`），月日补零后两位
+		if (!Number.isInteger(year) || year < 0 || year > 9999) return null;
+		if ([month, day].some(n => !Number.isInteger(n) || n < 0 || n > 99)) return null;
+		numbers = [year, month, day, ...timeNumbers];
+	}
+
+	let key = 0;
+	for (const n of numbers) key = key * 100 + n;
+	return key;
+}
+
+/**
+ * 把**相邻消息**按时间先后重排。
+ *
+ * ## 为什么需要这一步
+ *
+ * 粘贴顺序不一定等于聊天窗口里的先后：QQ / 微信 一次选多条复制时，
+ * 后一条（常常是图片）可能先落地、前一条（文字）落在它下面 ——
+ * 用户看到的就是"图片跑到上一条文字的上方"，而时间戳明明写着文字在前。
+ * 排版时手里正好有每条消息的时间戳，顺手把顺序摆正是这里的职责。
+ *
+ * ## 为什么只排"相邻"的
+ *
+ * 段与段之间可能夹着作者自己的正文（`03集`、`# 总结` 之类）：
+ * 那段正文没法判断该跟着谁走，把它一起搬走只会破坏笔记。
+ * 所以**中间夹着非空白内容的段一律不动** —— 排序只在
+ * "消息 + 纯空白 + 消息 + …" 这种连续段内做。
+ *
+ * 段里的时间戳必须**形状一致**才排：全带日期，或全不带（只有时分秒）。
+ * 一段里混着两种形状（`09-27 19:41:38` 与 `19:41:38`）就不排 ——
+ * 缺日期的那种跨天无从判断，猜错了就是把作者的消息搬乱。
+ *
+ * @param blocks 输出块（原地重排其中消息块的位置）
+ */
+function sortAdjacentMessages(blocks: OutputBlock[]): OutputBlock[] {
+	const ordered: OutputBlock[] = [];
+	let i = 0;
+
+	while (i < blocks.length) {
+		if (blocks[i]?.kind !== 'message') {
+			ordered.push(blocks[i]!);
+			i++;
+			continue;
+		}
+
+		// 从这条消息开始，往后收集"消息之间只夹空白"的连续段
+		let end = i + 1;
+		while (end < blocks.length) {
+			const next = blocks[end]!;
+			if (next.kind === 'message') { end++; continue; }
+			// 空白块后面必须还是消息，段才继续；否则段到此为止
+			if (next.text.trim() !== '') break;
+			if (blocks[end + 1]?.kind !== 'message') break;
+			end++;
+		}
+
+		// 段尾紧贴着正文（中间没有空行）时整段不动：末条消息的正文只取到第一个换行，
+		// 余下的续行作为普通文本留在后面 —— 排序会把那段续行跟消息拆开，
+		// 而且"谁在最后"一变，下一次排版对这条消息的取法也跟着变，宁可保持原样。
+		// 判据是"正文的第一个非空白字符前面有没有换行"：有换行就是另起一行（笔记正文），
+		// 没有换行（比如 `第二行` 直接接在正文后面）才是被截断的续行。
+		let gluedToText = false;
+		for (let k = end; k < blocks.length; k++) {
+			const block = blocks[k]!;
+			if (block.kind === 'message') break;       // 后面的消息与本段无关
+			if (block.text.trim() === '') continue;    // 纯空白块（空行）不算贴着正文
+			const leadingWhitespace = /^\s*/.exec(block.text)?.[0] ?? '';
+			gluedToText = !leadingWhitespace.includes('\n');
+			break;
+		}
+		if (gluedToText) {
+			for (let k = i; k < end; k++) ordered.push(blocks[k]!);
+			i = end;
+			continue;
+		}
+
+		const messagePositions: number[] = [];
+		for (let k = i; k < end; k++) {
+			if (blocks[k]?.kind === 'message') messagePositions.push(k);
+		}
+		const run = messagePositions.map(position => blocks[position]!);
+
+		// 整段都要有键，而且形状一致（全带日期或全不带）才排序
+		const dated = run.filter(block => block.hasDate).length;
+		if (run.length > 1 && (dated === 0 || dated === run.length) && run.every(block => block.key !== null)) {
+			// Array.prototype.sort 是稳定排序：时间相同的消息保持原有先后
+			const sorted = [...run].sort((a, b) => (a.key as number) - (b.key as number));
+			messagePositions.forEach((position, index) => { blocks[position] = sorted[index]!; });
+		}
+
+		for (let k = i; k < end; k++) ordered.push(blocks[k]!);
+		i = end;
+	}
+
+	return ordered;
+}
+
+/**
  * 修复聊天记录排版。
  *
  * @param rawContent 笔记原始内容
- * @param options 排版选项（用户名/日期/时间开关、缩进、图片位置）
+ * @param options 排版选项（用户名/日期/时间开关、缩进、图片位置、相邻消息排序）
  * @param now 用于补全缺失日期的"当前时间"，仅在原文没有日期时使用
  * @returns 排版后的内容；无时间戳锚点或无需改动时原样返回
  */
@@ -272,10 +412,49 @@ export function formatChatLog(
 	const imageOrder: ChatImageOrder =
 		options.imageOrder === 'above' || options.imageOrder === 'below' ? options.imageOrder : 'keep';
 
-	let result = "";
+	// 输出按"块"收集：一条消息一块（带时间键，便于稍后排序），消息之间的零散文本各自成块
+	const blocks: OutputBlock[] = [];
+	/** 正在拼装的消息块（头部 + 正文）；拼完由 flushMessage 收进 blocks */
+	let currentMessage = '';
+	let currentKey: number | null = null;
+	let currentHasDate = false;
+	let currentBodyOnly = false;
+	let currentHasBody = false;
+
+	/** 当前输出的末尾（正在拼装的消息优先） */
+	const tail = (): string =>
+		currentMessage || (blocks.length > 0 ? blocks[blocks.length - 1]!.text : '');
+	const pushText = (text: string): void => {
+		if (text) blocks.push({ kind: 'text', text, key: null, hasDate: false, bodyOnly: false, hasBody: false });
+	};
+	const ensureTrailingNewline = (): void => {
+		if (currentMessage) {
+			if (!currentMessage.endsWith('\n')) currentMessage += '\n';
+			return;
+		}
+		const last = blocks[blocks.length - 1];
+		// 还没有任何输出时什么都不做 —— 与原实现 `result.length > 0` 的判断一致
+		if (last && !last.text.endsWith('\n')) last.text += '\n';
+	};
+	const flushMessage = (): void => {
+		if (currentMessage) {
+			blocks.push({
+				kind: 'message',
+				text: currentMessage,
+				key: currentKey,
+				hasDate: currentHasDate,
+				bodyOnly: currentBodyOnly,
+				hasBody: currentHasBody,
+			});
+		}
+		currentMessage = '';
+		currentKey = null;
+		currentHasDate = false;
+		currentBodyOnly = false;
+		currentHasBody = false;
+	};
+
 	let lastProcessedIndex = 0;
-	// 上一次输出的是否为消息正文 —— 无头部信息时据此判断是否需要补一个分隔空行
-	let previousOutputWasBody = false;
 
 	for (let i = 0; i < anchors.length; i++) {
 		const anchor = anchors[i];
@@ -309,12 +488,11 @@ export function formatChatLog(
 			// 同样要做换行抵消 —— 否则上一段输出末尾的换行与本段开头的空行会叠加，
 			// 每执行一次就多出一个空行（无上限增长）。
 			let verbatim = rawContent.substring(lastProcessedIndex, anchor.end);
-			if (verbatim.startsWith('\n') && result.endsWith('\n')) {
+			if (verbatim.startsWith('\n') && tail().endsWith('\n')) {
 				verbatim = verbatim.substring(1);
 			}
-			result += verbatim;
+			pushText(verbatim);
 			lastProcessedIndex = anchor.end;
-			previousOutputWasBody = false;
 			continue;
 		}
 
@@ -329,19 +507,16 @@ export function formatChatLog(
 		let fragment = rawContent.substring(lastProcessedIndex, Math.max(lastProcessedIndex, fragmentEnd));
 
 		// 核心修复1：重叠换行抵消（防止多次运行导致换行符堆叠生长）
-		if (fragment.startsWith('\n') && result.endsWith('\n')) {
+		if (fragment.startsWith('\n') && tail().endsWith('\n')) {
 			fragment = fragment.substring(1);
 		}
 
-		result += fragment;
-		if (fragment) {
-			// 中间夹着笔记正文，本条消息不算是紧邻上一条正文
-			previousOutputWasBody = false;
-		}
+		// 中间夹着笔记正文时，这一块不是空白 —— 排序会因此跳过它所在的段
+		pushText(fragment);
 
 		// 确保聊天记录标题独占一行
-		if (result.length > 0 && !result.endsWith('\n')) {
-			result += '\n';
+		if (blocks.length > 0 && !tail().endsWith('\n')) {
+			ensureTrailingNewline();
 		}
 
 		// 2. 归一化日期与时间
@@ -370,9 +545,14 @@ export function formatChatLog(
 
 		// 按设置拼装头部（用户名/日期/时间可分别关闭；全关时不输出头部行）
 		const headerText = buildHeaderLine(userName, dateVal, normalizedTime, options);
-		if (headerText) {
-			result += `${headerText}\n`;
-		}
+		if (headerText) currentMessage += `${headerText}\n`;
+
+		// 时间排序键：`09-27 19:41:38` 这种带日期的按"年月日时分秒"比，
+		// 只有 `19:41:38` 的按"时分秒"比（两种形状不在同一段里混着比，见 messageSortKey）
+		currentHasDate = datePartStr !== '';
+		currentKey = messageSortKey(dateVal, normalizedTime, currentHasDate);
+		// 没有头部行时才知道"正文直接相邻"要不要补空行
+		currentBodyOnly = !headerText;
 
 		// 3. 正文边界计算：支持空行笔记剥离
 		let boundary: number;
@@ -437,32 +617,54 @@ export function formatChatLog(
 		const bodyClean = bodyRaw.replace(/^[:：]\s*/, "").trim();
 
 		if (bodyClean) {
-			// 头部信息全部关闭时，两条消息的正文会直接相邻，可按设置补一个空行分隔。
-			// 有头部信息时头部本身已起分隔作用，不额外插入。
-			if (options.blankLineBetweenMessages && !headerText && previousOutputWasBody) {
-				result += '\n';
-			}
-
 			let lines = bodyClean.split('\n').map(line => line.trim());
 			if (imageOrder !== 'keep') {
 				lines = reorderImages(lines, imageOrder);
 			}
-			result += lines.map(line => `${options.indent}${line}`).join('\n') + '\n';
-			previousOutputWasBody = true;
-		} else {
-			if (!result.endsWith('\n')) result += '\n';
+			currentMessage += lines.map(line => `${options.indent}${line}`).join('\n') + '\n';
+			currentHasBody = true;
+		} else if (!tail().endsWith('\n')) {
+			ensureTrailingNewline();
 		}
 
 		lastProcessedIndex = boundary;
+		flushMessage();
 	}
 
 	if (lastProcessedIndex < rawContent.length) {
 		const remaining = rawContent.substring(lastProcessedIndex);
-		if (remaining.startsWith('\n') && result.endsWith('\n')) {
-			result += remaining.substring(1);
+		if (remaining.startsWith('\n') && tail().endsWith('\n')) {
+			pushText(remaining.substring(1));
 		} else {
-			result += remaining;
+			pushText(remaining);
 		}
+	}
+
+	// 相邻消息按时间先后重排：粘贴顺序有时与聊天窗口里的先后不一致，
+	// 后一条（常常是图片）先落地、前一条（文字）落在下面 —— 见 sortAdjacentMessages
+	const ordered = options.sortByTime === false ? blocks : sortAdjacentMessages(blocks);
+
+	// 拼成最终文本。"消息之间插入空行"按**重排后**的相邻关系补，
+	// 否则排序换个顺序就会把分隔空行留错地方。
+	let result = '';
+	let previousOutputWasBody = false;
+
+	for (const block of ordered) {
+		if (block.kind === 'text') {
+			result += block.text;
+			// 中间夹着笔记正文，下一条消息不算是紧邻上一条正文
+			previousOutputWasBody = false;
+			continue;
+		}
+
+		// 头部信息全部关闭时，两条消息的正文会直接相邻，可按设置补一个空行分隔。
+		// 有头部信息时头部本身已起分隔作用，不额外插入。
+		if (options.blankLineBetweenMessages && block.bodyOnly && block.hasBody && previousOutputWasBody) {
+			result += '\n';
+		}
+
+		result += block.text;
+		if (block.hasBody) previousOutputWasBody = true;
 	}
 
 	return result;
