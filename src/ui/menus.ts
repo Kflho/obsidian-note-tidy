@@ -201,5 +201,19 @@ function addTextSubmenu(
 					await actions.typeset(files, where);
 				});
 		});
+
+		// 快速版：把本文件内的外部图片一并收进仓库（聊天记录从 QQ / 微信 粘出来时的典型样子）。
+		// 只给单篇笔记用 —— 文件夹那一路是"该文件夹下"，一键改一堆笔记的排版与图片不该没有确认步骤
+		if (files.length === 1) {
+			menu.addItem((item) => {
+				item
+					.setTitle(`快速修复${where}的聊天记录（转换外部图片 + 修复排版）`)
+					.setIcon('zap')
+					.onClick(async () => {
+						const target = files[0];
+						if (target) await actions.quickFixChatLog(target);
+					});
+			});
+		}
 	});
 }

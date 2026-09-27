@@ -15,6 +15,7 @@ import type { App, PluginManifest } from "obsidian";
 import ImageTransferPlugin from "../src/main";
 import { DEFAULT_SETTINGS } from "../src/settings/model";
 import { INJECTED_ITEM_KEYS, OWN_ITEM_COMMANDS, OWN_ITEM_SCOPES, ownMenuEntries } from "../src/ui/image-menu";
+import type { OwnItemKey } from "../src/ui/image-menu";
 import type { MenuScope } from "../src/ui/menu-hidden";
 
 // -------------------------------------------------------------------- 断言
@@ -114,6 +115,10 @@ const OPERATIONS: Array<{ menu: RegExp; commands: string[] }> = [
 		menu: /^快速设置.*图片的大小$/,
 		commands: ["quick-set-image-size-current-note"],
 	},
+	{
+		menu: /^快速修复.*的聊天记录（转换外部图片 \+ 修复排版）$/,
+		commands: ["quick-fix-chat-log-current-note"],
+	},
 ];
 
 /**
@@ -130,6 +135,10 @@ const EDITOR_OPERATIONS: Array<{ menu: RegExp; commands: string[] }> = [
 	{
 		menu: /^快速设置图片大小（Note Tidy）$/,
 		commands: ["quick-set-image-size-current-note"],
+	},
+	{
+		menu: /^快速修复聊天记录（Note Tidy）$/,
+		commands: ["quick-fix-chat-log-current-note"],
 	},
 	{
 		// 三个菜单里都有这一项：编辑器菜单这条由本表看着，图片 / 文件夹菜单那条是插进去的
@@ -150,12 +159,14 @@ const PANEL_COMMANDS: string[] = [];
  * 它们不是走 `file-menu` / `editor-menu` 事件加的（上面两张表抓不到），
  * 所以从实现里的 `imageMenuEntries` 直接生成：菜单里能看到的功能，命令面板里必须也找得到。
  */
-const INJECTED_OPERATIONS: Array<{ scope: MenuScope; key: 'copy' | 'quickSize' | 'manage' }> = [
+const INJECTED_OPERATIONS: Array<{ scope: MenuScope; key: OwnItemKey }> = [
 	{ scope: "image", key: "copy" },
 	{ scope: "image", key: "quickSize" },
+	{ scope: "image", key: "quickFix" },
 	{ scope: "image", key: "manage" },
 	{ scope: "note", key: "copy" },
 	{ scope: "note", key: "quickSize" },
+	{ scope: "note", key: "quickFix" },
 	{ scope: "note", key: "manage" },
 	{ scope: "folder", key: "manage" },
 ];
@@ -165,8 +176,8 @@ const INJECTED_OPERATIONS: Array<{ scope: MenuScope; key: 'copy' | 'quickSize' |
  * 少写一项 = 那一层拿不到这个功能；多写一项 = 那一层会多出一个设置里没有开关的项。
  */
 const EXPECTED_OWN_ITEMS: Record<string, string[]> = {
-	image: ["copy", "quickSize", "manage"],
-	note: ["copy", "quickSize", "manage"],
+	image: ["copy", "quickSize", "quickFix", "manage"],
+	note: ["copy", "quickSize", "quickFix", "manage"],
 	folder: ["imageSubmenu", "manage", "textSubmenu"],
 };
 
@@ -204,6 +215,8 @@ function createApp(options?: { contents?: Map<string, string>; failOn?: string }
 				return next;
 			},
 			createBinary: async (): Promise<unknown> => ({}),
+			// 插件也会往 vault 上挂事件（粘贴聊天记录后自动修复要等落盘）：替身接住即可
+			on: (event: string) => ({ event }),
 		},
 		workspace: {
 			on: (event: string, callback: FileMenuHandler) => {
@@ -371,6 +384,7 @@ async function audit(): Promise<void> {
 			hasFile: scope !== "folder",
 			copy: () => { /* 不做事 */ },
 			quickSize: () => { /* 不做事 */ },
+			quickFix: () => { /* 不做事 */ },
 			manage: () => { /* 不做事 */ },
 		});
 		ownTitles[scope] = entries.map(entry => entry.title);
@@ -484,12 +498,63 @@ async function batchTests(): Promise<void> {
 		`实际提示：${noticeLog.messages.join(" | ")}`);
 }
 
+// ------------------------------------- 6. 快速修复聊天记录：两步连做，一次点完
+/**
+ * 新功能「快速修复聊天记录」= 转换本文件内的外部图片 + 修复排版。
+ * 这里跑真实任务：外链图片那一步（本地没有外部图片时是个空操作）走通，
+ * 排版那一步真的写回，且"没有需要修复的内容"时不写盘、提示说清楚。
+ */
+async function quickFixTests(): Promise<void> {
+	installDomStubs();
+
+	const contents = new Map<string, string>([
+		["聊天记录.md", " >引用A"],   // 排版要修
+		["已规范.md", "> 引用 A"],     // 已经规范：不写盘
+	]);
+	const { app, contents: store, files } = createApp({ contents });
+	(app.workspace as unknown as { getActiveViewOfType: () => unknown }).getActiveViewOfType = () => ({ file: files[0] });
+
+	const manifest = { id: "note-tidy", name: "test", version: "0.0.0" } as PluginManifest;
+	const plugin = new ImageTransferPlugin(app, manifest);
+	await plugin.onload();
+
+	const tasks = (plugin as unknown as { tasks: { quickFixChatLog: (file: TFile) => Promise<void> } }).tasks;
+	checkTrue("任务里有 quickFixChatLog", typeof tasks.quickFixChatLog === "function", String(typeof tasks.quickFixChatLog));
+
+	const toFix = files[0];
+	const tidy = files[1];
+	if (!toFix || !tidy) throw new Error("测试仓库里应该有 2 篇笔记");
+
+	const consoleDebug = console.debug;
+	console.debug = () => undefined;
+	try {
+		noticeLog.messages.length = 0;
+		await tasks.quickFixChatLog(toFix);
+		check("快速修复：排版被修好", store.get("聊天记录.md") ?? "", "> 引用 A");
+		checkTrue("结果提示里说了修了什么",
+			noticeLog.messages.some(message => message.includes("已修复排版")),
+			`实际提示：${noticeLog.messages.join(" | ")}`);
+
+		noticeLog.messages.length = 0;
+		await tasks.quickFixChatLog(tidy);
+		check("已经规范的笔记原样不动", store.get("已规范.md") ?? "", "> 引用 A");
+		checkTrue("没有改动时不写盘、也不说修好了",
+			noticeLog.messages.some(message => message.includes("没有需要修复的内容")),
+			`实际提示：${noticeLog.messages.join(" | ")}`);
+	} finally {
+		console.debug = consoleDebug;
+	}
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 命令注册审计 ===");
 await audit();
 
 console.log("=== 整库批处理：单篇失败不拖垮整批 ===");
 await batchTests();
+
+console.log("=== 快速修复聊天记录 ===");
+await quickFixTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

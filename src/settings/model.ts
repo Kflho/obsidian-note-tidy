@@ -35,6 +35,8 @@ export interface ImageTransferSettings {
 	chatImageOrder: ChatImageOrder;
 	/** 头部信息全部关闭时，是否在相邻消息之间插入空行 */
 	chatBlankLineBetweenMessages: boolean;
+	/** 粘贴的内容被识别为聊天记录时，自动执行「快速修复聊天记录」（转换外部图片 + 修复排版） */
+	autoFixChatLogOnPaste: boolean;
 	// ---- 通用排版修复 ----
 	/** 行首缩进修复力度：把"用空格写的缩进"改回 Tab，顺带规范引用/列表/标题标记的空白 */
 	textLeadingIndentFix: LeadingIndentMode;
@@ -86,6 +88,8 @@ export interface ImageTransferSettings {
 	imageMenuCopyItem: boolean;
 	/** 在笔记右键菜单里显示「快速设置图片大小（Note Tidy）」 */
 	imageMenuQuickSizeItem: boolean;
+	/** 在笔记右键菜单里显示「快速修复聊天记录（Note Tidy）」 */
+	imageMenuQuickFixItem: boolean;
 	/** 在图片菜单里显示「管理右键菜单…（Note Tidy）」 */
 	imageMenuManageItem: boolean;
 	/** 在文件 / 文件夹的右键菜单里显示「图片功能」二级栏 */
@@ -114,6 +118,9 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	chatIndent: 'tab',
 	chatImageOrder: 'keep',
 	chatBlankLineBetweenMessages: false,
+	// 粘贴聊天记录就顺手修好：默认开启（判定很窄 —— 要有两条"用户名 + 时间戳"的消息头部才算），
+	// 不想让它自动改笔记的在设置里关掉即可，手动那条命令 / 菜单项不受影响
+	autoFixChatLogOnPaste: true,
 	// 默认「保守」：能修掉聊天记录里典型的空格混排，又不会动 Markdown 列表的嵌套缩进
 	textLeadingIndentFix: DEFAULT_LEADING_INDENT_MODE,
 	// 序号与标题级别是「保证式」整理：只修不齐的地方（首项编号不是 1、父子标题差不止一级），
@@ -142,10 +149,11 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	spacingChapterTitle: DEFAULT_SPACING_OPTIONS.chapterTitle,
 	// 状态栏那一格只在选中内容里真的有图片时才出现，默认不开（右下角越干净越好）
 	showSelectionImageCount: false,
-	// 右键菜单：默认插五项（图片功能 / 文本排版 两个二级栏 + 复制图片 / 快速设置大小 / 管理入口），
-	// 不接管菜单，原生项都在
+	// 右键菜单：默认插六项（图片功能 / 文本排版 两个二级栏 + 复制图片 / 快速设置大小 /
+	// 快速修复聊天记录 / 管理入口），不接管菜单，原生项都在
 	imageMenuCopyItem: true,
 	imageMenuQuickSizeItem: true,
+	imageMenuQuickFixItem: true,
 	imageMenuManageItem: true,
 	fileMenuImageSubmenu: true,
 	fileMenuTextSubmenu: true,

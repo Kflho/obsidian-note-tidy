@@ -251,6 +251,12 @@ export const TEXT_SECTION: FieldSection = {
 					control: { type: 'toggle' },
 					disabled: (settings) => !headerIsEmpty(settings),
 				},
+				{
+					key: 'autoFixChatLogOnPaste',
+					name: '粘贴聊天记录时自动修复',
+					desc: '在编辑器里粘贴的内容被识别为聊天记录（两条以上「用户名 + 时间戳」的消息头部）时，自动执行「快速修复聊天记录」：把本文件里引用的外部路径图片收进仓库，并把整篇排版修一遍（空格 / 缩进 / 聊天记录 / 标签 / 公式）。等这次粘贴落盘后才动手，改的是含粘贴内容的正文；不想让它自动改笔记就关掉，需要时用命令面板或右键菜单手动执行',
+					control: { type: 'toggle' },
+				},
 			],
 		},
 	],
