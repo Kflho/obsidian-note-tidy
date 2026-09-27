@@ -620,6 +620,19 @@ async function brokenFormatTests(): Promise<void> {
 	checkTrue("目标格式坏值：导入照样能跑完",
 		noticeLog.messages.some(message => message.includes("没有发现需要转换")),
 		`实际提示：${noticeLog.messages.join(" | ")}`);
+
+	// ③ pngquant 那一档：选它但没填可执行文件路径时，提示要**指名那一项**
+	// （那条路的默认值就是留空，用户最容易在这里卡住；泛泛一句"去设置里选格式"帮不上忙）
+	plugin.settings.vaultConvertFormat = 'pngquant';
+	plugin.settings.pngquantPath = '';
+	noticeLog.messages.length = 0;
+	await tasks.convertEntireVault();
+	checkTrue("pngquant 没填路径：提示指着「pngquant 可执行文件路径」",
+		noticeLog.messages.some(message =>
+			message.includes("pngquant") && message.includes("可执行文件路径")),
+		`实际提示：${noticeLog.messages.join(" | ")}`);
+	checkTrue("pngquant 没填路径：不转任何文件", store.get("笔记.md") === "正文，没有外部图片",
+		`实际内容：${store.get("笔记.md")}`);
 }
 
 // -------------------------------------------------------------------- 运行

@@ -371,12 +371,18 @@ export class ImageTasks implements TaskActions {
 	 *
 	 * 目标格式认不出来时（手改坏了 data.json）**只提示、什么都不做** ——
 	 * 宁可这一次不转，也不猜一个格式去重写用户的图片。
+	 * pngquant 那一档单独说一句：它"读不出来"通常是**没填可执行文件路径**（默认就是空的），
+	 * 提示得指出这一项，否则用户会去目标格式那一栏反复找。
 	 */
 	private prepareConversion(): ConversionReady | null {
 		const ready = this.readConversion();
 		if (ready) return ready;
 
-		new Notice('⚠️ 读不出「转换图片格式」的目标格式：请到设置里选一个（webp / JPEG / PNG）。');
+		new Notice(
+			(this.getSettings().vaultConvertFormat ?? '').toLowerCase() === 'pngquant'
+				? '⚠️ 目标格式选的是 pngquant，但「pngquant 可执行文件路径」还空着：请到设置里填上它，或改用别的目标格式。'
+				: '⚠️ 读不出「转换图片格式」的目标格式：请到设置里选一个（webp / JPEG / PNG / pngquant）。'
+		);
 		return null;
 	}
 

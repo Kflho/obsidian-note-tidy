@@ -509,7 +509,7 @@ npm run lint
 ### v1.4.1
 - 新增：**PNG 可以交给 pngquant 压**（**设置 → 图片导入 → 「转换图片格式」的目标格式 → `PNG（pngquant 压缩）`**）。pngquant 是它自己的有损调色板量化（把 PNG 的颜色数压到最少），专治截图类 PNG 的体积 —— 这是 Image Converter 那条「pngquant executable path」的对应物，行为也对齐：调**你自己装的那份**（[pngquant.org](https://pngquant.org/) 下载，填 **pngquant 可执行文件路径**）、**pngquant 质量档**默认 `65-80`、命令行 `pngquant --quality <min-max> -`（PNG 从 stdin 进、结果从 stdout 出）。**本插件不捆绑、不下载它**：pngquant 是 GPL / 商业双许可的外部程序，打进 0-BSD 的社区插件里既改变分发许可也过不了审查；路径留空＝这一档整步不做，图片保持原样
 - 改变：**转换结果一律照用，不再"转完更大就留原图"。** 判据是"这张图有没有统一成目标格式"（**它是不是 webp**），转出来比原图大也照用转换结果 —— 以前那条"没省下空间就回退原图"会让同一批图片里冒出几个漏网的 png，正是它让"判定优化过没有"这件事没法一眼看出来
-- 说明：pngquant 只吃 PNG（喂别的格式进去它只会报错退出），所以这一档只接 `.png` 源；它压不到你给的 `min` 时会**放弃压缩**（退出码 99）并原样吐回 24-bit PNG，那种情况我们按原图留着。输出仍是 `.png`，所以库里已有的 PNG **名字不变** —— 转换直接写回原文件内容，不产生 `xxx-1.png` 这种副本
+- 说明：pngquant 只吃 PNG（喂别的格式进去它只会报错退出），所以这一档只接 `.png` 源；它压不到你给的 `min` 时会**放弃压缩**（退出码 99）并原样吐回 24-bit PNG，那种情况我们按原图留着。输出仍是 `.png`，所以库里已有的 PNG **名字不变** —— 转换直接写回原文件内容，不产生 `xxx-1.png` 这种副本。选了这一档却还没填路径时，命令会当场提示你填「pngquant 可执行文件路径」那一项（不会含糊地说"去设置里选个格式"）
 - 内部：新增 `src/image/pngquant.ts`（`runPngquant`，只做"喂字节、收字节、非零退出＝这一步不做"）、`ConvertFormat` 多一档 `PNGQUANT`（`src/image/convert.ts` 的 `convertPlanFrom` / `shouldConvertFile` / `plannedExtension`）、设置项 `pngquantPath` / `pngquantQuality`；`convertImageBytes` 新增 `selfPath`（原地覆盖时"目标已存在"是正常的，不是撞名）；规则登记表新增 `image.pngquant`；测试新增 `test/pngquant.test.ts`（用假可执行文件真跑一遍 spawn 那条路）
 
 ### v1.4.0
