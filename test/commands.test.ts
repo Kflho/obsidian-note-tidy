@@ -166,6 +166,8 @@ const PANEL_COMMANDS: string[] = [
 	// 受 tidyConvertFormat 管，入口已记在 OPERATIONS 表里）
 	"convert-images-entire-vault",
 	"convert-images-current-note",
+	// 清理没人引用的图片：同样是"要删文件"的命令，只给命令面板（先弹确认框）
+	"clear-unused-images",
 ];
 
 /**
@@ -575,13 +577,13 @@ async function quickFixTests(): Promise<void> {
 	}
 }
 
-// ------------------------------- 7. 图片格式转换：没装 image converter 时的退路
+// ------------------------------- 7. 图片格式转换：目标格式认不出来时的退路
 /**
- * 没装 image converter 时功能**不该坏**：
- * - 「Image converter：把整个仓库的图片转换为指定格式」只提示去装，一个文件都不动；
- * - 导入外部图片那条路照旧可用，只是保持原格式，并在动手前提示一次（同一会话不重复唠叨）。
+ * 目标格式读不出来（手改过 data.json、老版本留下的 `preset` / `avif`）时功能**不该坏**：
+ * - 「把整个仓库的图片转换为指定格式」只提示去改设置，一个文件都不动；
+ * - 导入外部图片那条路照旧可用，只是保持原格式，而且**不唠叨**（转码是插件自带的，没有依赖）。
  */
-async function noConverterTests(): Promise<void> {
+async function brokenFormatTests(): Promise<void> {
 	installDomStubs();
 
 	const contents = new Map<string, string>([["笔记.md", "正文，没有外部图片"]]);
@@ -590,6 +592,7 @@ async function noConverterTests(): Promise<void> {
 	const manifest = { id: "note-tidy", name: "test", version: "0.0.0" } as PluginManifest;
 	const plugin = new ImageTransferPlugin(app, manifest);
 	await plugin.onload();
+	plugin.settings.vaultConvertFormat = 'preset';
 
 	const tasks = (plugin as unknown as {
 		tasks: {
@@ -600,28 +603,22 @@ async function noConverterTests(): Promise<void> {
 	const note = files[0];
 	if (!note) throw new Error("测试仓库里应该有 1 篇笔记");
 
-	// ① 整库转换：只提示安装，别的一个字都不动
+	// ① 整库转换：只提示去改设置，别的一个字都不动
 	noticeLog.messages.length = 0;
 	await tasks.convertEntireVault();
-	checkTrue("没装插件：整库转换提示去安装",
-		noticeLog.messages.some(message => message.includes("请先安装")),
+	checkTrue("目标格式坏值：整库转换提示去设置里选一个",
+		noticeLog.messages.some(message => message.includes("目标格式")),
 		`实际提示：${noticeLog.messages.join(" | ")}`);
-	checkTrue("没装插件：整库转换不动笔记", store.get("笔记.md") === "正文，没有外部图片", `实际内容：${store.get("笔记.md")}`);
+	checkTrue("目标格式坏值：整库转换不动笔记", store.get("笔记.md") === "正文，没有外部图片", `实际内容：${store.get("笔记.md")}`);
 
-	// ② 导入路径：提示一次去装，且同一会话不重复
+	// ② 导入路径：照旧跑完，保持原格式，不弹任何"去装插件"的提示
 	noticeLog.messages.length = 0;
 	await tasks.transferCurrentNote(note);
-	checkTrue("没装插件：导入时提示一次",
-		noticeLog.messages.filter(message => message.includes("没检测到 image converter")).length === 1,
+	checkTrue("目标格式坏值：导入不唠叨",
+		noticeLog.messages.every(message => !message.includes("image converter")),
 		`实际提示：${noticeLog.messages.join(" | ")}`);
-	checkTrue("没装插件：导入照样能跑完",
+	checkTrue("目标格式坏值：导入照样能跑完",
 		noticeLog.messages.some(message => message.includes("没有发现需要转换")),
-		`实际提示：${noticeLog.messages.join(" | ")}`);
-
-	noticeLog.messages.length = 0;
-	await tasks.transferCurrentNote(note);
-	checkTrue("没装插件：同一会话不重复提示",
-		noticeLog.messages.filter(message => message.includes("没检测到 image converter")).length === 0,
 		`实际提示：${noticeLog.messages.join(" | ")}`);
 }
 
@@ -635,8 +632,8 @@ await batchTests();
 console.log("=== 快速修复聊天记录 ===");
 await quickFixTests();
 
-console.log("=== 没装 image converter 时的退路 ===");
-await noConverterTests();
+console.log("=== 目标格式认不出来时的退路 ===");
+await brokenFormatTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

@@ -1,7 +1,8 @@
 import type { Editor, MarkdownFileInfo, MarkdownView, Plugin, TFile } from 'obsidian';
 import type { ImageTransferSettings } from '../settings';
-import type { TaskActions } from '../tasks';
+import type { PasteImage, TaskActions } from '../tasks';
 import { looksLikeChatLog } from '../text/chat-log';
+import { imageFilesFromClipboard, pastedImageName } from './paste-images';
 
 /**
  * 粘贴聊天记录时自动修好 —— **只修刚粘进来的那一段**（设置里可开关，见 `autoFixChatLogOnPaste`）。
@@ -147,6 +148,32 @@ function offsetOf(editor: Editor, which: 'from' | 'to'): number {
 	}
 }
 
+/**
+ * 把剪贴板里的图片读成字节再交给任务层（`ImageTasks.pasteImages`）。
+ *
+ * 读不出来的那一张只打日志、跳过，其余照旧 —— 与导入那条路一个态度。
+ * 这里**不 await**（事件处理器是同步的），但保证顺序：一张一张读、读完整批再写正文。
+ */
+async function pasteImagesFromClipboard(
+	actions: TaskActions,
+	file: TFile,
+	editor: Editor,
+	from: number,
+	to: number,
+	files: File[],
+	text: string
+): Promise<void> {
+	const images: PasteImage[] = [];
+	for (const file of files) {
+		try {
+			images.push({ name: pastedImageName(file), bytes: await file.arrayBuffer() });
+		} catch (err) {
+			console.error(`❌ 读不出剪贴板里的这张图: ${file.name}`, err);
+		}
+	}
+	await actions.pasteImages(file, editor, from, to, images, text);
+}
+
 export interface PasteSizeWatcherOptions {
 	/** 编辑器安静多久就把这笔丢掉，默认 `PASTE_SIZE_IDLE_MS` */
 	idleMs?: number;
@@ -243,8 +270,14 @@ export class PasteSizeWatcher {
 }
 
 /**
- * 注册"粘贴时自动修好"（main.ts 调用）：文本修复（`autoFixChatLogOnPaste`）与
- * 粘贴图片套尺寸（`autoSetImageSizeOnPaste`）两笔，共用同一套范围判定。
+ * 注册粘贴相关的三笔（main.ts 调用）：
+ *
+ * 1. **粘贴图片由我们接管**（`takeOverImagePaste`，默认开）：剪贴板里带图片文件时自己存
+ *    （见 `ui/paste-images.ts` 的文件头 —— 别的插件那条并发粘贴会丢图）；
+ * 2. **文本修复**（`autoFixChatLogOnPaste`）：刚粘进来的那段像聊天记录就修一遍；
+ * 3. **粘贴图片套尺寸**（`autoSetImageSizeOnPaste`）：别人家的粘贴也盯着补尺寸。
+ *
+ * 后两笔共用同一套范围判定（`[粘贴起点, 光标处)`）。
  *
  * @param getSettings 开关实时读取（设置面板改完立刻生效，不用重载插件）
  */
@@ -277,16 +310,32 @@ export function registerPasteAutoFix(
 	const sizeWatcher = new PasteSizeWatcher();
 	plugin.register(() => { sizeWatcher.dispose(); });
 
-	// ① 粘贴：只看一眼"粘在哪儿"，不判定也不动手（此刻内容还没进文档）；
-	//    处理函数是**具名函数**：它是观察者，故意不 preventDefault ——
-	//    那会把这次粘贴整个吞掉，而我们要的恰恰是"粘进去之后顺手修好"。
+	// ① 粘贴：先看这次粘贴里有没有图片文件 —— 有就是**我们的活**（自己存图 + 写正文），
+	//    没有才回到"只看一眼粘在哪儿、等编辑器变化"那套观察者路子。
 	const handlePaste = (evt: ClipboardEvent, editor: Editor, info: MarkdownView | MarkdownFileInfo): void => {
 		const file = info.file ?? null;
 		if (!file) return;
 
 		const start = Math.min(offsetOf(editor, 'from'), offsetOf(editor, 'to'));
 
-		// 图片尺寸这一笔**谁接管这次粘贴都要跟着**：Image Converter 会 preventDefault 自己
+		// 粘贴图片：剪贴板里带图片文件时我们自己来（`takeOverImagePaste`，默认开）。
+		// 别的插件的自动粘贴是并发跑的，一次粘多张会算出同一个输出名、后写的直接丢图
+		// （2026-09 用户实测"粘两张只剩第一张"），所以这件事得由一张一张来的我们做。
+		// 两个前提：这次粘贴**没人管**（别人 preventDefault 了就说明它已经在存这些图了 ——
+		// Image Converter 那边靠它的「Never process filenames」让开，设置面板上写着），
+		// 以及开关开着。接下来尺寸与排版都在 `pasteImages` 里顺着做掉，不再走下面那两笔。
+		const images = getSettings().takeOverImagePaste === false || evt.defaultPrevented
+			? []
+			: imageFilesFromClipboard(evt.clipboardData);
+		if (images.length > 0) {
+			evt.preventDefault();
+			const to = Math.max(offsetOf(editor, 'from'), offsetOf(editor, 'to'));
+			const text = evt.clipboardData?.getData('text/plain') ?? '';
+			void pasteImagesFromClipboard(actions, file, editor, start, to, images, text);
+			return;
+		}
+
+		// 图片尺寸这一笔**谁接管这次粘贴都要跟着**：别的插件会 preventDefault 自己
 		// 处理剪贴板里的图片文件，但它同样把图片存进仓库、把链接插进正文 —— 那正是要套尺寸的图片
 		if (getSettings().autoSetImageSizeOnPaste === true) {
 			sizeWatcher.schedule({ editor, file, start });

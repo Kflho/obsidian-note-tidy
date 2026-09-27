@@ -40,7 +40,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'convert-images-entire-vault',
-		name: 'Image converter：把整个仓库的图片转换为指定格式',
+		name: '把整个仓库的图片转换为指定格式',
 		callback: async () => {
 			await tasks.convertEntireVault();
 		}
@@ -48,7 +48,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'convert-images-current-note',
-		name: 'Image converter：把当前笔记的图片转换为指定格式',
+		name: '把当前笔记的图片转换为指定格式',
 		editorCallback: async (_editor: Editor, ctx: MarkdownView | MarkdownFileInfo) => {
 			await tasks.convertNoteImages(currentFile(ctx));
 		}
@@ -59,6 +59,14 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 		name: TIDY_IMAGES_LABEL,
 		callback: async () => {
 			await tasks.tidyImages(true);
+		}
+	});
+
+	plugin.addCommand({
+		id: 'clear-unused-images',
+		name: '清理没人引用的图片',
+		callback: async () => {
+			await tasks.clearUnusedImagesWithConfirm();
 		}
 	});
 

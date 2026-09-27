@@ -8,10 +8,8 @@
  *   2. 逐字节比对：大小一样但内容不同要拆开；读不动的文件单独一组（宁可少合并）
  *   3. 留哪张：引用最多的优先，一样多取名字最小的（结果可复现）
  *   4. 引用改写：`![[名]]` / `[[名]]` / `![](.../名)` / canvas 都改到，且不误伤长名字
- *   5. 与 Clear Unused Images 对接的命令 ID 不能写错
  */
 import {
-	CLEAR_UNUSED_IMAGES_COMMAND,
 	chooseKeeper,
 	collectImageTargets,
 	countImageReferences,
@@ -164,12 +162,6 @@ function targetTests(): void {
 	check("抽取：空文本", collectImageTargets(""), []);
 }
 
-// ------------------------------------------------------------ 6. 命令 ID
-function commandIdTests(): void {
-	check("Clear Unused Images 的命令 ID 与插件里的一致",
-		CLEAR_UNUSED_IMAGES_COMMAND, "oz-clear-unused-images:clear-images-obsidian");
-}
-
 // -------------------------------------------------------------------- 运行
 console.log("=== 1. 扩展名与粗分组 ===");
 groupTests();
@@ -185,9 +177,6 @@ referenceTests();
 
 console.log("=== 5. 目标抽取 ===");
 targetTests();
-
-console.log("=== 6. 命令 ID ===");
-commandIdTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

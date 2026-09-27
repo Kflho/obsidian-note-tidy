@@ -162,7 +162,7 @@ async function resolveTests(): Promise<void> {
 // ------------------------------------------- 4. 笔记里嵌的图片（格式转换要用）
 /**
  * `collectLinkedImageFiles`：把一篇笔记里 `![[…]]` 嵌的图片解析成文件清单。
- * 「Image converter：把当前笔记的图片转换为指定格式」靠它确定范围。
+ * 「把当前笔记的图片转换为指定格式」靠它确定范围。
  */
 async function linkedImageTests(): Promise<void> {
 	const app = makeApp({

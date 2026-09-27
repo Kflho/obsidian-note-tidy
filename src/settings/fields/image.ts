@@ -53,11 +53,10 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'vaultConvertFormat',
 				name: '「转换图片格式」的目标格式',
-				desc: '命令「把整个仓库 / 当前笔记的图片转换为指定格式」按它决定转成什么，「整理图片」开着「整理时转换图片格式」时也用这一项。「跟随预设」＝按 Image Converter 当前选中的转换预设；其余选项直接点名格式（质量与缩放仍照预设）。动图（gif）与已经是目标格式的图片一律跳过，转换后扩展名会变（如 png → webp），链接由 Obsidian 自己更新',
+				desc: '命令「把整个仓库 / 当前笔记的图片转换为指定格式」按它决定转成什么，「整理图片」开着「整理时转换图片格式」时也用这一项。转码用的是插件自带的编码器（浏览器 canvas），不依赖别的插件；动图（gif）与已经是目标格式的图片一律跳过，转换后扩展名会变（如 png → webp），链接由 Obsidian 自己更新',
 				control: {
 					type: 'dropdown',
 					options: {
-						preset: '跟随 Image Converter 的预设',
 						webp: 'WEBP（推荐）',
 						jpg: 'JPEG',
 						png: 'PNG',
@@ -65,9 +64,26 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 				},
 			},
 			{
-				key: 'handOffImportedImages',
-				name: '导入的图片交给 Image Converter 转格式',
-				desc: '把收进仓库的外部图片顺手交给 Image Converter 转换（用它当前选中的转换预设，例如 png/jpg → webp），链接直接写成转换后的文件名。它的自动转换只认"剪贴板里带图片文件"的粘贴，看不到本插件导入的 file:///D:\\… 文本路径，所以不交接的话图片会一直保持原格式。它没安装 / 没启用 / 转换失败时按原格式导入，不影响图片进库',
+				key: 'convertQuality',
+				name: '转换质量',
+				desc: '1–100，默认 75。JPEG / WEBP 用它决定压缩程度（PNG 无损，忽略这一项）。调低省空间、小字更容易糊',
+				control: { type: 'text', placeholder: '75' },
+				coerce: (value) => {
+					const num = Number(typeof value === 'string' ? value.trim() : NaN);
+					if (!Number.isFinite(num)) return '75';
+					return String(Math.min(100, Math.max(1, Math.round(num))));
+				},
+			},
+			{
+				key: 'convertImportedImages',
+				name: '导入的图片转成目标格式',
+				desc: '把收进仓库的外部图片顺手转成上面的目标格式（例如 png/jpg → webp），链接直接写成转换后的文件名。转码用插件自带的编码器，不依赖别的插件；解不开的格式（HEIC / TIFF 这类）与转完更大的图片按原格式导入，不影响图片进库',
+				control: { type: 'toggle' },
+			},
+			{
+				key: 'takeOverImagePaste',
+				name: '粘贴图片由本插件接管',
+				desc: '在编辑器里粘贴图片文件时，由本插件自己存进仓库（一张一张、名字不撞、顺手转成目标格式）并写好链接 —— 一次粘多张也不会漏。**建议同时把 Image Converter 的「Never process filenames」填 `*`**，让它的自动粘贴/拖放处理让开，免得两边各存一份。关掉后粘贴恢复交给别的插件（或 Obsidian 默认行为）',
 				control: { type: 'toggle' },
 			},
 		],
@@ -97,7 +113,7 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'autoSetImageSizeOnPaste',
 				name: '粘贴图片时自动套用默认尺寸',
-				desc: '把刚粘进笔记的图片按上面的默认宽度 / 高度加上尺寸（与「快速设置图片大小」用的是同一套参数）—— 粘贴的截图、Image Converter 转完插进来的图，以及粘贴文本里带的图片链接都算。只改刚粘进来的那一小段，笔记其余部分一个字符都不动，撤销一次即可回退；粘贴多张图时逐张处理，不会漏。宽度留空（那是"移除尺寸"模式）或尺寸填错时这一步自动跳过；粘贴进来的图片已经带着尺寸时，照上面的「覆盖已有尺寸」开关决定动不动它',
+				desc: '把刚粘进笔记的图片按上面的默认宽度 / 高度加上尺寸（与「快速设置图片大小」用的是同一套参数）—— 本插件自己接管的粘贴、别的插件存下的截图，以及粘贴文本里带的图片链接都算。只改刚粘进来的那一小段，笔记其余部分一个字符都不动，撤销一次即可回退；粘贴多张图时逐张处理，不会漏。宽度留空（那是"移除尺寸"模式）或尺寸填错时这一步自动跳过；粘贴进来的图片已经带着尺寸时，照上面的「覆盖已有尺寸」开关决定动不动它',
 				control: { type: 'toggle' },
 			},
 		],
@@ -109,7 +125,7 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'tidyConvertFormat',
 				name: '整理时转换图片格式',
-				desc: '执行「整理图片」时，顺手把还不是目标格式的图片交给 Image Converter 转换（目标格式取上面「转换图片格式」那一项，默认 webp）。动图（gif）、已经是目标格式的图片、转完没省下空间的图片一律保持原样；没装 Image Converter 时这一步自动跳过，合并重复副本与清理附件照常执行',
+				desc: '执行「整理图片」时，顺手把还不是目标格式的图片转成目标格式（目标格式取上面「转换图片格式」那一项，默认 webp）。转码用插件自带的编码器，不依赖别的插件；动图（gif）、已经是目标格式的图片、转完没省下空间的图片一律保持原样',
 				control: { type: 'toggle' },
 			},
 			{
@@ -121,7 +137,7 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'autoClearUnusedImages',
 				name: '整理时清理没人引用的附件',
-				desc: '执行「整理图片」时顺手跑一次 Clear Unused Images 插件（oz-clear-unused-images）的「清理未使用图片」命令 —— 我们负责合并"内容相同的重复副本"，它负责"没有任何笔记引用的附件"，正好互补。它默认删到仓库的 .trash 里，可还原；没装那个插件时这一步自动跳过，不影响合并',
+				desc: '执行「整理图片」时顺手清一遍"没人引用的图片"：扫描全库笔记与 canvas 里出现过的图片文件名，一张都没被提到的图片送进回收站（可还原）。只清图片，pdf、音频等其它附件一个都不碰；命令面板里还有一条单独的「清理没人引用的图片」，那一条会先让你确认',
 				control: { type: 'toggle' },
 			},
 		],
