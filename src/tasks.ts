@@ -15,6 +15,7 @@ import type { ImageSizeOptions } from './image/size';
 import { transferExternalImages, transferImagesInText } from './image/transfer';
 import { resolveIndent } from './text/chat-log';
 import type { ChatLogOptions } from './text/chat-log';
+import { dedentBy, keepEdgeNewlines, placeBlockAt, resolveRangeIndent } from './text/context-indent';
 import { getSpacingOptions } from './settings';
 import type { ImageTransferSettings } from './settings';
 import { resolveLeadingIndentMode } from './text/indent';
@@ -532,7 +533,8 @@ export class ImageTasks implements TaskActions {
 	 * 选中一段再排版就没有这个歧义：**选中的是什么就排什么**。
 	 *
 	 * 排版结果用 `editor.replaceRange` 写回编辑器，因此**不走写盘**，
-	 * 也就不会碰到笔记里没选中的部分（撤销一次即可回退）。
+	 * 也就不会碰到笔记里没选中的部分（撤销一次即可回退）。选中内容的缩进跟随上下文
+	 * （见 `typesetEditorRange` 与 `text/context-indent.ts`）：选区连同它所在的那一层一起排。
 	 */
 	async typesetSelection(file: TFile, editor: Editor): Promise<void> {
 		const from = editor.posToOffset(editor.getCursor('from'));
@@ -570,6 +572,9 @@ export class ImageTasks implements TaskActions {
 	 * 那一段的范围是确定的（粘贴前的光标位置 → 粘贴后的光标位置），所以不需要猜
 	 * "哪几行是作者自己写的"，也不会碰到笔记的其它部分。
 	 *
+	 * 排版时缩进跟随上下文（在列表项里粘贴就与列表项对齐）、首尾换行数保持粘贴前的样子，
+	 * 见 `typesetEditorRange` 与 `text/context-indent.ts`。
+	 *
 	 * @returns 是否真的改了（调用方据此决定要不要提示）
 	 */
 	async fixPastedRange(file: TFile, editor: Editor, start: number): Promise<boolean> {
@@ -587,6 +592,12 @@ export class ImageTasks implements TaskActions {
 	 * 两步与「快速修复聊天记录」一致：先把这段里 `file:///D:\…` 这类图片收进仓库，再排版。
 	 * 结果写回编辑器（不写盘）。
 	 *
+	 * 另外做两件"只在这条路上说得清"的事（都在 `text/context-indent.ts`）：
+	 *
+	 * - **跟随上下文缩进**：按起点那一行的续行前缀（光标处的空白 / `>` 链）给整段每一行加前缀，
+	 *   在列表项里粘贴不再"第一行缩进、其余顶格"；上下文自己对不上时整块顶格；
+	 * - **接缝不变**：排版结果首尾的换行数还原成这一段原来的样子，粘贴块与上下文之间不再多出空行。
+	 *
 	 * 期间用户又改了这一段（或这段已被替换 / 删除）时**不动它**：拿旧的偏移去写回，
 	 * 只会把他刚打的字覆盖掉。
 	 */
@@ -598,22 +609,34 @@ export class ImageTasks implements TaskActions {
 	): Promise<'fixed' | 'unchanged' | 'skipped'> {
 		if (to <= from) return 'skipped';
 
-		const fromPos = editor.offsetToPos(from);
+		// 缩进前缀按整篇算：这一段落在笔记的哪一层，只有全文知道
+		const indent = resolveRangeIndent(editor.getValue(), from, to);
+
+		const fromPos = editor.offsetToPos(indent.from);
 		const toPos = editor.offsetToPos(to);
+		// 记住替换范围内的原文：异步期间它变了就不写回（免得覆盖用户刚输入的内容）
 		const text = editor.getRange(fromPos, toPos);
-		if (!text.trim()) return 'skipped';
+
+		// 排版只作用在"这一段自己的文字"上：起点之前那截已有缩进另算
+		const pasted = editor.getRange(editor.offsetToPos(from), toPos);
+		if (!pasted.trim()) return 'skipped';
+
+		// 先把这一段原本那一层缩进剥掉，让流水线看到"顶格的这一段"；
+		// 那一层由 applyIndentPrefix 在排完版后按光标处补回去（顺序反了会吃掉正文自己的缩进）
+		const content = dedentBy(pasted, indent.baseIndent);
 
 		// ① 这段里的外部路径图片 → 收进仓库并换成内部链接
-		const transferred = await transferImagesInText(this.app, this.getSettings(), file, text);
+		const transferred = await transferImagesInText(this.app, this.getSettings(), file, content);
 		// ② 文本排版（只作用在这段文字上）
 		const typeset = formatNoteText(transferred.content, this.getTextPipelineOptions());
+		// ③ 整块落到光标那一层（块的缩进就是光标处那一层，不再往上加；见 placeBlockAt）
+		const result = keepEdgeNewlines(pasted, placeBlockAt(typeset, indent.prefix));
 
-		if (!transferred.changed && typeset === text) return 'unchanged';
+		if (!transferred.changed && result === text) return 'unchanged';
 
-		// 异步期间这段被改过就别写回（免得覆盖用户刚输入的内容）
 		if (editor.getRange(fromPos, toPos) !== text) return 'skipped';
 
-		editor.replaceRange(typeset, fromPos, toPos);
+		editor.replaceRange(result, fromPos, toPos);
 		return 'fixed';
 	}
 

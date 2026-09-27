@@ -33,7 +33,7 @@ export interface ImageTransferSettings {
 	chatIndent: ChatIndent;
 	/** 图文消息中图片相对文字的位置 */
 	chatImageOrder: ChatImageOrder;
-	/** 头部信息全部关闭时，是否在相邻消息之间插入空行 */
+	/** 相邻消息之间是否留空行（总开关，与头部信息开不开无关）：关（默认）时源文里消息之间的空行也一并去掉 */
 	chatBlankLineBetweenMessages: boolean;
 	/** 相邻消息的时间戳与粘贴顺序不一致时，是否按时间先后输出 */
 	chatSortByTime: boolean;

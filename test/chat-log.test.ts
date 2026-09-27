@@ -180,18 +180,24 @@ function goldenTests(): void {
 		`${HEAD}\t${IMG}\n\n笔记`
 	);
 
-	// 空行：源文里的空行会被保留
+	// 空行：源文里消息之间的空行归「消息之间插入空行」总开关管（默认关 ⇒ 收掉）
 	const TWO = "张三 2024/1/5 14:30:25\n你好\n李四 2024/1/5 14:31:02\n在的";
 	const TWO_BLANK = "张三 2024/1/5 14:30:25\n你好\n\n李四 2024/1/5 14:31:02\n在的";
+	const TWO_COMPACT = "张三: 2024/01/05 14:30:25\n\t你好\n李四: 2024/01/05 14:31:02\n\t在的\n";
+	const TWO_ONE_BLANK = "张三: 2024/01/05 14:30:25\n\t你好\n\n李四: 2024/01/05 14:31:02\n\t在的\n";
+	check("相邻消息_默认不留空行", formatChatLog(TWO, D), TWO_COMPACT);
+	check("源文空行被收掉", formatChatLog(TWO_BLANK, D), TWO_COMPACT);
 	check(
-		"相邻消息_默认不留空行",
-		formatChatLog(TWO, D),
-		"张三: 2024/01/05 14:30:25\n\t你好\n李四: 2024/01/05 14:31:02\n\t在的\n"
+		"源文多空行也收掉",
+		formatChatLog("张三 2024/1/5 14:30:25\n你好\n\n\n\n李四 2024/1/5 14:31:02\n在的", D),
+		TWO_COMPACT
 	);
+	check("开关打开_源文没空行也留一行", formatChatLog(TWO, opts({ blankLineBetweenMessages: true })), TWO_ONE_BLANK);
+	check("开关打开_源文空行收成一行", formatChatLog(TWO_BLANK, opts({ blankLineBetweenMessages: true })), TWO_ONE_BLANK);
 	check(
-		"源文空行被保留",
-		formatChatLog(TWO_BLANK, D),
-		"张三: 2024/01/05 14:30:25\n\t你好\n\n李四: 2024/01/05 14:31:02\n\t在的\n"
+		"开关打开_有头部信息也留一行",
+		formatChatLog(TWO, { ...D, blankLineBetweenMessages: true }),
+		TWO_ONE_BLANK
 	);
 
 	// 空行：头部信息全关时可选择插入空行
@@ -208,11 +214,9 @@ function goldenTests(): void {
 		formatChatLog(TWO_BLANK, { ...ALL_OFF, blankLineBetweenMessages: true }),
 		"\t你好\n\n\t在的\n"
 	);
-	check(
-		"有头部信息时插空行设置不生效",
-		formatChatLog(TWO, { ...D, blankLineBetweenMessages: true }),
-		"张三: 2024/01/05 14:30:25\n\t你好\n李四: 2024/01/05 14:31:02\n\t在的\n"
-	);
+	// 开关现在是总开关：有头部信息时同样管用（旧版只对"头部全关"生效）
+	check("有头部信息时插空行设置也生效", formatChatLog(TWO, { ...D, blankLineBetweenMessages: true }), TWO_ONE_BLANK);
+	check("有头部信息时源文空行同样收掉", formatChatLog(TWO_BLANK, D), TWO_COMPACT);
 	check(
 		"全关_插空行_末条笔记不缩进",
 		formatChatLog("张三 2024/1/5 14:30:25\n你好\n李四 2024/1/5 14:31:02\n在的\n\n笔记", {
@@ -228,11 +232,11 @@ function goldenTests(): void {
 	check("空行不增长_复跑", formatChatLog(GROWTH_OUT, D), GROWTH_OUT);
 
 	// 头部行自带缩进（" \t李四"）时，那截缩进不该以"纯空白行"的形式留在两条消息之间
-	check(
-		"头部行缩进不留残渣",
-		formatChatLog("张三 2024/1/5 14:30:25\n你好\n\n \t李四 2024/1/5 14:31:02\n在的", D),
-		"张三: 2024/01/05 14:30:25\n\t你好\n\n李四: 2024/01/05 14:31:02\n\t在的\n"
-	);
+	const HEAD_INDENT_RESIDUE = "张三 2024/1/5 14:30:25\n你好\n\n \t李四 2024/1/5 14:31:02\n在的";
+	check("头部行缩进不留残渣", formatChatLog(HEAD_INDENT_RESIDUE, D), TWO_COMPACT);
+	check("头部行缩进不留残渣_留空行时也只有一行",
+		formatChatLog(HEAD_INDENT_RESIDUE, opts({ blankLineBetweenMessages: true })),
+		TWO_ONE_BLANK);
 
 	// 同一行的多条消息（消息之间只有一个空格）—— 历史 bug：那截空格已被上一条正文 trim 掉，
 	// 而 `substring(start, end)` 在 start > end 时会**交换参数**（slice 才是返回空串），
@@ -516,11 +520,16 @@ function fuzzConvergenceTests(): void {
 					// 插入空行等），都属于预期行为，只记录基准
 					blankRun = maxNewlineRun(next);
 				} else {
-					// 此时 current 已经是排版结果，不允许再丢字或让空行变厚
+					// 此时 current 已经是排版结果，不允许再丢字或让空行变厚。
+					//
+					// 基准最少按"一个空行"（连续换行 2）算：病态输入的**消息边界本身**要几轮才定下来
+					// （`[图片] 14:30:25` 这类伪头部第一轮认不出是消息），后一轮才认出"这两条相邻"
+					// 并按「消息之间插入空行」补上一行 —— 那是一次性的，不是"每执行一次厚一层"。
 					const nextBlankRun = maxNewlineRun(next);
+					const allowed = Math.max(blankRun, 2);
 					checkTrue(
 						`病态输入空行累积 ${name} [${label}]`,
-						nextBlankRun <= blankRun,
+						nextBlankRun <= allowed,
 						`  第 ${passes} 次：最长连续换行 ${blankRun} → ${nextBlankRun}`
 					);
 					blankRun = nextBlankRun;

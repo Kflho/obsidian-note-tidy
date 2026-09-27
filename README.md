@@ -77,6 +77,7 @@ The layout is configurable (see **Settings** below):
 - Toggle each piece of header info independently — username, date, time
 - Choose the body indent — tab, 2 spaces, 4 spaces, or none
 - When a message contains both an image and text, choose whether the image goes above or below the text (or keep the original order)
+- **Blank line between messages** (off by default) — a master switch, independent of the header toggles: off keeps adjacent messages tight (blank lines the paste itself carried are dropped too), on leaves exactly one empty line between them
 - **Adjacent messages in time order** (on by default) — see below
 - **Drop @-mentions** (off by default) — see below
 - Choose how aggressively leading indentation is rewritten (off / smart / strict) — this also switches the block-marker fixes on and off
@@ -96,7 +97,7 @@ The layout is configurable (see **Settings** below):
 1. images the selection references by absolute path (`file:///D:\…`, `C:\…`) are copied into the vault and the links become `![[…]]`;
 2. the layout rules run on that text only.
 
-The result replaces the selection in the editor (so <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it, and nothing is written to disk), and the menu entry only appears while something is selected. Practical use: paste a chat log, select it, run this — the messages around it are never touched, so no pass has to guess where a message ends.
+The result replaces the selection in the editor (so <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it, and nothing is written to disk), and the menu entry only appears while something is selected. Practical use: paste a chat log, select it, run this — the messages around it are never touched, so no pass has to guess where a message ends. The indent and the seams work exactly as they do for a paste (see **Fix on paste** below): a selection inside a list item or a quote stays on that level, and the line breaks around it are left as they were.
 
 **@-mentions can be dropped** (**Settings → 排版格式 → 聊天记录 → 去掉 @ 提及**, off by default, because it deletes words): in a group chat every reply starts with `@昵称`, and the nickname points at nobody once the log is in your vault. With the switch on:
 
@@ -116,6 +117,8 @@ The result replaces the selection in the editor (so <kbd>Ctrl</kbd>+<kbd>Z</kbd>
 How it knows which part is "just pasted": the paste event itself is only used to note *where* the paste happened (that event fires before the text is in the document — the insertion is done by CodeMirror's own handler afterwards), and as soon as the editor reports the change, everything from that position to the cursor is the pasted text. That range is read back, checked with the same "does this look like a chat log" test, and then reformatted in place: the images it references by absolute path are copied into the vault, the layout rules run on it, and the result is written back through the editor. So:
 
 - **your own lines are never touched** — no pass has to guess where a message ends (see the selection command above for the manual version);
+- **the indent follows where you pasted.** The layout engine only ever sees the pasted text, so it used to start at column 0 and leave the first line wherever the cursor was — paste inside a list item (after pressing Enter, where the editor already indented you by two spaces) and the block landed half in, half out. The pasted block now sits on top of the indentation at the cursor (the leading whitespace and any `>` quotes of that line), every line of it, headers included: **whatever indent the cursor sits at is the indent the block gets**, plus the body indent from your settings (the block's own level is stripped before formatting and put back afterwards, so the two can never eat each other — with tabs on both sides, pasting at one tab used to come out at one tab instead of two). Nothing else is consulted — looking at the neighbouring lines to veto it ("both are flush, so you may not be indented either") was tried and removed, since putting the cursor at a column is an explicit instruction;
+- **the seam is left alone.** The formatter always ends a chat log with a newline, which used to add a blank line between the pasted block and whatever followed it. The number of line breaks before and after the pasted text is now restored to what it was, so a paste never changes the spacing around it;
 - nothing is written to disk by the plugin: the change goes through the editor's normal save path, and one <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it;
 - if the editor never reports a change (that paste was swallowed by another plugin, or the view is not a Markdown view), the pending fix is dropped after 5 seconds — better to do nothing than to touch the note.
 
@@ -386,9 +389,9 @@ Image size:
 
 Chat log, indentation and the other layout options are grouped under **排版格式** below.
 
-All defaults reproduce the previous layout, so existing notes are not reformatted until you change a setting. The one default that can rearrange a *fresh* paste is **Adjacent messages in time order** (see section 3): it only acts when a paste arrives with its messages out of order, and notes that are already formatted carry no timestamps for it to compare, so they are never touched.
+All defaults reproduce the previous layout, so existing notes are not reformatted until you change a setting. The two defaults that can rearrange a *fresh* paste are **Adjacent messages in time order** (see section 3) — it only acts when a paste arrives with its messages out of order, and notes that are already formatted carry no timestamps for it to compare, so they are never touched — and **Blank line between messages** being off, which drops the empty lines a QQ / WeChat paste often carries *between* messages.
 
-Blank lines already present in the source text are always preserved.
+Blank lines inside your own text are always preserved; the only blank lines the layout removes are the ones sitting between two adjacent chat-log messages, and only while **Blank line between messages** is off.
 
 **代码格式 (code format)** — how the source code is written:
 
@@ -435,7 +438,7 @@ Chat log:
 - **Image position in mixed messages** — image above the text, below the text, or keep the original order
 - **Adjacent messages in time order** — on by default. Compares the timestamps of adjacent messages and emits them in time order, which fixes the QQ / WeChat paste that groups the texts together and appends the images at the end. Only messages separated by blank space are reordered (your own content between messages is never moved), and only when every message in the run has a comparable timestamp of the same shape. See section 3
 - **Drop @-mentions** — off by default (it deletes words). Removes `@昵称` from message bodies: `@` must start a word (so `foo@bar.com` is untouched), a line holding nothing but a mention goes away entirely, and the rest of the line is kept. It only acts while a chat log is being formatted, so a region that no longer carries timestamps (because the headers are hidden) is never rewritten. See section 3
-- **Blank line between messages** — only available when username, date and time are all turned off; inserts an empty line between adjacent messages so they stay visually distinct
+- **Blank line between messages** — off by default, and a **master switch** independent of the header toggles: off keeps adjacent messages tight and **drops the empty lines the source text carries between them** (a QQ / WeChat paste usually has one, which is why "no blank lines" used to still show blank lines), on leaves exactly one empty line between adjacent messages. Blank space between a message and content of your own is never touched, and a message with no body is not separated either. See section 3
 - **Fix on paste** — on by default; pasting a chat log (two or more message headers) tidies **just the text you pasted**: the images it references by absolute path are copied into the vault, the layout rules run on that range, and the result is written back through the editor (no disk write by the plugin, one <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it). The rest of the note is never touched — see section 3
 
 Status bar:
@@ -484,6 +487,7 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 | `src/text/list-numbering.ts` | list numbering: every list starts at 1 (lists that already start at 1 are never touched) |
 | `src/text/heading-levels.ts` | heading levels: a sub-heading sits exactly one level below its parent; when several headings change, all new levels are computed from the original ones in one pass |
 | `src/text/chat-log.ts` | chat log layout (username / date / time toggles, indent, image order, blank lines), adjacent messages put back in time order, `@mention` stripping, and the cut that keeps your own top-level lines out of the message above them |
+| `src/text/context-indent.ts` | context indent and seams for a *range* (fix on paste / typeset selection): align the block to the cursor's indentation, restore the leading/trailing line breaks |
 | `src/text/math-wrap.ts` | plain-text math detection — `矩阵 A`, `n维`, `V(F)`, `x = 0`, `λ` → `$…$`, plus the variable table that reads variables out of the note's existing formulas |
 | `src/text/inline-scan.ts` | shared inline protection — code spans, links, URLs, tags, comments, existing formulas; **also the single place that recognises and pairs `$…$` / `$$…$$`** (tag layout and block sorting ask `mathOpaqueLines` whether a line may be touched) |
 | `src/text/indent.ts` | general layout fixes — leading indentation (4 spaces = 1 tab) |
@@ -524,6 +528,12 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 3. Reload Obsidian and enable **Note Tidy** (the old entry can be removed)
 
 ## Changelog
+
+### v1.3.16
+- Fixed: **pasting a chat log no longer adds an indent of its own.** The layout engine only ever sees the pasted text, so the block started at column 0 while its first line stayed wherever the cursor was — paste inside a list item after pressing Enter (where the editor already indented you by two spaces) and the block landed half in, half out. With the cursor indent and **body indent** both written as tabs it came out one level short or one level deep, depending on which pass looked at it. The whole block now lands on the indentation at the cursor (the leading whitespace and any `>` quotes of that line), every line of it: **whatever indent the cursor sits at is the indent the block gets**, and nothing else is consulted. The block's own level is stripped before formatting and put back afterwards, so the two can never eat each other. The same goes for **typeset just the selection**. See section 3
+- Fixed: **a paste no longer leaves a blank line behind it.** The formatter always ends a chat log with a newline, which the editor turned into an extra empty line between the pasted block and the text below. The number of line breaks before and after the pasted range is restored to what it was, so a paste never changes the spacing around it
+- Fixed: **"blank line between messages" is a master switch now** (**Settings → 排版格式 → 聊天记录 → 消息之间插入空行**, off by default). It used to appear only while username, date and time were all hidden, and it only ever *added* a blank line — the empty line a QQ / WeChat paste carries *between* messages stayed put, which is the "I turned the blank lines off and still get blank lines" report. Off now means adjacent messages are tight (the blank lines the source carries between them are dropped as well), on means exactly one empty line; blank space next to content of your own, or next to a message with no body, is never touched
+- Internal: new `src/text/context-indent.ts` (`resolveRangeIndent` / `commonIndent` / `dedentBy` / `placeBlockAt` / `applyIndentPrefix` / `keepEdgeNewlines`), shared by the paste fix and the selection command; rule `cross.range-indent` added to the registry (with the regenerated `docs/规则登记表.md`) and `test/context-indent.test.ts` covers it, including a real `ImageTasks.fixPastedRange` run through an editor stub. The field-table option `legacyDesc` is gone — the blank-line switch no longer changes its wording per header toggle, so both render paths share one `desc`
 
 ### v1.3.15
 - New: **typeset just the selection** — command **排版选中的内容**, and the entry **排版选中内容（Note Tidy）** in the note right-click menu (shown only while something is selected; switch **Settings → Note Tidy → 右键菜单 → 「排版选中内容」菜单项**, on by default). It runs the same two steps as the quick chat-log fix, but scoped to the selection: absolute-path images the selection references are copied into the vault and re-linked, then the layout rules run on that text alone, and the result replaces the selection through the editor — one <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back, nothing is written to disk. Formatting a whole note has to decide where a message body ends; a selection has no such ambiguity, which is the entire point of having this entry. See section 3

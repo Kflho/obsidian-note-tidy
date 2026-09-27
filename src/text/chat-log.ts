@@ -24,7 +24,14 @@ export interface ChatLogOptions {
 	indent: string;
 	/** 图片与文字的相对位置 */
 	imageOrder: ChatImageOrder;
-	/** 头部信息全部关闭时，是否在相邻消息之间插入空行作为分隔 */
+	/**
+	 * 相邻消息之间是否留空行（**总开关**，与头部信息开不开无关）：
+	 * - 关（默认）：消息紧挨着，**源文里带的空行也去掉**（QQ / 微信 复制出来的记录常在消息之间带空行，
+	 *   而它们本来就由头部或缩进分开）；
+	 * - 开：相邻消息之间恰好留一行（源文里空了几行也只留一行）。
+	 *
+	 * 中间夹着作者自己的正文时不算"相邻消息"，那一段空白原样保留。
+	 */
 	blankLineBetweenMessages: boolean;
 	/** 相邻消息的时间戳与粘贴顺序不一致时，是否按时间先后输出（见 sortAdjacentMessages） */
 	sortByTime: boolean;
@@ -32,7 +39,13 @@ export interface ChatLogOptions {
 	stripMentions: boolean;
 }
 
-/** 默认行为与旧版本完全一致：用户名/日期/时间全显示、Tab 缩进、不调整图片顺序、不加空行 */
+/**
+ * 默认：用户名/日期/时间全显示、Tab 缩进、不调整图片顺序、相邻消息之间不留空行。
+ *
+ * ⚠️ 「不留空行」现在连**源文里消息之间的空行**一起收掉（见 `blankLineBetweenMessages`），
+ * 所以默认值不再等于"旧版本原样"：已经排好版的聊天记录不含时间戳，不会被重新排版，
+ * 只有**新粘进来的**记录才会看出差别。
+ */
 export const DEFAULT_CHAT_LOG_OPTIONS: ChatLogOptions = {
 	showUsername: true,
 	showDate: true,
@@ -292,9 +305,7 @@ interface OutputBlock {
 	key: number | null;
 	/** 时间戳里写了日期（键是"年月日时分秒"），false 表示只有"时分秒" */
 	hasDate: boolean;
-	/** 这条消息没有头部行（用户名/日期/时间全关），只有正文 */
-	bodyOnly: boolean;
-	/** 这条消息真的输出了正文 */
+	/** 这条消息真的输出了正文（只有头部行时为 false） */
 	hasBody: boolean;
 }
 
@@ -419,6 +430,22 @@ function sortAdjacentMessages(blocks: OutputBlock[]): OutputBlock[] {
 }
 
 /**
+ * 从 `index` 往后看：下一个"有内容"的块是不是消息（中间只允许再夹纯空白块）。
+ *
+ * 用来判断一段空白是不是"两条消息之间的分隔" —— 只有这种空白才归
+ * 「消息之间插入空行」总开关管；夹着作者正文的空白原样保留。
+ */
+function nextNonBlankIsMessage(blocks: OutputBlock[], index: number): boolean {
+	for (let i = index + 1; i < blocks.length; i++) {
+		const block = blocks[i];
+		if (!block) continue;
+		if (block.kind === 'message') return true;
+		if (block.text.trim() !== '') return false;
+	}
+	return false;
+}
+
+/**
  * 修复聊天记录排版。
  *
  * @param rawContent 笔记原始内容
@@ -458,14 +485,13 @@ export function formatChatLog(
 	let currentMessage = '';
 	let currentKey: number | null = null;
 	let currentHasDate = false;
-	let currentBodyOnly = false;
 	let currentHasBody = false;
 
 	/** 当前输出的末尾（正在拼装的消息优先） */
 	const tail = (): string =>
 		currentMessage || (blocks.length > 0 ? blocks[blocks.length - 1]!.text : '');
 	const pushText = (text: string): void => {
-		if (text) blocks.push({ kind: 'text', text, key: null, hasDate: false, bodyOnly: false, hasBody: false });
+		if (text) blocks.push({ kind: 'text', text, key: null, hasDate: false, hasBody: false });
 	};
 	const ensureTrailingNewline = (): void => {
 		if (currentMessage) {
@@ -483,14 +509,12 @@ export function formatChatLog(
 				text: currentMessage,
 				key: currentKey,
 				hasDate: currentHasDate,
-				bodyOnly: currentBodyOnly,
 				hasBody: currentHasBody,
 			});
 		}
 		currentMessage = '';
 		currentKey = null;
 		currentHasDate = false;
-		currentBodyOnly = false;
 		currentHasBody = false;
 	};
 
@@ -591,8 +615,6 @@ export function formatChatLog(
 		// 只有 `19:41:38` 的按"时分秒"比（两种形状不在同一段里混着比，见 messageSortKey）
 		currentHasDate = datePartStr !== '';
 		currentKey = messageSortKey(dateVal, normalizedTime, currentHasDate);
-		// 没有头部行时才知道"正文直接相邻"要不要补空行
-		currentBodyOnly = !headerText;
 
 		// 3. 正文边界计算：支持空行笔记剥离
 		let boundary: number;
@@ -686,27 +708,54 @@ export function formatChatLog(
 	// 后一条（常常是图片）先落地、前一条（文字）落在下面 —— 见 sortAdjacentMessages
 	const ordered = options.sortByTime === false ? blocks : sortAdjacentMessages(blocks);
 
-	// 拼成最终文本。"消息之间插入空行"按**重排后**的相邻关系补，
+	// 拼成最终文本。"消息之间留不留空行"按**重排后**的相邻关系处理，
 	// 否则排序换个顺序就会把分隔空行留错地方。
+	//
+	// 「消息之间插入空行」是总开关（与头部信息开不开无关）：
+	// - 关（默认）：两条相邻消息之间一个空行都不留 —— 源文里带的空行一并去掉，
+	//   它们本来就由头部或缩进分开，用户要的是"消息紧挨着"；
+	// - 开：相邻消息之间恰好留一行（源文里空了几行也只留一行）。
+	//
+	// 中间夹着作者正文时不算"相邻消息"，那一段空白原样保留；两条消息里只要有一条
+	// 没有正文（只有头部行）也不补 —— 没有正文就没有"分隔两段正文"这回事。
 	let result = '';
-	let previousOutputWasBody = false;
+	/** 上一条输出的是消息 */
+	let previousWasMessage = false;
+	/** 上一条输出的消息带了正文 */
+	let previousWasBody = false;
 
-	for (const block of ordered) {
+	/** 补一个空行（结果末尾已经是一行完整内容时才补） */
+	const ensureBlankLine = (): void => {
+		if (result === '') return;
+		if (!result.endsWith('\n')) result += '\n';
+		if (!result.endsWith('\n\n')) result += '\n';
+	};
+
+	for (let i = 0; i < ordered.length; i++) {
+		const block = ordered[i];
+		if (!block) continue;
+
 		if (block.kind === 'text') {
+			// 夹在两条消息之间的纯空白（空行）：归总开关管，这里直接丢掉，
+			// 需要空行时由下面"看到下一条消息"的那一步补（那时才知道它有没有正文）
+			if (previousWasMessage && block.text.trim() === '' && nextNonBlankIsMessage(ordered, i)) {
+				continue;
+			}
 			result += block.text;
-			// 中间夹着笔记正文，下一条消息不算是紧邻上一条正文
-			previousOutputWasBody = false;
+			// 中间夹着笔记正文，下一条消息不算是紧邻上一条消息
+			previousWasMessage = false;
+			previousWasBody = false;
 			continue;
 		}
 
-		// 头部信息全部关闭时，两条消息的正文会直接相邻，可按设置补一个空行分隔。
-		// 有头部信息时头部本身已起分隔作用，不额外插入。
-		if (options.blankLineBetweenMessages && block.bodyOnly && block.hasBody && previousOutputWasBody) {
-			result += '\n';
-		}
+		// 两条消息相邻：关掉开关时它们至少要各占一行（源文里那点空白已经被丢掉），
+		// 打开时补一个空行 —— 两种情况都不会让上一条的正文与下一条的头部挤在一行。
+		if (previousWasMessage && !result.endsWith('\n')) result += '\n';
+		if (options.blankLineBetweenMessages && previousWasBody && block.hasBody) ensureBlankLine();
 
 		result += block.text;
-		if (block.hasBody) previousOutputWasBody = true;
+		previousWasMessage = true;
+		previousWasBody = block.hasBody;
 	}
 
 	return result;

@@ -9,10 +9,6 @@ import type { FieldSection } from './types';
  * 改规则时先改规范、再改这里的文案、最后改对应模块的实现（见 rule-registry.ts）。
  */
 
-/** 头部信息全关时，「消息之间插入空行」才有意义 */
-const headerIsEmpty = (settings: { chatShowUsername: boolean; chatShowDate: boolean; chatShowTime: boolean }): boolean =>
-	!settings.chatShowUsername && !settings.chatShowDate && !settings.chatShowTime;
-
 export const TEXT_SECTION: FieldSection = {
 	type: 'page',
 	heading: '排版格式',
@@ -198,21 +194,18 @@ export const TEXT_SECTION: FieldSection = {
 					name: '显示用户名',
 					desc: '关闭后每条消息只保留日期与时间',
 					control: { type: 'toggle' },
-					rerenderOnChange: true,
 				},
 				{
 					key: 'chatShowDate',
 					name: '显示日期',
 					desc: '日期格式为 {YYYY}/{MM}/{DD}',
 					control: { type: 'toggle' },
-					rerenderOnChange: true,
 				},
 				{
 					key: 'chatShowTime',
 					name: '显示时间',
 					desc: '时间格式为 {HH}:{mm}:{ss}。关闭后排版结果不含时间戳，可避免记录被再次识别为聊天数据',
 					control: { type: 'toggle' },
-					rerenderOnChange: true,
 				},
 				{
 					key: 'chatIndent',
@@ -256,12 +249,8 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'chatBlankLineBetweenMessages',
 					name: '消息之间插入空行',
-					desc: '仅在用户名、日期、时间全部关闭时可用；有头部信息时头部本身已起分隔作用',
-					legacyDesc: (settings) => headerIsEmpty(settings)
-						? '头部信息已全部关闭，开启后用空行分隔相邻消息，便于区分说话人'
-						: '仅在用户名、日期、时间全部关闭时可用；有头部信息时头部本身已起分隔作用',
+					desc: '相邻消息之间留不留空行，**与头部信息开不开无关**：关闭时消息紧挨着（QQ / 微信 复制出来的记录常在消息之间带空行，那点空行也一并去掉），开启时恰好留一行。中间夹着你自己的正文时不算相邻消息，那一段空白不动',
 					control: { type: 'toggle' },
-					disabled: (settings) => !headerIsEmpty(settings),
 				},
 				{
 					key: 'autoFixChatLogOnPaste',
