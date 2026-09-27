@@ -27,13 +27,6 @@ export interface FieldSpec {
 	name: string;
 	/** 说明文字（旧版 DOM 走 setDesc，声明式走 desc） */
 	desc?: string;
-	/**
-	 * 旧版 DOM 专用的动态说明。
-	 *
-	 * 声明式定义的 `desc` 只接受字符串，做不了"随别的开关换话术"；
-	 * 「消息之间插入空行」在两条路径上本来就说的是不同的话（照抄旧实现，不改写）。
-	 */
-	legacyDesc?: (settings: ImageTransferSettings) => string;
 	control: ControlSpec;
 	/**
 	 * 取值收敛：data.json 里可能是旧版本没有的字段或手工改坏的值。

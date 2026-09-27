@@ -81,8 +81,7 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 		if (field.visible && !field.visible(settings)) return;
 
 		const setting = new Setting(containerEl).setName(field.name);
-		if (field.legacyDesc) setting.setDesc(field.legacyDesc(settings));
-		else if (field.desc) setting.setDesc(field.desc);
+		if (field.desc) setting.setDesc(field.desc);
 		if (field.disabled) setting.setDisabled(field.disabled(settings));
 
 		const write = async (value: unknown): Promise<void> => {

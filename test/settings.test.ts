@@ -134,12 +134,9 @@ check("标签排序：标签排版开启时可用",
 	(defsOf(createTab({ tagLayout: true }).tab).find(def => def.control?.key === 'tagSort')
 		?.control?.disabled as () => boolean)(), false);
 
-const blankLine = byKey(definitions, 'chatBlankLineBetweenMessages')?.control?.disabled as () => boolean;
-check("消息间空行：头部信息齐全时不可用", blankLine(), true);
-check("消息间空行：头部信息全关时可用",
-	(defsOf(createTab({ chatShowUsername: false, chatShowDate: false, chatShowTime: false }).tab)
-		.find(def => def.control?.key === 'chatBlankLineBetweenMessages')
-		?.control?.disabled as () => boolean)(), false);
+// 「消息之间插入空行」是总开关，不再依赖头部信息开关（旧版只在头部全关时可用）
+check("消息间空行：不再依赖头部开关",
+	byKey(definitions, 'chatBlankLineBetweenMessages')?.control?.disabled, undefined);
 
 // 5. 写入时收敛脏数据并保存
 const { tab: writeTab, settings: written, saveCount } = createTab();
