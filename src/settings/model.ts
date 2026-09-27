@@ -37,6 +37,8 @@ export interface ImageTransferSettings {
 	chatBlankLineBetweenMessages: boolean;
 	/** 相邻消息的时间戳与粘贴顺序不一致时，是否按时间先后输出 */
 	chatSortByTime: boolean;
+	/** 是否去掉消息正文里的 `@昵称` 提及 */
+	chatStripMentions: boolean;
 	/** 粘贴的内容被识别为聊天记录时，自动执行「快速修复聊天记录」（转换外部图片 + 修复排版） */
 	autoFixChatLogOnPaste: boolean;
 	// ---- 通用排版修复 ----
@@ -123,6 +125,8 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	// 粘贴顺序有时与聊天窗口里的先后不一致（一次选多条时后一条先落地），
 	// 时间戳就在手边，默认按时间摆正 —— 只在相邻消息之间做，见 text/chat-log.ts
 	chatSortByTime: true,
+	// 去掉 @ 提及会删正文，默认关：要用的自己打开（设置 → 聊天记录排版）
+	chatStripMentions: false,
 	// 粘贴聊天记录就顺手修好：默认开启（判定很窄 —— 要有两条"用户名 + 时间戳"的消息头部才算），
 	// 不想让它自动改笔记的在设置里关掉即可，手动那条命令 / 菜单项不受影响
 	autoFixChatLogOnPaste: true,

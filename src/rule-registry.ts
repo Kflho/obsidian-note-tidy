@@ -747,16 +747,20 @@ export const RULE_SECTIONS: RuleSection[] = [
 			},
 			{
 				id: 'structure.chat-log',
-				name: '聊天记录排版：头部信息与正文缩进、图文顺序、消息间空行、相邻消息按时间排序',
+				name: '聊天记录排版：头部信息与正文缩进、图文顺序、消息间空行、相邻消息按时间排序、去掉 @ 提及',
 				spec: null,
 				status: 'done',
 				switchKeys: [
 					'chatShowUsername', 'chatShowDate', 'chatShowTime',
 					'chatIndent', 'chatImageOrder', 'chatBlankLineBetweenMessages', 'chatSortByTime',
+					'chatStripMentions',
 				],
-				impl: { file: 'src/text/chat-log.ts', symbols: ['formatChatLog', 'resolveIndent', 'looksLikeChatLog'] },
+				impl: {
+					file: 'src/text/chat-log.ts',
+					symbols: ['formatChatLog', 'resolveIndent', 'looksLikeChatLog', 'stripMentions', 'bodyEndsBeforeNoteLine'],
+				},
 				tests: ['test/chat-log.test.ts'],
-				note: '规范里没有对应条目；必须严格幂等（重复执行不能再产生空行或空格变化）。`looksLikeChatLog` 是"这段文本像不像聊天记录"的判定（时间戳锚点与排版共用一份正则），供粘贴自动修复用，见 `cross.auto-fix-paste`。「相邻消息按时间排序」（`sortAdjacentMessages`）针对粘贴顺序与时间戳不一致的情况（一次选多条复制时后一条先落地，图片就跑到上一条文字上方）：只在"消息 + 纯空白 + 消息"的连续段内重排，中间夹着作者正文的段一律不动，段里时间戳形状不一致（有的写了日期、有的只有时分秒）也不排',
+				note: '规范里没有对应条目；必须严格幂等（重复执行不能再产生空行或空格变化）。`looksLikeChatLog` 是"这段文本像不像聊天记录"的判定（时间戳锚点与排版共用一份正则），供粘贴自动修复用，见 `cross.auto-fix-paste`。「相邻消息按时间排序」（`sortAdjacentMessages`）针对粘贴顺序与时间戳不一致的情况（一次选多条复制时后一条先落地，图片就跑到上一条文字上方）：只在"消息 + 纯空白 + 消息"的连续段内重排，中间夹着作者正文的段一律不动，段里时间戳形状不一致（有的写了日期、有的只有时分秒）也不排。「去掉 @ 提及」（`stripMentions`，默认关）删的是正文里的 `@昵称` —— 昵称在笔记里指不到具体的人；`@` 前面必须是行首或空白/标点（`foo@bar.com` 不动），整行只有提及的连整行去掉。「顶格行截断正文」（`bodyEndsBeforeNoteLine`）处理"作者自己接在消息下面写内容"：正文区域里先有带缩进的行、之后又出现一行顶格的（`06集` 这类作者自己的小标题）时，上一条消息的正文到此为止，那一行及其后内容原样保留 —— 否则作者的标题会被一起重新缩进、变成消息正文（2026-09 的 bug）；刚从 QQ 粘进来的正文整段顶格，不受影响，「不缩进」选项下也没有这个判据，规则跳过',
 			},
 		],
 	},

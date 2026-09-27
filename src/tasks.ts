@@ -568,6 +568,8 @@ export class ImageTasks implements TaskActions {
 			blankLineBetweenMessages: settings.chatBlankLineBetweenMessages,
 			// 老 data.json 里没有这个字段 —— 当成开（默认值），用户不用手动打开就能拿到修复
 			sortByTime: settings.chatSortByTime !== false,
+			// 删正文的功能，只有明确打开才生效
+			stripMentions: settings.chatStripMentions === true,
 		};
 	}
 
