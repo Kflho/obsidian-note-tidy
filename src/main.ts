@@ -42,7 +42,10 @@ export default class ImageTransferPlugin extends Plugin {
 		this.registerEditorExtension(selectionCountExtension(text => this.selectionCount.update(text)));
 
 		// 批量任务外壳：互斥锁 + 通知屏蔽 + 状态栏进度
-		const runner = new BatchRunner(this.app, progress, new NoticeSuppressor());
+		const notices = new NoticeSuppressor();
+		// 卸载时撤掉屏蔽与 MutationObserver：别把 body 上的类留给下一次加载
+		this.register(() => { notices.dispose(); });
+		const runner = new BatchRunner(this.app, progress, notices);
 		this.tasks = new ImageTasks(this.app, () => this.settings, runner, progress, () => this.saveSettings());
 
 		registerCommands(this, this.tasks);

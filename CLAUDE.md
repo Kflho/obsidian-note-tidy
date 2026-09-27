@@ -103,13 +103,13 @@ src/
     menu-hidden.ts      # 隐藏名单（`作用域：标题`）的解析与生成（纯函数）
     menu-manage-modal.ts# 右键菜单管理面板：图片 / 笔记 / 文件夹三节，开关各项
     copy-shortcut.ts    # 可选的"接管编辑器里的 Ctrl+C"：选中图片时改走复制文件那条路
-    paste-watch.ts      # 粘贴聊天记录时自动执行「快速修复聊天记录」（editor-paste 只看不动，等落盘后再修）
+    paste-watch.ts      # 粘贴聊天记录时自动执行「快速修复聊天记录」（editor-paste 只看不动，内容落地即催落盘再修）
     image-size-modal.ts # 图片大小弹窗
     confirm-rename-modal.ts # 批量重命名确认
     progress.ts         # 状态栏进度
     selection-count.ts  # 状态栏"选中内容的图片张数"：计数 + 文案（纯函数，不 import obsidian）
     selection-status.ts # 选区监听（CodeMirror 扩展），把选中文本交给上面那一格
-    notice-suppressor.ts# 批量期间屏蔽通知
+    notice-suppressor.ts# 批量期间屏蔽通知；收尾立刻弹结果，没到期的旧通知逐条藏住自己过期
 test/*.test.ts          # 每个纯函数模块一份测试（含幂等）；rules.test.ts 核对规则登记表与文档
 docs/规则登记表.md       # 由 src/rule-registry.ts 生成（node test/run-tests.mjs --update-rules-doc）
 main.js                 # Bundled output (committed — Obsidian plugins require it at root)
@@ -215,8 +215,9 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 - **只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），只读剪贴板的纯文本；`evt.defaultPrevented` 为真说明别的插件已经接管了，我们就不看。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）；
 - **判定很窄**（`looksLikeChatLog`，与排版共用时间戳正则）：至少**两条**"消息头部"（时间戳前同一行有用户名，或整行是本插件写出的无用户名时间戳）。只认一条会把 `会议 14:30:25` 这种正文误判，而复制单条消息本来也不带时间戳头部；
-- **粘贴那一刻绝不动手**：事件派发时粘贴的内容还没落进文档，此刻读到的是粘贴之前的正文 —— 修完写盘会被编辑器随后的保存覆盖（"改了又弹回去"）。所以只登记一笔（`PasteFixScheduler`），等这篇笔记**落盘**（`vault` 的 `modify`）再跑；编辑器迟迟不保存时用 `PASTE_FALLBACK_MS` 兜底；
-- **等待表的三条规矩**：同一篇连着粘只留最后一次；跑之前先把自己从表里删掉（我们自己的写盘也会触发 `modify`，不删就会自己触发自己）；插件卸载时 `dispose()` 清空，卸载后不再写仓库。
+- **粘贴那一刻绝不动手**：`editor-paste` 是 Obsidian 剪贴板管理器的 paste 处理器发的，而真正往文档里插内容的是 CodeMirror 内置的处理器（排在它后面，一返回 true 就 break）—— 此刻读到的正文是粘贴之前的，修完写盘会被编辑器随后的保存覆盖（"改了又弹回去"）。所以只登记一笔（`PasteFixScheduler`）；
+- **但也不干等自动保存**：`vault` 的 `modify` 才是"能动手"的信号（那一刻磁盘上才是含粘贴内容的正文），可 Obsidian 的自动保存是**停手 2 秒后**（`TextFileView.requestSave` 的 debounce 就是 2000 毫秒）—— 干等它，用户看到的就是"粘完一两秒才修好"。所以中间加一步：内容一落进编辑器（`editor-change`）就 `MarkdownView.save()` 把这篇笔记立刻写盘，`modify` 随之而来（v1.3.12 前是干等，这就是那个"肉眼可见的延迟"）；
+- **等待表的三条规矩**：同一篇连着粘只留最后一次、同一笔只催一次落盘（粘完接着打字会连着触发 `editor-change`）；跑之前先把自己从表里删掉（我们自己的写盘也会触发 `modify`，不删就会自己触发自己）；插件卸载时 `dispose()` 清空，卸载后不再写仓库。编辑器迟迟不落盘时用 `PASTE_FALLBACK_MS` 兜底。
 
 ### 右键菜单怎么插项、怎么管理（`ui/image-menu.ts` + `menu-injector.ts`）
 

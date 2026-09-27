@@ -436,8 +436,10 @@ function installDomStubs(): void {
 				contains: (name: string) => classes.has(name),
 			},
 		},
+		// 收尾时按 `.notice` 找"还没到期的旧通知"逐条藏住（这里没有通知，返回空即可）
+		querySelectorAll: (): unknown[] => [],
 	};
-	// 定时器立即执行：省掉恢复通知的 5 秒等待，也不留悬挂的定时器
+	// 定时器立即执行：状态栏进度那 5 秒的收尾不用真等，也不留悬挂的定时器
 	globals.window = {
 		setTimeout: (fn: () => void) => { fn(); return 0; },
 		clearTimeout: () => undefined,

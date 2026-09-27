@@ -1,10 +1,12 @@
 /* Note Tidy — notice suppression during batch operations.
-   用 body 上的 suppress-notices 提高选择器特异性，避免 !important：
-   Obsidian 自身的 .notice / .notice-container 都是单类选择器，这里多一层
-   body 限定即可稳定压过。 */
+   批量期间靠 body 上的 suppress-notices 压住整批刷屏通知；批量结束时 body 上的类会
+   立刻撤掉（结果通知要马上弹出来），那几条还没到期的旧通知改由 .note-tidy-suppressed
+   逐条藏住，到期自己消失。
+   用 body 前缀提高选择器特异性，避免 !important：Obsidian 自身的 .notice /
+   .notice-container 都是单类选择器，多一层限定即可稳定压过。 */
 body.suppress-notices .notice-container,
 body.suppress-notices .notice,
-body.suppress-notices .note-tidy-suppressed {
+body .note-tidy-suppressed {
 	display: none;
 	visibility: hidden;
 	opacity: 0;
