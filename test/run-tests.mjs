@@ -1,6 +1,6 @@
 /**
- * 娴嬭瘯杩愯鍣細鐢?esbuild 鎶?test/ 涓嬬殑娴嬭瘯鎵撳寘鎴?ESM 鍚庡湪褰撳墠杩涚▼鍐呮墽琛屻€?
- * 杩欐牱娴嬭瘯鏃犻渶浠讳綍娴嬭瘯妗嗘灦锛屼篃涓嶅彈 Node 鐗堟湰瀵?TypeScript 鏀寔绋嬪害鐨勯檺鍒躲€?
+ * 测试运行器：用 esbuild 把 test/ 下的测试打包成 ESM 后在本进程内执行。
+ * 这样测试无需任何测试框架，也不受 Node 版本对 TypeScript 支持程度的限制。
  */
 import esbuild from "esbuild";
 import fs from "node:fs";
@@ -55,14 +55,14 @@ await esbuild.build({
 	target: "node18",
 	outdir,
 	outExtension: { ".js": ".mjs" },
-	// 绾€昏緫妯″潡閲岀殑 instanceof TFile 绛夊垽鏂渶瑕佺湡瀹炵殑绫伙紝杩欓噷鎹㈡垚娴嬭瘯鏇胯韩
+	// 纯逻辑模块里的 instanceof TFile 等判断需要真实的类，这里换成测试替身
 	alias: { obsidian: path.resolve("test/obsidian-stub.mjs") },
 	logLevel: "warning",
 });
 
 for (const entry of entryPoints) {
 	const outfile = path.join(outdir, path.basename(entry).replace(/\.ts$/, ".mjs"));
-	console.log(`\n鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ ${path.basename(entry)} 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€`);
-	// eslint-disable-next-line no-unsanitized/method -- 璺緞鐢辨湰鏂囦欢鐨?entryPoints 甯搁噺鎷煎嚭锛屼笉鏉ヨ嚜澶栭儴杈撳叆
+	console.log(`\n──────── ${path.basename(entry)} ────────`);
+	// eslint-disable-next-line no-unsanitized/method -- 路径由本文件的 entryPoints 常量拼出，不来自外部输入
 	await import(pathToFileURL(outfile).href);
 }

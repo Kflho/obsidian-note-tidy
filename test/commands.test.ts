@@ -13,6 +13,7 @@
 import { Menu, MenuItem, Notice, TFile } from "obsidian";
 import type { App, PluginManifest } from "obsidian";
 import ImageTransferPlugin from "../src/main";
+import { setPngquantProbe } from "../src/image/pngquant";
 import { DEFAULT_SETTINGS } from "../src/settings/model";
 import { INJECTED_ITEM_KEYS, OWN_ITEM_COMMANDS, OWN_ITEM_SCOPES, TIDY_IMAGES_LABEL, ownMenuEntries } from "../src/ui/image-menu";
 import type { OwnItemKey } from "../src/ui/image-menu";
@@ -621,18 +622,35 @@ async function brokenFormatTests(): Promise<void> {
 		noticeLog.messages.some(message => message.includes("没有发现需要转换")),
 		`实际提示：${noticeLog.messages.join(" | ")}`);
 
-	// ③ pngquant 那一档：选它但没填可执行文件路径时，提示要**指名那一项**
-	// （那条路的默认值就是留空，用户最容易在这里卡住；泛泛一句"去设置里选格式"帮不上忙）
+	// ③ pngquant 那一档：路径留空＝"按系统里装的那份找"，所以这里要的是**探测**的结果 ——
+	// 系统里没有（或用户填的路径不对）时，提示得说清"去装一个 / 去填路径"，
+	// 而不是让几十张图一张张"跳过"完再报个含糊的数字。探测换成替身，别真去起进程。
 	plugin.settings.vaultConvertFormat = 'pngquant';
 	plugin.settings.pngquantPath = '';
+	setPngquantProbe(async () => null);
 	noticeLog.messages.length = 0;
 	await tasks.convertEntireVault();
-	checkTrue("pngquant 没填路径：提示指着「pngquant 可执行文件路径」",
+	checkTrue("pngquant 找不到：提示去装 / 去填路径",
 		noticeLog.messages.some(message =>
-			message.includes("pngquant") && message.includes("可执行文件路径")),
+			message.includes("没找到 pngquant") && message.includes("路径")),
 		`实际提示：${noticeLog.messages.join(" | ")}`);
-	checkTrue("pngquant 没填路径：不转任何文件", store.get("笔记.md") === "正文，没有外部图片",
+	checkTrue("pngquant 找不到：不转任何文件", store.get("笔记.md") === "正文，没有外部图片",
 		`实际内容：${store.get("笔记.md")}`);
+
+	// ④ 探测说有：这条路就该照常往下走（仓库里没有 png 可转，于是停在"没有需要转换的图片"）
+	let probed = 0;
+	setPngquantProbe(async configured => {
+		probed++;
+		return { path: configured === '' ? 'pngquant' : configured, version: '2.17.0 (September 2021)' };
+	});
+	noticeLog.messages.length = 0;
+	await tasks.convertEntireVault();
+	checkTrue("pngquant 找得到：探测过设置里那个值", probed > 0, `探测次数：${probed}`);
+	checkTrue("pngquant 找得到：不再报「没找到」",
+		noticeLog.messages.every(message => !message.includes("没找到 pngquant")),
+		`实际提示：${noticeLog.messages.join(" | ")}`);
+
+	setPngquantProbe(null);
 }
 
 // -------------------------------------------------------------------- 运行

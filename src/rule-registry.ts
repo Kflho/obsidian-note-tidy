@@ -151,16 +151,19 @@ export const RULE_SECTIONS: RuleSection[] = [
 			},
 			{
 				id: 'image.pngquant',
-				name: 'PNG（pngquant）：把 PNG 交给用户自己装的 pngquant 压（有损调色板量化）',
+				name: 'PNG（pngquant）：把 PNG 交给系统里装的 pngquant 压（有损调色板量化）',
 				spec: null,
 				status: 'done',
 				switchKeys: ['pngquantPath', 'pngquantQuality'],
 				impl: {
 					file: 'src/image/pngquant.ts',
-					symbols: ['runPngquant', 'DEFAULT_PNGQUANT_QUALITY'],
+					symbols: [
+						'runPngquant', 'probePngquant', 'setPngquantProbe', 'pngquantCandidates',
+						'resolvePngquantExecutable', 'PNGQUANT_COMMAND', 'DEFAULT_PNGQUANT_QUALITY',
+					],
 				},
 				tests: ['test/pngquant.test.ts', 'test/image-convert.test.ts'],
-				note: '**只调用户自己装的那份，不捆绑、不下载**：pngquant 是 GPL / 商业双许可的外部可执行文件（[pngquant.org](https://pngquant.org/)），把一个 GPL 二进制打进 0-BSD 的社区插件里既改变整个分发包的许可，也过不了插件审查（平台相关二进制）。Image Converter 也是这么划界的 —— 它只给一个「pngquant executable path」设置项，二进制用户自己下。调用方式照抄它（实测它的实现）：`pngquant --quality <min-max> -`，PNG 从 stdin 进、压缩后的 PNG 从 stdout 出；质量档是 `min-max` 字符串（默认 `65-80`）而不是我们那套 0–100 单值。**退出码非 0 一律当"别用这次结果"**：质量够不到 min 时 pngquant 会原样吐 24-bit PNG 并 `exit 99`（官方文档明说），那正是"压不动"的信号，我们按原图留着 —— 与 Image Converter 的 `code !== 0 → 抛错 → 原图` 同一个结果。三条边界：① 计划阶段就要求**可执行文件路径非空**，留空＝这一档整步不做（不去 PATH 里瞎找）；② **只接 PNG 源**（它只吃 PNG，喂 jpg 进去只会报错退出，`shouldConvertFile` 里挡掉），并且不套"已是目标格式就不转"——压 PNG 正是它的活；③ 输出仍是 `.png`，所以库里已有的图**名字不变**，`convertVaultImage` 会跳过改名那一步、直接写回内容（拿同一路径去 `renameFile` 只会得到一次多余的报错）',
+				note: '**只调系统里装的那份，不捆绑、不下载**：pngquant 是 GPL / 商业双许可的外部可执行文件（[pngquant.org](https://pngquant.org/)），打进 0-BSD 的社区插件里既改变整个分发包的许可、又要多背 1 MB 的 base64（市场安装只拉 main.js / manifest / styles 三个文件，二进制只能编进 main.js）。**用户装，插件负责找到它**：设置里填了就用填的那个（完整路径或命令名都行），**留空＝先在 `PATH` 里找 `pngquant`，再退到几个常见安装位置**（`pngquantCandidates`：Windows 的 `%LOCALAPPDATA%\\Programs\\pngquant`、choco、scoop、winget 链接目录；macOS 的 brew 两处；Linux 的 `/usr/bin` 等 —— 只列**真实存在**的那些，免得白起进程）。这一条是刻意比 Image Converter 多做的：它只认设置里那个完整路径，连 `PATH` 都不找，所以"装好了但没配路径"在那边等于没装。动手之前**先探一次**（`probePngquant`，跑 `<候选> --version`，5 秒超时，探测结果记在模块里供 `runPngquant` 复用）：两条转换命令与「整理图片」探不到就**整步不做并提示去装 / 去填路径**（不让几十张图一张张"跳过"完再报个含糊数字），导入与粘贴那两条路探不到就按原格式入库（不打断用户正在干的事）。调用方式照抄 Image Converter（实测它的实现）：`pngquant --quality <min-max> -`，PNG 从 stdin 进、压缩后的 PNG 从 stdout 出；质量档是 `min-max` 字符串（默认 `65-80`）而不是我们那套 0–100 单值。**退出码非 0 一律当"别用这次结果"**：质量够不到 min 时 pngquant 会原样吐 24-bit PNG 并 `exit 99`（官方文档明说），那正是"压不动"的信号，我们按原图留着 —— 与 Image Converter 的 `code !== 0 → 抛错 → 原图` 同一个结果。三条边界：① **只接 PNG 源**（它只吃 PNG，喂 jpg 进去只会报错退出，`shouldConvertFile` 里挡掉），并且不套"已是目标格式就不转"——压 PNG 正是它的活；② 输出仍是 `.png`，所以库里已有的图**名字不变**，`convertVaultImage` 会跳过改名那一步、直接写回内容（拿同一路径去 `renameFile` 只会得到一次多余的报错）；③ 找不到可执行文件时**同一句提示只唠叨一次**（一批几十张图共用，别把控制台刷满）',
 			},
 			{
 				id: 'image.attachment-folder',

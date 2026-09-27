@@ -15,10 +15,23 @@
 import { TFile } from "obsidian";
 import type { App } from "obsidian";
 import { convertImageBytes, convertPlanFrom } from "../src/image/convert";
-import { DEFAULT_PNGQUANT_QUALITY, runPngquant } from "../src/image/pngquant";
+import {
+	DEFAULT_PNGQUANT_QUALITY,
+	pngquantCandidates,
+	probePngquant,
+	resolvePngquantExecutable,
+	runPngquant,
+	setPngquantProbe,
+} from "../src/image/pngquant";
 import { stubPngBytes, stubWebpBytes } from "./canvas-stub";
 
 // -------------------------------------------------------------------- 断言
+/** Node 下没有 window：探测的超时兜底要用到它，装一个最小的替身（与别的测试同一套做法） */
+(globalThis as unknown as Record<string, unknown>).window = {
+	setTimeout: globalThis.setTimeout.bind(globalThis),
+	clearTimeout: globalThis.clearTimeout.bind(globalThis),
+};
+
 let checks = 0;
 const failures: string[] = [];
 
@@ -114,9 +127,18 @@ async function runTests(): Promise<void> {
 			await runPngquant({ path: 'definitely-not-a-real-pngquant-xyz', quality: '65-80' }, stubPngBytes()), null);
 	}
 
-	// ④ 路径留空：连 spawn 都不做
+	// ④ 路径留空：不算"不做"，而是按系统里装的那份找（探测过就用探测结果，否则裸命令名交给 PATH）
 	{
-		check("路径留空：null", await runPngquant({ path: '   ', quality: '65-80' }, stubPngBytes()), null);
+		setPngquantProbe(async configured => configured === ''
+			? { path: 'C:/detected/pngquant.exe', version: '2.17.0' }
+			: null);
+		const found = await probePngquant('');
+		check("路径留空：探测回来的就是系统里那份", found?.path, 'C:/detected/pngquant.exe');
+		check("路径留空：resolvePngquantExecutable 用探测到的路径",
+			resolvePngquantExecutable(''), 'C:/detected/pngquant.exe');
+		check("填了路径：resolvePngquantExecutable 用填的那个",
+			resolvePngquantExecutable('  D:/tools/pngquant.exe  '), 'D:/tools/pngquant.exe');
+		setPngquantProbe(null);
 	}
 
 	// ⑤ 输出为空：null
@@ -125,13 +147,51 @@ async function runTests(): Promise<void> {
 	}
 }
 
-// ------------------------------------------------------------ 2. 与转换流程接上
+// ------------------------------------------------------------ 2. 系统里怎么找它
+async function locateTests(): Promise<void> {
+	// ① 填了路径：只用它，不去猜别的
+	check("填了路径：候选只有它", pngquantCandidates('  D:/tools/pngquant.exe  ', 'win32', {}, () => true),
+		['D:/tools/pngquant.exe']);
+
+	// ② 留空：第一条是裸命令名（交给 PATH），后面是"真实存在"的常见安装位置
+	const win = {
+		LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local',
+		ProgramData: 'C:\\ProgramData',
+		USERPROFILE: 'C:\\Users\\me',
+	};
+	const only = (paths: string[]) => (path: string) => paths.includes(path);
+	const winCandidates = pngquantCandidates('', 'win32', win,
+		only(['C:\\Users\\me\\AppData\\Local\\Programs\\pngquant\\pngquant.exe']));
+	check("留空（Windows）：先裸命令名，再本机装的那个位置", winCandidates,
+		['pngquant', 'C:\\Users\\me\\AppData\\Local\\Programs\\pngquant\\pngquant.exe']);
+
+	// ③ 不存在的常见位置不进候选（免得白起进程）
+	check("留空（Windows）：没有的位置不列", pngquantCandidates('', 'win32', win, () => false), ['pngquant']);
+	check("留空（Linux）：只列真有的那几个", pngquantCandidates('', 'linux', {}, only(['/usr/bin/pngquant'])),
+		['pngquant', '/usr/bin/pngquant']);
+	check("留空（macOS）：brew 的位置也在候选里",
+		pngquantCandidates('', 'darwin', {}, only(['/opt/homebrew/bin/pngquant'])),
+		['pngquant', '/opt/homebrew/bin/pngquant']);
+
+	// ④ 真探测一次：拿 node 自己当"pngquant"（`--version` 有回话就算找到）
+	{
+		const found = await probePngquant(process.execPath);
+		checkTrue("真探测：能跑起来的可执行文件会被认下来",
+			(found?.version ?? '').startsWith('v'), `探测结果：${JSON.stringify(found)}`);
+		check("真探测：找不到的文件回来 null",
+			await probePngquant('definitely-not-a-real-pngquant-xyz'), null);
+	}
+}
+
+// ------------------------------------------------------------ 3. 与转换流程接上
 async function convertTests(): Promise<void> {
-	// ① 计划：`pngquant` 这一档要路径；没路径＝这一步不做（与 Image Converter 一致）
+	// ① 计划：`pngquant` 那一档**路径可以留空**（＝用系统里那份），也支持显式指定
 	check("计划：pngquant + 路径",
 		convertPlanFrom('pngquant', '75', 'D:/tools/pngquant.exe', '65-80'),
 		{ format: 'PNGQUANT', quality: 75, pngquant: { path: 'D:/tools/pngquant.exe', quality: '65-80' } });
-	check("计划：pngquant 没配路径 → 不做", convertPlanFrom('pngquant', '75', '', '65-80'), null);
+	check("计划：pngquant 路径留空 → 照旧给计划（真跑时去系统里找）",
+		convertPlanFrom('pngquant', '75', '', '65-80'),
+		{ format: 'PNGQUANT', quality: 75, pngquant: { path: '', quality: '65-80' } });
 	check("计划：pngquant 质量档留空 → 用默认 65-80",
 		convertPlanFrom('pngquant', '75', 'D:/pngquant.exe', '  ')?.pngquant?.quality, DEFAULT_PNGQUANT_QUALITY);
 
@@ -183,10 +243,13 @@ async function vaultConvertTests(): Promise<void> {
 console.log("=== 1. 真跑一次（假可执行文件） ===");
 await runTests();
 
-console.log("=== 2. 与转换流程接上 ===");
+console.log("=== 2. 系统里怎么找它 ===");
+await locateTests();
+
+console.log("=== 3. 与转换流程接上 ===");
 await convertTests();
 
-console.log("=== 3. 库里已有的 PNG：同名写回 ===");
+console.log("=== 4. 库里已有的 PNG：同名写回 ===");
 await vaultConvertTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);

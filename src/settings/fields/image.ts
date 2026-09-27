@@ -78,8 +78,8 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'pngquantPath',
 				name: 'pngquant 可执行文件路径',
-				desc: '目标格式选 **PNG（pngquant）** 时才用。pngquant 是 GPL / 商业双许可的外部程序，本插件**不捆绑**它（社区插件不带二进制）—— 到 pngquant.org 下载后把它的完整路径填在这里（Windows 形如 D:\\tools\\pngquant\\pngquant.exe）。**已经在 PATH 里的话直接填 `pngquant` 就行**（本插件按系统规则找它，不必写全路径）。留空＝这一档整步不做，图片保持原样',
-				control: { type: 'text', placeholder: 'D:\\tools\\pngquant\\pngquant.exe' },
+				desc: '目标格式选 **PNG（pngquant）** 时才用。**留空＝用系统里装的那份**：先在 `PATH` 里找 `pngquant`，再试几个常见安装位置（`%LOCALAPPDATA%\\Programs\\pngquant`、choco、scoop）。所以装好就能用 —— 到 pngquant.org 下 Windows 包解压、把 `pngquant.exe` 放进任意 PATH 目录即可（本机就是这么装的），`choco install pngquant` 也行。也可以用这一栏直接指路：填完整路径，或填命令名走 PATH。**本插件不捆绑、不下载它**（GPL 的外部程序）；实在找不到时这一档整步不做，图片保持原样',
+				control: { type: 'text', placeholder: '留空＝自动找（或填 D:\\tools\\pngquant\\pngquant.exe）' },
 				visible: (settings) => (settings.vaultConvertFormat ?? '').toLowerCase() === 'pngquant',
 			},
 			{

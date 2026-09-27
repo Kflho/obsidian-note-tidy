@@ -92,8 +92,10 @@ export function targetExtension(format: string): string | null {
  * 手改过 data.json、老版本留下的 `preset` / `avif` 都在这里被挡下 —— 宁可什么都不转，
  * 也不猜一个格式下手。四个调用方（导入 / 粘贴 / 两条命令 / 整理图片）共用这一份收敛。
  *
- * `pngquant` 这一档**没配可执行文件路径时同样返回 `null`**：与 Image Converter 一致
- * （它没配路径时只弹一句提示、图片保持原样），我们不猜路径、也不去 PATH 里瞎找。
+ * `pngquant` 这一档**路径可以留空**：留空＝用系统里装的那份（`PATH` 里的 `pngquant`，
+ * 或几个常见安装位置，见 `pngquantCandidates`）。真跑之前由调用方先探一次
+ * （`probePngquant`），没探到就整步不做并提示用户 —— 这里不拦，免得"设置里空着、
+ * 但系统里明明装了"这种最常见的用法被挡在门外。
  */
 export function convertPlanFrom(
 	formatSetting: string,
@@ -116,10 +118,9 @@ export function convertPlanFrom(
 		quality: Number.isFinite(quality) ? Math.min(100, Math.max(1, Math.round(quality))) : 75,
 	};
 	if (format === 'PNGQUANT') {
-		const path = (pngquantPath ?? '').trim();
-		if (path === '') return null;
 		plan.pngquant = {
-			path,
+			// 留空是合法的：真跑时 `runPngquant` 去系统里找（探测结果优先，其次裸命令名交给 PATH）
+			path: (pngquantPath ?? '').trim(),
 			quality: (pngquantQuality ?? '').trim() === '' ? DEFAULT_PNGQUANT_QUALITY : pngquantQuality.trim(),
 		};
 	}
