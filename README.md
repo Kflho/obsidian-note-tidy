@@ -155,6 +155,8 @@ Why it is safer than a regex replace:
 - **Preview before applying.** The dialog shows how many links will change and the first few before → after examples, updating live as you type.
 - Leave both width and height empty to **remove** existing sizes.
 
+**Sizing on paste** (**Settings → 图片大小 → 粘贴图片时自动套用默认尺寸**, on by default) applies the same preset automatically to whatever you paste: a screenshot Obsidian saves for you, an image Image Converter converted on its way in, or image links that came along inside pasted text. It only rewrites the range you just pasted — the rest of the note is untouched, nothing is written to disk, and one <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back. Paste several images at once and each one is handled as it lands (Obsidian saves them one by one, and the plugin keeps watching that spot for a few seconds rather than giving up after the first). Images that already carry a size follow the **Overwrite existing sizes** switch above, and the step is skipped entirely when the width is empty (that setting means "remove sizes" — not something a paste should do on its own) or the width/height is not a number. When the pasted text is a chat log, the sizing rides along in the *same* edit as the layout fix, so a single undo reverses both.
+
 ### 5. Organize image locations
 
 After you copy-paste a note, its short links such as `![[photo.png]]` still point at the image in the **original** folder — the note's own attachments folder has no such file. Move, rename or delete that original image and the note loses its pictures.
@@ -395,6 +397,7 @@ Image size:
 - **Default width** — pre-filled width in the size dialog, in pixels
 - **Default height** — optional; leave empty to scale proportionally
 - **Overwrite existing sizes** — when off, only images without a size are filled in
+- **Size pasted images automatically** (on by default) — applies the same preset to whatever you paste (screenshots Obsidian saves, images Image Converter converted on the way in, image links inside pasted text), touching only the pasted range. Skipped when the width is empty or invalid, and pasting several images handles each of them. See section 4
 
 > The same three values are what the **快速设置图片大小（Note Tidy）** item (and the matching command) applies — it skips the dialog entirely.
 
@@ -539,6 +542,13 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 3. Reload Obsidian and enable **Note Tidy** (the old entry can be removed)
 
 ## Changelog
+
+### v1.3.19
+- New: **pasted images get the preset size automatically** (**Settings → 图片大小 → 粘贴图片时自动套用默认尺寸**, on by default). Paste a screenshot, an image Image Converter converted on the way in, or text that carries image links, and the links are rewritten to your **Default width** / **Default height** — the same preset the 快速设置图片大小 item and the size dialog use. Only the range you pasted is touched, nothing is written to disk, and one <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back. Images that already have a size follow the **Overwrite existing sizes** switch; the step does nothing when the width is empty (that setting means "remove sizes") or not a number. See section 4
+- New: **pasting several images at once works.** Obsidian saves pasted files one at a time and inserts each link as it goes, so the plugin keeps an eye on the pasted range for a few seconds (re-armed by every change, capped at 20 s) instead of handling only the first link. Re-running the step is idempotent, so images that are already sized are never touched twice
+- Changed: **a paste another plugin handled is no longer ignored by the sizing step.** Image Converter takes the paste over (`preventDefault`) when the clipboard carries image files — and then stores the image and inserts the link itself, which is exactly the image that should get the size. The chat-log fix still keeps its hands off pastes another plugin handled (what lands in the document is not necessarily what was on the clipboard)
+- Changed: **the chat-log fix and the sizing share one edit.** When the pasted text looks like a chat log, the sizes are applied inside the same write-back as the layout fix, so a single undo reverses both; when it does not, the sizing runs on its own
+- Internal: new `PasteSizeWatcher` in `src/ui/paste-watch.ts` (idle 5 s / total 20 s per paste) and `ImageTasks.sizePastedRange`; `pastedImageSizeOptions` in `src/image/size.ts` decides when the step must stay out of the way; new rule `image.paste-size` in the registry and cases in `test/image-size.test.ts`, `test/paste-watch.test.ts` and `test/context-indent.test.ts`
 
 ### v1.3.18
 - New: **format conversion is now part of 整理图片** — the one-click tidy converts, merges and cleans in one run. **Settings → 图片整理 → 整理时转换图片格式** (on by default) hands every image that is not in the target format (**Settings → 图片导入 → 「转换图片格式」的目标格式**, default webp) to Image Converter, using the same converter and preset as the two conversion commands. The order is fixed: **rewrite links → trash duplicate copies → convert formats → run Clear Unused Images**; conversion runs after the merge, so a copy that is about to be trashed is never converted first (that would only burn time and then report a bogus failure). `gif` files, images already in the target format and conversions that do not save enough space are left as they are — exactly the rules the commands already follow

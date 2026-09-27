@@ -8,7 +8,7 @@
  *   2. 幂等 —— 尺寸已经正确时 changed 为 0，内容一字不变
  *   3. 安全 —— 非图片链接、含说明文字的别名、未开启覆盖时一律不碰
  */
-import { applyImageSize, toSizeString, validateImageSize } from "../src/image/size";
+import { applyImageSize, pastedImageSizeOptions, toSizeString, validateImageSize } from "../src/image/size";
 import type { ImageSizeOptions } from "../src/image/size";
 
 // -------------------------------------------------------------------- 断言
@@ -211,6 +211,40 @@ function validationTests(): void {
 	checkEqual("尺寸字符串_去空格", toSizeString(" 100 ", " 200 "), "100x200");
 }
 
+// ------------------------------------------- 6. 「粘贴时自动套尺寸」的取参
+/** 选项摘要，便于一眼看出三样各是什么（null = 这一档不该动手） */
+function summary(options: ImageSizeOptions | null): string {
+	return options === null ? "null" : `${options.width}|${options.height}|${options.overwriteExisting}`;
+}
+
+function pastedOptionsTests(): void {
+	const base = {
+		autoSetImageSizeOnPaste: true,
+		imageSizeWidth: "100",
+		imageSizeHeight: "",
+		imageSizeOverwrite: true,
+	};
+
+	check("默认设置：按 100 宽、覆盖已有尺寸", summary(pastedImageSizeOptions(base)), "100||true");
+	check("带高度：一并带上", summary(pastedImageSizeOptions({ ...base, imageSizeHeight: "200" })), "100|200|true");
+	check("不覆盖：照开关传下去", summary(pastedImageSizeOptions({ ...base, imageSizeOverwrite: false })), "100||false");
+
+	check("开关关着：不动手", summary(pastedImageSizeOptions({ ...base, autoSetImageSizeOnPaste: false })), "null");
+	check("旧设置里没有这个字段：不动手", summary(pastedImageSizeOptions({ ...base, autoSetImageSizeOnPaste: undefined })), "null");
+	// 宽度留空在「设置图片大小」里是"移除已有尺寸"：粘贴时自动去删尺寸不是这个功能该干的事
+	check("宽度留空：不动手（那是移除尺寸模式）", summary(pastedImageSizeOptions({ ...base, imageSizeWidth: "" })), "null");
+	check("只填高度：不动手（校验不通过）", summary(pastedImageSizeOptions({ ...base, imageSizeWidth: "", imageSizeHeight: "200" })), "null");
+	check("宽度填错：不动手", summary(pastedImageSizeOptions({ ...base, imageSizeWidth: "abc" })), "null");
+	check("高度填错：不动手", summary(pastedImageSizeOptions({ ...base, imageSizeHeight: "abc" })), "null");
+	check("宽度为零：不动手", summary(pastedImageSizeOptions({ ...base, imageSizeWidth: "0" })), "null");
+
+	// 取出来的选项直接能喂给 applyImageSize（宽度两侧的空格由 toSizeString 收掉）
+	const spaced = pastedImageSizeOptions({ ...base, imageSizeWidth: " 100 " });
+	check("选项能直接用：空白宽度也收敛",
+		spaced ? applyImageSize("![[图.png]]", spaced).content : "（没拿到选项）",
+		"![[图.png|100]]");
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 1. 双链嵌入 ===");
 wikiTests();
@@ -226,6 +260,9 @@ idempotencyTests();
 
 console.log("=== 5. 输入校验 ===");
 validationTests();
+
+console.log("=== 6. 粘贴时自动套尺寸的取参 ===");
+pastedOptionsTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

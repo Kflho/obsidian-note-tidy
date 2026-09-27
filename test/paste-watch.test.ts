@@ -9,6 +9,10 @@
  *   3. 时机：`editor-paste` 那一刻不动手（内容还没进文档），`editor-change` 才动手
  *   4. 等待表：一篇只留最后一笔、取出后才回调（免得自己触发自己）、兜底丢掉、卸载清空
  *   5. 接线：`registerPasteAutoFix` 只接 `editor-paste` / `editor-change`（不再等 `vault.modify`）
+ *
+ * 另有「粘贴的图片套尺寸」那一笔（`autoSetImageSizeOnPaste`）：它是**观望式**的
+ * （`PasteSizeWatcher`），因为一次粘贴可能分几次落进编辑器（粘贴多张图逐张存盘 /
+ * Image Converter 逐张转码），而且别的插件接管了这次粘贴时它照样要跟着。
  */
 import { TFile } from "obsidian";
 import type { Editor, Plugin } from "obsidian";
@@ -17,7 +21,9 @@ import { DEFAULT_SETTINGS } from "../src/settings/model";
 import type { TaskActions } from "../src/tasks";
 import {
 	PASTE_FALLBACK_MS,
+	PASTE_SIZE_MAX_MS,
 	PasteFixScheduler,
+	PasteSizeWatcher,
 	registerPasteAutoFix,
 	shouldAutoFixPaste,
 } from "../src/ui/paste-watch";
@@ -154,7 +160,60 @@ function schedulerTests(): void {
 	checkEqual("卸载后不再交出去", taken.length, 1);
 }
 
-// ------------------------------------------------------------ 3. 接线
+// ------------------------------------------------- 3. 尺寸观望表（粘贴多张图）
+function sizeWatcherTests(): void {
+	const timers = fakeTimers();
+	let clock = 0;
+	const watcher = new PasteSizeWatcher({
+		setTimer: timers.setTimer,
+		clearTimer: timers.clearTimer,
+		now: () => clock,
+	});
+
+	const note = fileOf("聊天记录.md");
+	const other = fileOf("别的.md");
+	const editor = {} as Editor;
+	const otherEditor = {} as Editor;
+
+	checkEqual("没粘过：什么都不做", watcher.onEditorChange(editor, note), null);
+
+	watcher.schedule({ editor, file: note, start: 5 });
+	checkEqual("观望表里有一笔", watcher.size, 1);
+
+	// 粘贴多张图：第一张落进来之后**不摘**，后面几张还能接着管
+	const first = watcher.onEditorChange(editor, note);
+	checkEqual("第一次变化交出去（范围从粘贴起点算）", first?.start, 5);
+	checkEqual("交出去之后这一笔还活着", watcher.size, 1);
+	clock += 1000;
+	const second = watcher.onEditorChange(editor, note);
+	checkEqual("第二张图落进来照样交出去", second?.start, 5);
+
+	checkEqual("别的笔记变化不命中", watcher.onEditorChange(editor, other), null);
+	checkEqual("别的编辑器变化不命中", watcher.onEditorChange(otherEditor, note), null);
+	checkEqual("不命中也不影响这一笔", watcher.size, 1);
+
+	// 每次变化都重新计时：编辑器安静下来（idleMs 内没有动静）才丢掉
+	timers.fireAll();
+	checkEqual("安静之后丢掉这笔观望", watcher.size, 0);
+	checkEqual("丢掉之后不再交出去", watcher.onEditorChange(editor, note), null);
+
+	// 总寿命：一直有人在改也总有个头（用户随手打字不能把这笔观望一直续下去）
+	clock = 0;
+	watcher.schedule({ editor, file: note, start: 0 });
+	checkEqual("刚开始还能交出去", watcher.onEditorChange(editor, note)?.start, 0);
+	clock = PASTE_SIZE_MAX_MS + 1;
+	checkEqual("超过总寿命就不再管", watcher.onEditorChange(editor, note), null);
+	checkEqual("作废之后观望表清空", watcher.size, 0);
+
+	// 卸载：清掉观望与定时器
+	watcher.schedule({ editor, file: note, start: 0 });
+	watcher.dispose();
+	checkEqual("卸载后清空观望表", watcher.size, 0);
+	checkEqual("卸载后定时器也清了", timers.count(), 0);
+	checkEqual("卸载后不再交出去", watcher.onEditorChange(editor, note), null);
+}
+
+// ------------------------------------------------------------ 4. 接线
 /** 编辑器替身：够 paste-watch 与 tasks 的替身用（偏移 ↔ 位置、读区间） */
 function fakeEditor(text: string, cursor = 0): Editor & { setText: (t: string, c?: number) => void; replaced: string[] } {
 	let value = text;
@@ -191,6 +250,7 @@ function wiringTests(): void {
 	const note = fileOf("聊天记录.md");
 	const settings: ImageTransferSettings = { ...DEFAULT_SETTINGS };
 	const calls: Array<[string, number]> = [];
+	const sizeCalls: number[] = [];
 
 	const plugin = {
 		app: {
@@ -211,12 +271,19 @@ function wiringTests(): void {
 			calls.push([file.path, start]);
 			return true;
 		},
+		sizePastedRange: async (_editor: Editor, start: number) => {
+			sizeCalls.push(start);
+			return true;
+		},
 	} as unknown as TaskActions;
 	registerPasteAutoFix(plugin, actions, () => settings);
 
 	const editor = fakeEditor("笔记开头。", 5);
-	const paste = (text: string): void => {
-		const evt = { clipboardData: { getData: () => text }, defaultPrevented: false } as unknown as ClipboardEvent;
+	/** 把光标放回第 5 个字符（=`粘贴前光标`），这样每次粘贴的起点都是 5，断言好写 */
+	const resetCursor = (): void => { editor.setText("笔记开头。", 5); };
+	/** 粘贴一次；`prevented` = 别的插件（比如 Image Converter）接管了这次粘贴 */
+	const paste = (text: string, prevented = false): void => {
+		const evt = { clipboardData: { getData: () => text }, defaultPrevented: prevented } as unknown as ClipboardEvent;
 		for (const handler of pasteHandlers) handler(evt, editor, { file: note });
 	};
 	const change = (): void => {
@@ -227,41 +294,78 @@ function wiringTests(): void {
 		pasteHandlers.length === 1 && changeHandlers.length === 1,
 		`paste ${pasteHandlers.length} / change ${changeHandlers.length}`);
 
-	// 像聊天记录：粘贴那一刻不动手，内容落进编辑器后把"刚粘的那一段"交出去修
+	// 0. 尺寸开关关掉：粘贴图片也不登记观望（被接管的粘贴同样不登记）
+	settings.autoSetImageSizeOnPaste = false;
+	resetCursor();
+	paste(PLAIN_TEXT, true);
+	editor.setText("笔记开头。![[a.png]]", 5 + "![[a.png]]".length);
+	change();
+	checkEqual("尺寸开关关掉：不套尺寸", sizeCalls, []);
+	checkEqual("尺寸开关关掉：也不跑文本修复", calls, []);
+
+	// 1. 像聊天记录：粘贴那一刻不动手，内容落进编辑器后把"刚粘的那一段"交出去修。
+	//    文本与尺寸共用**一次**写回 —— 那一次变化里只调 fixPastedRange
+	settings.autoSetImageSizeOnPaste = true;
+	resetCursor();
 	paste(CHAT_LOG);
 	checkEqual("粘贴时不立刻动手", calls, []);
 	editor.setText("笔记开头。" + CHAT_LOG, 5 + CHAT_LOG.length);
 	change();
 	checkEqual("内容落地后修这一段（起点 = 粘贴前光标）", calls, [["聊天记录.md", 5]]);
+	checkEqual("同一次变化里不再单独跑尺寸（文本修复内部已经做掉）", sizeCalls, []);
+	change();
+	checkEqual("文本那一笔摘掉之后，尺寸那一笔还看着这一段", sizeCalls, [5]);
 
-	// 普通粘贴（内容不像聊天记录）：什么都不做
+	// 2. 普通粘贴（内容不像聊天记录）：文本不动手；尺寸那一笔照看（真没图时任务自己会跳过）
 	calls.length = 0;
+	sizeCalls.length = 0;
+	resetCursor();
 	paste(PLAIN_TEXT);
 	editor.setText("笔记开头。" + PLAIN_TEXT, 5 + PLAIN_TEXT.length);
 	change();
 	checkEqual("不像聊天记录就不动手", calls, []);
+	checkEqual("尺寸那一笔照样看一眼", sizeCalls, [5]);
 
-	// 开关关掉：什么都不发生
+	// 3. 文本开关关掉：文本那一笔不登记（尺寸那一笔不受它影响）
 	settings.autoFixChatLogOnPaste = false;
+	calls.length = 0;
+	resetCursor();
 	paste(CHAT_LOG);
 	editor.setText("笔记开头。" + CHAT_LOG, 5 + CHAT_LOG.length);
 	change();
-	checkEqual("开关关掉后不触发", calls, []);
+	checkEqual("文本开关关掉后不触发", calls, []);
 
-	// 别的插件已经接管了这次粘贴（defaultPrevented）：不凑热闹
+	// 4. 别的插件已经接管了这次粘贴（defaultPrevented）：文本修复不凑热闹……
 	settings.autoFixChatLogOnPaste = true;
-	for (const handler of pasteHandlers) {
-		handler({ clipboardData: { getData: () => CHAT_LOG }, defaultPrevented: true } as unknown as ClipboardEvent, editor, { file: note });
-	}
+	calls.length = 0;
+	sizeCalls.length = 0;
+	resetCursor();
+	paste(CHAT_LOG, true);
 	editor.setText("笔记开头。" + CHAT_LOG + CHAT_LOG, 5 + CHAT_LOG.length * 2);
 	change();
-	checkEqual("被别处接管的粘贴不触发", calls, []);
+	checkEqual("被别处接管的粘贴不触发文本修复", calls, []);
+	// ……但尺寸那一笔要跟：Image Converter 处理图片文件时就是 preventDefault 自己来的，
+	// 图片是它存进仓库、链接是它插进正文的 —— 那正是要套尺寸的图片
+	checkEqual("被接管的粘贴照样套尺寸", sizeCalls, [5]);
 
-	// 卸载：等待清空，不再动手
-	paste(CHAT_LOG);
+	// 5. 粘贴图片：一次粘贴可能分几次落进编辑器（逐张存盘 / 逐张转码），每落一张都再看一眼
+	sizeCalls.length = 0;
+	resetCursor();
+	paste("", true);
+	editor.setText("笔记开头。![[a.png]]", 5 + "![[a.png]]".length);
+	change();
+	editor.setText("笔记开头。![[a.png]]\n![[b.png]]", 5 + "![[a.png]]\n![[b.png]]".length);
+	change();
+	checkEqual("粘贴多张图：逐张都看一眼（起点都是粘贴处）", sizeCalls, [5, 5]);
+
+	// 6. 卸载：观望清空，不再动手
+	calls.length = 0;
+	sizeCalls.length = 0;
+	resetCursor();
+	paste(CHAT_LOG, true);
 	for (const cleanup of cleanups) cleanup();
 	change();
-	checkEqual("卸载后不再动手", calls, []);
+	checkEqual("卸载后不再动手", [calls.length, sizeCalls], [0, []]);
 }
 
 // -------------------------------------------------------------------- 运行
@@ -270,6 +374,9 @@ gateTests();
 
 console.log("=== 等待表 ===");
 schedulerTests();
+
+console.log("=== 尺寸观望表 ===");
+sizeWatcherTests();
 
 console.log("=== 接线 ===");
 wiringTests();

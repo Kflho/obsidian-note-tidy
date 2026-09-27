@@ -55,6 +55,14 @@ export interface ImageTransferSettings {
 	imageSizeHeight: string;
 	/** 设置图片大小时是否覆盖已有尺寸 */
 	imageSizeOverwrite: boolean;
+	/**
+	 * 粘贴进来的图片自动套用上面的默认宽度 / 高度（与「快速设置图片大小」同一套参数）。
+	 *
+	 * 只管**刚粘进来的那一段**：Obsidian 存下的截图、Image Converter 转完插进来的图、
+	 * 粘贴文本里带的图片链接都算；宽度留空（= 移除尺寸模式）或尺寸填错时整步不动
+	 * （见 `image/size.ts` 的 `pastedImageSizeOptions`）。
+	 */
+	autoSetImageSizeOnPaste: boolean;
 	// ---- 聊天记录排版 ----
 	/** 是否在排版结果中保留用户名 */
 	chatShowUsername: boolean;
@@ -162,6 +170,9 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	imageSizeWidth: '100',
 	imageSizeHeight: '',
 	imageSizeOverwrite: true,
+	// 粘贴进来的图片顺手套上默认尺寸（默认开）：粘贴的多半是聊天截图，尺寸统一了笔记才整齐；
+	// 只改刚粘的那一段，宽度留空 / 填错时整步不动，撤销一次即可回退
+	autoSetImageSizeOnPaste: true,
 	// 以下默认值与旧版本排版结果完全一致，升级后已有笔记不会被改动
 	chatShowUsername: true,
 	chatShowDate: true,
