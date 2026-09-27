@@ -1,6 +1,8 @@
 import { App, TFile } from 'obsidian';
 import { MANAGED_IMAGE_EXTENSIONS } from './constants';
 import { vaultPathFor } from './naming';
+import { DEFAULT_PNGQUANT_QUALITY, runPngquant } from './pngquant';
+import type { PngquantRunner, PngquantSettings } from './pngquant';
 
 /**
  * 图片格式转换（**自带编码器**，不依赖任何别的插件）。
@@ -21,22 +23,32 @@ import { vaultPathFor } from './naming';
  * 它真正比我们多出来的能力（AVIF 走 ffmpeg、pngquant、HEIC/TIFF 解码、非破坏性缩放）
  * 我们不做：解不了的格式按原样留着，用户要那些就继续用 Image Converter 自己。
  *
- * ## 三条硬规矩
+ * ## 两条硬规矩
  *
  * 1. **`.gif` 一律不转** —— canvas 转出来只有一帧，动图会被拍成静图，那是不可逆的损坏；
- * 2. **已经是目标格式的不再压一遍**（代际失真）；
- * 3. **转完更大就留原图** —— 小图（已经是压缩过的截图）转完常常更大，
- *    留着原格式比"统一格式"重要。
+ * 2. **已经是目标格式的不再压一遍**（代际失真）。
+ *
+ * "转完更大"**不拦**：一律用转换结果。目标格式统一本身就是目的 —— 用户判定
+ * "这张图优化过没有"看的就是**它是不是 webp**（2026-09 用户明确要的："对齐到 webp，
+ * 这是我目前判定是否优化过的判据"）。代价是极少数已经压得很狠的图转完会略大一点，
+ * 换来的是全库格式一致、一眼能看出优化没优化。
  */
 
-/** 我们自己能编出来的目标格式（浏览器 canvas 的编码器就这三种） */
-export type ConvertFormat = 'WEBP' | 'JPEG' | 'PNG';
+/**
+ * 我们能编出来的目标格式：canvas 的三种 + **PNG（pngquant）**。
+ *
+ * `PNGQUANT` 的输出也是 `.png`，只是压缩交给用户自己装的 pngquant（见 `pngquant.ts`）——
+ * 它是有损调色板量化，专门用来把 PNG 压小。
+ */
+export type ConvertFormat = 'WEBP' | 'JPEG' | 'PNG' | 'PNGQUANT';
 
 /** 一次转换要用的参数：目标格式 + 质量 */
 export interface ConvertPlan {
 	format: ConvertFormat;
-	/** 0–100（canvas 的 `toBlob` 要 0–1，调用前除以 100） */
+	/** 0–100（canvas 的 `toBlob` 要 0–1，调用前除以 100）；PNGQUANT 不用它 */
 	quality: number;
+	/** 目标格式是 `PNGQUANT` 时才有：可执行文件路径 + 质量档（`65-80`） */
+	pngquant?: PngquantSettings;
 }
 
 /** 编码器：把字节转成目标格式。默认实现用 canvas，测试里换成替身 */
@@ -58,35 +70,61 @@ const MIME_FOR_FORMAT: Record<ConvertFormat, string> = {
 	WEBP: 'image/webp',
 	JPEG: 'image/jpeg',
 	PNG: 'image/png',
+	// pngquant 那条路不走 canvas；这一项只是让类型完整（真跑时不会读到它）
+	PNGQUANT: 'image/png',
 };
 
-/** 认出来的目标格式 → 扩展名；`null` 表示这个格式我们不接 */
+/** 目标格式 → 扩展名；`null` 表示这个格式我们不接（pngquant 的输出也是 `.png`） */
 export function targetExtension(format: string): string | null {
 	switch (format) {
 		case 'WEBP': return 'webp';
 		case 'JPEG': return 'jpg';
-		case 'PNG': return 'png';
+		case 'PNG':
+		case 'PNGQUANT': return 'png';
 		default: return null;
 	}
 }
 
 /**
- * 设置里的「目标格式」+「转换质量」→ 转换计划；认不出来时 `null`（= 这一步不做）。
+ * 设置里的「目标格式」+「转换质量」（+ pngquant 那两项）→ 转换计划；认不出来时 `null`
+ * （= 这一步不做）。
  *
  * 手改过 data.json、老版本留下的 `preset` / `avif` 都在这里被挡下 —— 宁可什么都不转，
  * 也不猜一个格式下手。四个调用方（导入 / 粘贴 / 两条命令 / 整理图片）共用这一份收敛。
+ *
+ * `pngquant` 这一档**路径可以留空**：留空＝用系统里装的那份（`PATH` 里的 `pngquant`，
+ * 或几个常见安装位置，见 `pngquantCandidates`）。真跑之前由调用方先探一次
+ * （`probePngquant`），没探到就整步不做并提示用户 —— 这里不拦，免得"设置里空着、
+ * 但系统里明明装了"这种最常见的用法被挡在门外。
  */
-export function convertPlanFrom(formatSetting: string, qualitySetting: string): ConvertPlan | null {
+export function convertPlanFrom(
+	formatSetting: string,
+	qualitySetting: string,
+	pngquantPath = '',
+	pngquantQuality = DEFAULT_PNGQUANT_QUALITY
+): ConvertPlan | null {
 	const raw = (formatSetting ?? '').trim().toUpperCase();
 	const format: ConvertFormat | null =
 		raw === 'WEBP' ? 'WEBP'
 			: raw === 'JPG' || raw === 'JPEG' ? 'JPEG'
 				: raw === 'PNG' ? 'PNG'
-					: null;
+					: raw === 'PNGQUANT' ? 'PNGQUANT'
+						: null;
 	if (!format) return null;
 
 	const quality = Number((qualitySetting ?? '').trim());
-	return { format, quality: Number.isFinite(quality) ? Math.min(100, Math.max(1, Math.round(quality))) : 75 };
+	const plan: ConvertPlan = {
+		format,
+		quality: Number.isFinite(quality) ? Math.min(100, Math.max(1, Math.round(quality))) : 75,
+	};
+	if (format === 'PNGQUANT') {
+		plan.pngquant = {
+			// 留空是合法的：真跑时 `runPngquant` 去系统里找（探测结果优先，其次裸命令名交给 PATH）
+			path: (pngquantPath ?? '').trim(),
+			quality: (pngquantQuality ?? '').trim() === '' ? DEFAULT_PNGQUANT_QUALITY : pngquantQuality.trim(),
+		};
+	}
+	return plan;
 }
 
 /** 格式的小写标签（提示文案里用：`WEBP` → `webp`） */
@@ -134,6 +172,10 @@ export function convertedFileName(name: string, format: string): string | null {
  * - **已经是目标格式的不转**（再压一遍只会一代比一代糊）；
  * - **`.gif` 一律不转**（动图会被拍成一张静图，不可逆）；
  * - 没有扩展名 / 不在受管位图清单里的不转（svg 这类矢量图当文本处理更合适）。
+ *
+ * `PNGQUANT` 是唯一例外：它**专压 PNG**，所以"已经是 png"正是它的活（不套上面第一条），
+ * 反过来**只接 PNG 源** —— pngquant 只吃 PNG，喂别的格式进去只会报错退出（Image Converter
+ * 那边也是这样：非 PNG 源走进 pngquant 就失败，退回原图）。
  */
 export function shouldConvertFile(name: string, plan: ConvertPlan | null): boolean {
 	if (!plan) return false;
@@ -141,9 +183,10 @@ export function shouldConvertFile(name: string, plan: ConvertPlan | null): boole
 	if (!ext) return false;
 	const current = extensionOf(name);
 	if (current === '') return false;
-	if (current === ext) return false;
 	if (current === 'gif') return false;
-	return (MANAGED_IMAGE_EXTENSIONS as readonly string[]).includes(current);
+	if (!(MANAGED_IMAGE_EXTENSIONS as readonly string[]).includes(current)) return false;
+	if (plan.format === 'PNGQUANT') return current === 'png';
+	return current !== ext;
 }
 
 /**
@@ -275,13 +318,15 @@ export const encodeWithCanvas: EncodeImage = async (request: EncodeRequest) => {
  * @param input 原文件名（含扩展名，用来判格式）、原始字节，以及要落到哪个附件夹
  * @param plan `null` = 不转换（调用方没开这一步）
  * @param encode 编码器（默认 canvas；测试里换成替身）
- * @returns 转换后的文件名 + 字节；没转（不接的格式 / 动图 / 已是目标格式 / 撞名 / 解不开 / 更大）时 `null`
+ * @param pngquant 目标格式是 `PNGQUANT` 时用的执行器（默认真跑 pngquant；测试里换成替身）
+ * @returns 转换后的文件名 + 字节；没转（不接的格式 / 动图 / 已是目标格式 / 撞名 / 解不开）时 `null`
  */
 export async function convertImageBytes(
 	app: App,
-	input: { name: string; bytes: ArrayBuffer; folder?: string },
+	input: { name: string; bytes: ArrayBuffer; folder?: string; selfPath?: string },
 	plan: ConvertPlan | null,
-	encode: EncodeImage = encodeWithCanvas
+	encode: EncodeImage = encodeWithCanvas,
+	pngquant: PngquantRunner = runPngquant
 ): Promise<{ name: string; bytes: ArrayBuffer } | null> {
 	if (!plan) return null;
 	if (!shouldConvertFile(input.name, plan)) return null;
@@ -290,20 +335,25 @@ export async function convertImageBytes(
 	if (!targetName) return null;
 
 	const targetPath = vaultPathFor(input.folder ?? '', targetName);
-	// 撞名就放弃：宁可按原格式留着，也不覆盖仓库里已有的文件
-	if (app.vault.getAbstractFileByPath(targetPath)) return null;
+	// 撞名就放弃：宁可按原格式留着，也不覆盖仓库里已有的文件。
+	// 例外：**要转的就是它自己**（pngquant 原地压 PNG，`a.png` → `a.png`）—— 那时目标路径
+	// 当然"已经存在"，正是我们要覆盖的那一份（`convertVaultImage` 会把 `selfPath` 传进来）
+	if (targetPath !== input.selfPath && app.vault.getAbstractFileByPath(targetPath)) return null;
 
-	const bytes = await encode({
-		bytes: input.bytes,
-		sourceMime: mimeForExtension(extensionOf(input.name)),
-		targetMime: MIME_FOR_FORMAT[plan.format],
-		quality: plan.quality,
-	});
+	// PNGQUANT 那条路不画 canvas：pngquant 直接吃 PNG 字节、吐压缩后的 PNG
+	const bytes = plan.format === 'PNGQUANT' && plan.pngquant
+		? await pngquant(plan.pngquant, input.bytes)
+		: await encode({
+			bytes: input.bytes,
+			sourceMime: mimeForExtension(extensionOf(input.name)),
+			targetMime: MIME_FOR_FORMAT[plan.format],
+			quality: plan.quality,
+		});
 	if (!bytes || bytes.byteLength === 0) return null;
 	// 编码器没按要求给（解不开、原样返回了输入）：当没转
-	if (!looksLikeFormat(bytes, plan.format)) return null;
-	// 转完更大：留原图（截图这类本来就压过的图，转 webp 常常更大）
-	if (bytes.byteLength >= input.bytes.byteLength) return null;
+	const expected = plan.format === 'PNGQUANT' ? 'PNG' : plan.format;
+	if (!looksLikeFormat(bytes, expected)) return null;
+	// 比原来大也照用：目标格式统一本身就是目的（见文件头"两条硬规矩"）
 
 	return { name: targetName, bytes };
 }
@@ -313,14 +363,17 @@ export async function convertImageBytes(
  *
  * 改名走 Obsidian 自己的 `fileManager.renameFile` —— 它会跟着更新全库链接
  * （wikilink、Markdown 链接、canvas），比我们自己写正则替换靠谱得多。
+ * 目标格式与源格式相同时（pngquant 压 PNG：`a.png` → `a.png`）没有改名这一步，直接写回内容。
  *
+ * @param pngquant 目标格式是 `PNGQUANT` 时用的执行器（默认真跑 pngquant；测试里换成替身）
  * @returns 转换后的文件名；没转 / 转不动时 `null`
  */
 export async function convertVaultImage(
 	app: App,
 	file: TFile,
 	plan: ConvertPlan | null,
-	encode: EncodeImage = encodeWithCanvas
+	encode: EncodeImage = encodeWithCanvas,
+	pngquant: PngquantRunner = runPngquant
 ): Promise<string | null> {
 	if (!plan) return null;
 
@@ -330,15 +383,22 @@ export async function convertVaultImage(
 			name: file.name,
 			bytes: await app.vault.readBinary(file),
 			folder: file.parent?.path ?? '',
+			// 要转的是它自己：pngquant 原地压 PNG 时"目标路径已存在"是正常的
+			selfPath: file.path,
 		},
 		plan,
-		encode
+		encode,
+		pngquant
 	);
 	if (!converted) return null;
 
 	const folder = file.parent?.path ?? '';
 	const newPath = vaultPathFor(folder, converted.name);
-	await app.fileManager.renameFile(file, newPath);
+	// 目标格式与源格式相同时（pngquant 压 PNG：`a.png` → `a.png`）没有改名这回事，
+	// 直接写回内容即可 —— 拿同一个路径去 renameFile 只会得到一次多余的报错
+	if (newPath !== file.path) {
+		await app.fileManager.renameFile(file, newPath);
+	}
 
 	const renamed = app.vault.getAbstractFileByPath(newPath);
 	if (!(renamed instanceof TFile)) return null;

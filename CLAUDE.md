@@ -63,7 +63,7 @@ src/
   rule-registry.ts      # 规则登记表：规范出处 ↔ 开关 ↔ 实现 ↔ 测试（不进 main.js，只有测试与文档用它）
   settings/
     model.ts            # ImageTransferSettings + DEFAULT_SETTINGS + 设置 → 各功能选项的转换
-    fields/             # 字段表（面板的单一数据源：名字、说明、控件、收敛、显隐）
+    fields/             # 字段表（面板的单一数据源）：image.ts 图片页 / text.ts 文本排版页 / interface.ts 菜单与交互页
     tab.ts              # 设置面板：声明式定义（1.13+）与手写 DOM（1.13 以下）都由字段表生成
   text/                 # 排版（纯函数，不依赖 Obsidian API）
     pipeline.ts         # 流水线：缩进 → 标记 → 聊天记录 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序
@@ -159,6 +159,8 @@ Returns the first physical file path found, or `null`.
 
 设置分三层：`settings/model.ts`（字段与默认值）、`settings/fields/`（面板的字段表，单一数据源）、`settings/tab.ts`（渲染：Obsidian 1.13+ 走声明式定义，1.13 以下走手写 DOM，两条路由同一张表生成）。加设置项只改字段表一处；`test/settings.test.ts` 会核对"每个字段都有且只有一条定义"。
 
+**面板结构守着三条规矩**（2026-09 用户报"功能加多了，设置面板已经乱了"后重排过一次，加设置项前先读 `fields/index.ts` 头部）：**按"用户要干什么"分页**（顶层只有三个 `page`：图片 / 文本排版 / 菜单与交互，不再平铺一堆 `group`）、**同页里同类的事挨着并用组标题说清**（图片页按"附件与命名 → 格式转换 → 粘贴 → 图片大小 → 一键整理"，文本排版页按流水线顺序）、**每个设置项只属于一处**。`test/settings.test.ts` 第 6 节守住这三条（顶层全是页面、每页都有说明与分组、同页不出现重名分组）。
+
 附件夹定位（`image/attachment-folder.ts`）只看 `attachmentLocation`（`"system"` | `"root"` | `"current"` | `"subfolder"` | `"custom"`）与 `customAttachmentFolder` 两个字段：`resolveAttachmentFolder` 纯算路径，`getTargetAttachmentFolder` 才按需创建；`"system"` 模式读 vault 的系统级 `attachmentFolderPath` 配置。
 
 ### 桌面端约束 / 支持的图片格式
@@ -237,7 +239,7 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 以前这三件事分别靠 **Image Converter**（转格式）与 **Clear Unused Images**（清孤儿附件）。拆掉的理由与做法，改这几块前先读：
 
-- **转格式**（`image/convert.ts`）：解码 → 画到 canvas → `canvas.toBlob(mime, quality/100)`，浏览器自带的编码器，没有额外依赖、没有许可证问题。四个入口共用 `convertPlanFrom(settings)` 算出来的计划（`vaultConvertFormat` + `convertQuality`，默认 webp / 75）：导入外部图片（`convertImportedImages`）、粘贴图片（`paste-images`）、两条命令、整理图片那一步（`tidyConvertFormat`）。搬过来的三条硬规矩：**`.gif` 一律不转**（canvas 只有一帧，动图会被拍成静图）、**已是目标格式不转**、**转完更大就留原图**；解不开的格式（HEIC / TIFF）走 `decodeImage` 的两条路都失败就按原样留着。**名字按最终扩展名生成**（`plannedExtension`）：落盘的是转换后那个文件，命名就得按它来 —— 按源扩展名生成会让同一秒里的 png 与 jpg 各占一个名字（2026-09 用户报的"粘多张只有第一张转 webp"）。**不再有"读它的预设"这件事**：质量、格式都在本插件设置里，`preset` / `avif` 这类认不出来的值一律当"这一步不做"。
+- **转格式**（`image/convert.ts`）：解码 → 画到 canvas → `canvas.toBlob(mime, quality/100)`，浏览器自带的编码器，没有额外依赖、没有许可证问题。四个入口共用 `convertPlanFrom(settings)` 算出来的计划（`vaultConvertFormat` + `convertQuality`，默认 webp / 75）：导入外部图片（`convertImportedImages`）、粘贴图片（`paste-images`）、两条命令、整理图片那一步（`tidyConvertFormat`）。两条硬规矩：**`.gif` 一律不转**（canvas 只有一帧，动图会被拍成静图）、**已是目标格式不转**（PNGQUANT 那档例外，见下）；解不开的格式（HEIC / TIFF）走 `decodeImage` 的两条路都失败就按原样留着。**"转完更大"不再是留下来的理由**（2026-09 用户明确要的）：用户判定"这张图优化过没有"看的就是**它是不是 webp**，转完比原图大也照用转换结果。**名字按最终扩展名生成**（`plannedExtension`）：落盘的是转换后那个文件，命名就得按它来 —— 按源扩展名生成会让同一秒里的 png 与 jpg 各占一个名字（2026-09 用户报的"粘多张只有第一张转 webp"）。**不再有"读它的预设"这件事**：质量、格式都在本插件设置里，`preset` / `avif` 这类认不出来的值一律当"这一步不做"。**PNG 还能走 pngquant 那一档**（`vaultConvertFormat: "pngquant"`）：那是**装在系统里的**外部可执行文件（GPL，插件不捆绑、不下载 —— 二进制进不了市场安装包，只能编进 `main.js`，要多背 1 MB base64），只接 `.png` 源、输出仍是 `.png`（所以库里已有的图名字不变、`convertVaultImage` 跳过改名直接写回内容）。**路径留空＝自动找**（`pngquantCandidates`：先 `PATH` 里的 `pngquant`，再试常见安装位置），命令与「整理图片」动手前会 `probePngquant` 探一次、探不到就整步不做并提示；细节与理由见 `src/rule-registry.ts` 的 `image.pngquant`。
 - **粘贴图片**（`ui/paste-images.ts` + `tasks.pasteImages`）：剪贴板里有图片文件时自己接管（`takeOverImagePaste`，默认开），一张一张存、名字不撞、顺手转格式，再把文字与链接写进正文。原因是 Image Converter 那条路**并发跑**（`files.map(async …)`）会撞名丢图（见上一节）。**要同时把它的「Never process filenames」填 `*`**，否则两边都存一份。
 - **清理没人引用的图片**（`image/unused.ts`）：判定只有一条 —— 文件名没在任何一篇笔记或 canvas 里出现过（复用 `dedupe.ts` 的 `collectImageTargets`）。只清图片、走回收站、**有一个文档读不出来就整步不做**。入口：「整理图片」第 ④ 步（`autoClearUnusedImages`）与命令 `clear-unused-images`（先弹确认框）。
 

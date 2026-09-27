@@ -197,7 +197,7 @@ async function convertTests(): Promise<void> {
 		jpegCanvas.restore();
 	}
 
-	// ③ 各种"不转"：编回来不是目标格式 / 比原来大 / 已经是目标格式 / 撞名 / 没有计划
+	// ③ 各种"不转"：编回来不是目标格式 / 已经是目标格式 / 撞名 / 没有计划
 	{
 		const wrong = installCanvasStub(() => stubPngBytes());
 		try {
@@ -208,11 +208,18 @@ async function convertTests(): Promise<void> {
 			wrong.restore();
 		}
 
-		const huge = installCanvasStub(() => new Uint8Array(9000).buffer);
+		// **比原来大也照用**：目标格式统一本身就是目的
+		//（用户判定"这张图优化过没有"看的就是它是不是 webp）
+		const huge = installCanvasStub(() => stubWebpBytes('x'.repeat(9000)));
 		try {
 			const { app } = createApp();
-			check("不转：转完更大（源图才 4000）",
-				await convertImageBytes(app, { name: 'a.png', bytes: BIG_SOURCE }, WEBP), null);
+			const converted = await convertImageBytes(app, { name: 'a.png', bytes: BIG_SOURCE }, WEBP);
+			check("转完更大也用转换结果（格式统一优先）", converted?.name, 'a.webp');
+			check("转完更大时交出去的就是编码器那份字节",
+				converted
+					? looksLikeFormat(converted.bytes, 'WEBP') && converted.bytes.byteLength > BIG_SOURCE.byteLength
+					: false,
+				true);
 		} finally {
 			huge.restore();
 		}

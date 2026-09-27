@@ -92,7 +92,7 @@ export function buildVaultBasenameMap(app: App): Map<string, string> {
  * 附件夹里的完整仓库路径（根目录统一处理成不带前导斜杠）。
  *
  * 单独抽出来是因为"先算名字、再决定最终文件名"的地方有两处：正常导入用它拼目标路径，
- * 交接给 Image Converter 转换后（`img.png` → `img.webp`）也要用同一套规则重算一次。
+ * 转格式之后（`img.png` → `img.webp`，见 `image/convert.ts`）也要用同一套规则重算一次。
  */
 export function vaultPathFor(folder: string, fileName: string): string {
 	// 先自己收掉首尾斜杠，别指望 normalizePath 兜底：根目录（`/`）与"没有附件夹"（`''`）

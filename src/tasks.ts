@@ -11,6 +11,7 @@ import { buildVaultBasenameMap } from './image/naming';
 import { getTargetAttachmentFolder } from './image/attachment-folder';
 import { convertVaultImage, formatLabel, selectConvertibleImages } from './image/convert';
 import type { ConvertPlan } from './image/convert';
+import { probePngquant } from './image/pngquant';
 import { organizeNoteImages } from './image/organize';
 import { countImages, fixImageLinkFormats, renameGarbledImages, renameImagesToPreset } from './image/rename';
 import { applyImageSize, pastedImageSizeOptions, validateImageSize } from './image/size';
@@ -115,6 +116,9 @@ function summarizeNames(names: string[]): string {
 
 /** 转换前确认弹窗里那句警告（当前笔记 / 全库共用） */
 const CONVERT_WARNING = '⚠️ 转换会重写这些图片文件并改扩展名（例如 png → webp），笔记里的链接由 Obsidian 自动更新；动图（gif）与已经是目标格式的图片不会被动。';
+
+/** 目标格式选了 pngquant、系统里又找不到它时说的话（怎么装、怎么指路都写清楚） */
+const PNGQUANT_MISSING_MESSAGE = '⚠️ 系统里没找到 pngquant —— 压 PNG 要靠它。到 pngquant.org 下 Windows 包解压，把 pngquant.exe 放进任意一个 PATH 目录（或 `choco install pngquant`），也可以在设置里直接填它的完整路径。';
 
 /** 转换一次要用的东西：目标格式 + 质量 + 格式标签（两条转换命令与「整理图片」共用） */
 interface ConversionReady {
@@ -314,7 +318,7 @@ export class ImageTasks implements TaskActions {
 	 * 想先在一篇笔记上试，用 `convertNoteImages`（范围小、看得清效果）。
 	 */
 	async convertEntireVault(): Promise<void> {
-		const ready = this.prepareConversion();
+		const ready = await this.prepareConversion();
 		if (!ready) return;
 
 		const targets = selectConvertibleImages(this.app.vault.getFiles(), ready.plan);
@@ -345,7 +349,7 @@ export class ImageTasks implements TaskActions {
 			return;
 		}
 
-		const ready = this.prepareConversion();
+		const ready = await this.prepareConversion();
 		if (!ready) return;
 
 		const index = buildBasenameIndex(this.app);
@@ -367,17 +371,38 @@ export class ImageTasks implements TaskActions {
 	}
 
 	/**
-	 * 转换前的统一准备：算一次转换计划（目标格式 + 质量）。
+	 * 转换前的统一准备：算一次转换计划（目标格式 + 质量），pngquant 那一档顺带确认"找得到它"。
 	 *
-	 * 目标格式认不出来时（手改坏了 data.json）**只提示、什么都不做** ——
-	 * 宁可这一次不转，也不猜一个格式去重写用户的图片。
+	 * 两件事都**只提示、什么都不做**（返回 `null`）：
+	 *
+	 * - 目标格式认不出来（手改坏了 data.json）：宁可这一次不转，也不猜一个格式去重写用户的图片；
+	 * - 目标格式是 pngquant、系统里又找不到它：转 PNG 全靠这个外部程序，找不到就先把话说清楚，
+	 *   而不是让几十张图一张一张"跳过"完再报个含糊的数字。
 	 */
-	private prepareConversion(): ConversionReady | null {
+	private async prepareConversion(): Promise<ConversionReady | null> {
 		const ready = this.readConversion();
-		if (ready) return ready;
+		if (!ready) {
+			new Notice('⚠️ 读不出「转换图片格式」的目标格式：请到设置里选一个（webp / JPEG / PNG / pngquant）。');
+			return null;
+		}
+		if (!(await this.pngquantReady(ready.plan))) {
+			new Notice(PNGQUANT_MISSING_MESSAGE);
+			return null;
+		}
+		return ready;
+	}
 
-		new Notice('⚠️ 读不出「转换图片格式」的目标格式：请到设置里选一个（webp / JPEG / PNG）。');
-		return null;
+	/**
+	 * pngquant 那一档能不能跑：探测一次（`--version` 有回话就算找到）。
+	 *
+	 * 别的目标格式直接算通过 —— 只有这一档要靠外部程序。
+	 */
+	private async pngquantReady(plan: ConvertPlan): Promise<boolean> {
+		if (plan.format !== 'PNGQUANT') return true;
+		const found = await probePngquant(plan.pngquant?.path ?? '');
+		if (found) return true;
+		console.warn(`⚠️ 没找到 pngquant（当前设置：${plan.pngquant?.path || '留空＝按系统 PATH 找'}）`);
+		return false;
 	}
 
 	/**
@@ -422,7 +447,7 @@ export class ImageTasks implements TaskActions {
 				if (converted > 0) {
 					ctx.progress.finish('✅ 转换完成');
 					let message = `🎉 已把 ${converted} 张图片转换为 ${label}。`;
-					if (skipped > 0) message += `另有 ${skipped} 张没转成（已是 ${label} 或没省下空间），按原样留着。`;
+					if (skipped > 0) message += `另有 ${skipped} 张没转（已是 ${label}、动图，或这张解不开 / 名字被占着），按原样留着。`;
 					if (failed > 0) message += `⚠️ 有 ${failed} 张出错，详情见控制台。`;
 					return message;
 				}
@@ -430,7 +455,7 @@ export class ImageTasks implements TaskActions {
 				if (failed > 0) {
 					return `⚠️ 没有图片转换成功，有 ${failed} 张出错，详情见控制台。`;
 				}
-				return `ℹ️ 没有图片需要转换（可能都已经是 ${label}，或转完没省下空间）。`;
+				return `ℹ️ 没有图片需要转换（可能都已经是 ${label}，或这些图解不开 / 名字被占着）。`;
 			}
 		);
 	}
@@ -505,18 +530,22 @@ export class ImageTasks implements TaskActions {
 			.filter((file): file is TFile => file instanceof TFile);
 		const megabytes = dropFiles.reduce((sum, file) => sum + file.stat.size, 0) / (1024 * 1024);
 
-		// 格式转换那一段的准备：开关关着 / 目标格式读不出来 → 整步跳过，其余两步照常
-		// （整理图片不能因为一个设置读不出来就什么都不做）。
+		// 格式转换那一段的准备：开关关着 / 目标格式读不出来 / pngquant 找不到 → 整步跳过，
+		// 其余两步照常（整理图片不能因为一个设置或一个外部程序就什么都不做）。
 		// 待转清单要先排掉"马上会被合并掉的副本"—— 那几张第 ② 步就进回收站了，
 		// 再拿去读盘只会得到一次"失败"，把结果提示里的数字弄脏。
 		const dropPaths = new Set(dropFiles.map(file => file.path));
-		const ready = settings.tidyConvertFormat === false ? null : this.readConversion();
+		let ready = settings.tidyConvertFormat === false ? null : this.readConversion();
+		let convertHint = '';
+		if (!ready) {
+			if (settings.tidyConvertFormat !== false) convertHint = '读不出「转换图片格式」的目标格式，跳过格式转换';
+		} else if (!(await this.pngquantReady(ready.plan))) {
+			ready = null;
+			convertHint = '系统里没找到 pngquant，跳过格式转换（装一个，或在设置里填它的路径）';
+		}
 		const convertTargets = ready
 			? selectConvertibleImages(images, ready.plan).filter(file => !dropPaths.has(file.path))
 			: [];
-		const convertHint = settings.tidyConvertFormat === false || ready
-			? ''
-			: '读不出「转换图片格式」的目标格式，跳过格式转换';
 
 		const run = async (): Promise<void> => {
 			await this.runner.run(
@@ -598,7 +627,7 @@ export class ImageTasks implements TaskActions {
 					if (parts.length === 0) {
 						ctx.progress.clear();
 						if (convertSkipped > 0) {
-							return `ℹ️ 没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但转完没省下空间，按原样留着）。`;
+							return `ℹ️ 没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但这些图解不开 / 名字被占着，按原样留着）。`;
 						}
 						return `ℹ️ 没有需要整理的图片（没有内容相同的重复副本，也没有需要转换格式的图片${convertHint ? `；${convertHint}` : ''}）。`;
 					}
@@ -608,7 +637,7 @@ export class ImageTasks implements TaskActions {
 
 					let message = `🎉 已整理：${parts.join('，')}。`;
 					if (convertSkipped > 0) {
-						message += `另有 ${convertSkipped} 张没转成（已经是 ${ready?.label ?? ''} 或没省下空间），按原样留着。`;
+						message += `另有 ${convertSkipped} 张没转（已经是 ${ready?.label ?? ''}、动图，或这张解不开 / 名字被占着），按原样留着。`;
 					}
 					if (convertFailed > 0) message += `⚠️ 有 ${convertFailed} 张转换出错，详情见控制台。`;
 					if (convertHint) message += `（${convertHint}）`;
@@ -656,7 +685,7 @@ export class ImageTasks implements TaskActions {
 		const images = all.filter(file => isImageFileName(file.name));
 		if (images.length === 0) return 0;
 
-		// 引用只可能出现在笔记与 canvas 里（与 Clear Unused Images 同一口径）
+		// 引用只可能出现在笔记与 canvas 里（其它附件、pdf 里的引用一律不看：误判的代价比少清几个大）
 		const documents = all.filter(file => file.extension === 'md' || file.extension === 'canvas');
 		const texts: string[] = [];
 		for (const doc of documents) {

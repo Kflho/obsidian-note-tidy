@@ -11,11 +11,11 @@
  *      只有文字时保持原样（不接管，回到"观察者 + 文本修复"那条老路）
  */
 import type { Editor, Plugin } from "obsidian";
-import { TFile } from "obsidian";
+import { Notice, TFile } from "obsidian";
 import type { ImageTransferSettings } from "../src/settings/model";
 import { DEFAULT_SETTINGS } from "../src/settings/model";
 import type { PasteImage, TaskActions } from "../src/tasks";
-import { buildPasteText, imageFilesFromClipboard, isImageFile, pastedImageName } from "../src/ui/paste-images";
+import { PasteTakeoverHint, buildPasteText, imageFilesFromClipboard, isImageFile, pastedImageName } from "../src/ui/paste-images";
 import { registerPasteAutoFix } from "../src/ui/paste-watch";
 
 // -------------------------------------------------------------------- 断言
@@ -116,6 +116,24 @@ function insertTextTests(): void {
 	checkEqual("拼正文：都没有", buildPasteText('', []), '');
 }
 
+// -------------------------------------------- 3b. 被别的插件抢走时的提醒（一次会话一次）
+function takeoverHintTests(): void {
+	const said: string[] = [];
+	const hint = new PasteTakeoverHint(message => said.push(message));
+
+	checkEqual("提醒：第一次不说", said.length, 0);
+	hint.maybeShow();
+	checkEqual("提醒：这一次说了", said.length, 1);
+	checkTrue("提醒：说清了怎么让开（Never process filenames）",
+		said[0]?.includes('Never process filenames') === true,
+		`实际提示：${said[0] ?? ''}`);
+	hint.maybeShow();
+	checkEqual("提醒：同一会话不重复", said.length, 1);
+	hint.forget();
+	hint.maybeShow();
+	checkEqual("提醒：忘了之后能再说一次", said.length, 2);
+}
+
 // ------------------------------------------------------------ 4. 真接线
 function fakeEditor(text: string, cursor: number): Editor & { setText: (t: string, c?: number) => void } {
 	let value = text;
@@ -135,6 +153,9 @@ function fakeEditor(text: string, cursor: number): Editor & { setText: (t: strin
 
 async function wiringTests(): Promise<void> {
 	installDomStubs();
+
+	// 替身里的 `Notice` 记下了每条通知（真实类型里没有这个静态字段，这里按结构取）
+	const notices = Notice as unknown as { messages: string[] };
 
 	const pasteHandlers: Array<(evt: ClipboardEvent, editor: unknown, info: { file: TFile | null }) => void> = [];
 	const changeHandlers: Array<(editor: unknown, info: { file: TFile | null }) => void> = [];
@@ -234,6 +255,35 @@ async function wiringTests(): Promise<void> {
 		await settle();
 		checkEqual("已被接管：不重复处理", pasted.length, 0);
 	}
+
+	// ⑥ 被接管 + 一次粘多张：这才提醒（单张那条路对方是好的，不唠叨），
+	//    它那条路一次粘多张会撞名丢图，让开的开关在它自己设置里
+	{
+		pasted.length = 0;
+		notices.messages.length = 0;
+		paste(fakeClipboard({
+			items: [
+				{ kind: 'file', type: 'image/png', file: fakeFile('a.png', 'image/png', 4) },
+				{ kind: 'file', type: 'image/jpeg', file: fakeFile('b.jpg', 'image/jpeg', 6) },
+			],
+		}), true);
+		await settle();
+		checkEqual("被接管的多张：仍不重复处理", pasted.length, 0);
+		checkTrue("被接管的多张：提醒一次并说清怎么让开",
+			notices.messages.filter(message => message.includes("Never process filenames")).length === 1,
+			`实际提示：${notices.messages.join(" | ")}`);
+
+		// 再来一次：同一会话不重复唠叨
+		notices.messages.length = 0;
+		paste(fakeClipboard({
+			items: [
+				{ kind: 'file', type: 'image/png', file: fakeFile('c.png', 'image/png', 4) },
+				{ kind: 'file', type: 'image/jpeg', file: fakeFile('d.jpg', 'image/jpeg', 6) },
+			],
+		}), true);
+		await settle();
+		checkEqual("被接管的多张：同一会话不再重复提醒", notices.messages.length, 0);
+	}
 }
 
 // -------------------------------------------------------------------- 运行
@@ -245,6 +295,9 @@ nameTests();
 
 console.log("=== 3. 拼要写进正文的内容 ===");
 insertTextTests();
+
+console.log("=== 3b. 被别的插件抢走时的提醒 ===");
+takeoverHintTests();
 
 console.log("=== 4. 真接线 ===");
 await wiringTests();

@@ -1,5 +1,5 @@
 /**
- * 测试运行器：用 esbuild 把 test/ 下的测试打包成 ESM 后在当前进程内执行。
+ * 测试运行器：用 esbuild 把 test/ 下的测试打包成 ESM 后在本进程内执行。
  * 这样测试无需任何测试框架，也不受 Node 版本对 TypeScript 支持程度的限制。
  */
 import esbuild from "esbuild";
@@ -26,6 +26,7 @@ const entryPoints = [
 	"test/image-dedupe.test.ts",
 	"test/image-unused.test.ts",
 	"test/image-convert.test.ts",
+	"test/pngquant.test.ts",
 	"test/image-tidy.test.ts",
 	"test/image-scan.test.ts",
 	"test/image-copy.test.ts",

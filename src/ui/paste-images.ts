@@ -99,3 +99,39 @@ export function buildPasteText(text: string, links: string[]): string {
 	if (text === '') return body;
 	return text.endsWith('\n') ? `${text}${body}` : `${text}\n${body}`;
 }
+
+/**
+ * 「这次粘贴被别的插件抢走了」的提醒：**一次会话只说一次**。
+ *
+ * 本插件接管粘贴的前提是"没人管这一次"（别人 `preventDefault` 了就说明它已经在存这些图了，
+ * 我们再动手就会存两份）。可别的插件那条路一次粘多张会撞名丢图（2026-09 用户实测
+ * "粘两张只剩第一张"），而它们的开关藏在自己的设置里 —— 不说一句，用户只会觉得我们的接管失效了。
+ *
+ * 提醒里点名「Never process filenames」，是因为那是唯一能让对方让开的开关
+ * （Image Converter 里那一项只作用于它的自动粘贴 / 拖放，右键与批量功能都还在）。
+ * 这句话只是文案：本插件没有任何对它的调用或读取，它没装也照常提示。
+ */
+export class PasteTakeoverHint {
+	private shown = false;
+	private readonly notify: (message: string) => void;
+
+	constructor(notify: (message: string) => void) {
+		this.notify = notify;
+	}
+
+	/** 提示一次「这次粘贴被别人接管了」；本会话已经提示过就什么都不做 */
+	maybeShow(): void {
+		if (this.shown) return;
+		this.shown = true;
+		this.notify(
+			'ℹ️ 这次粘贴图片被别的插件接管了：它一次粘多张时会算出同一个文件名，后面几张可能丢。'
+			+ '想让 Note Tidy 来处理粘贴图片，就在那个插件（例如 Image Converter）的设置里把'
+			+ '「Never process filenames」填 * —— 那一项只关它的自动粘贴 / 拖放，其它功能不受影响。'
+		);
+	}
+
+	/** 忘掉"已经提示过"（测试用） */
+	forget(): void {
+		this.shown = false;
+	}
+}

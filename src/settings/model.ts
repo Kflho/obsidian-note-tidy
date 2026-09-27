@@ -28,11 +28,16 @@ export interface ImageTransferSettings {
 	 * `convert-images-current-note` / `convert-images-entire-vault` 两条命令，
 	 * 以及「整理图片」（`tidyConvertFormat` 开着时）。
 	 *
-	 * `webp` / `jpg` / `png` 三选一（浏览器 canvas 能编出来的就是这三种）。
+	 * `webp` / `jpg` / `png` = 自带 canvas 编码器；`pngquant` = 交给系统里装的 pngquant
+	 * 压 PNG（见 `image/pngquant.ts`；找不到它时整步不做）。
 	 */
 	vaultConvertFormat: string;
-	/** 转换质量 `1`–`100`（默认 `'75'`）：canvas 编码器的质量参数，png 忽略它 */
+	/** 转换质量 `1`–`100`（默认 `'75'`）：canvas 编码器的质量参数，png / pngquant 不用它 */
 	convertQuality: string;
+	/** pngquant 可执行文件路径（目标格式选 pngquant 时才用；**留空＝按系统 PATH 与常见位置找**） */
+	pngquantPath: string;
+	/** pngquant 的质量档（`min-max`，默认 `65-80`；与 Image Converter 那一项同名同义） */
+	pngquantQuality: string;
 	/**
 	 * 「整理图片」时是否顺手把还不是目标格式的图片转换成目标格式
 	 * （目标格式看 `vaultConvertFormat`，与那两条转换命令同一个开关）。
@@ -41,9 +46,8 @@ export interface ImageTransferSettings {
 	 */
 	tidyConvertFormat: boolean;
 	/**
-	 * 「合并重复图片」跑完是否顺手执行一次 Clear Unused Images
-	 * （`oz-clear-unused-images`）的「清理未使用图片」命令。
-	 * 没装那个插件时这一步自动跳过，不影响合并。
+	 * 「合并重复图片」跑完是否顺手清理一次"没人引用的图片"
+	 * （自己实现，见 `image/unused.ts`；不依赖 Clear Unused Images）。
 	 */
 	autoClearUnusedImages: boolean;
 	/** 在左侧栏放一个「整理图片」图标（点一下 = 转换格式 + 合并重复副本 + 清理没人引用的附件） */
@@ -67,10 +71,11 @@ export interface ImageTransferSettings {
 	 * 在编辑器里粘贴图片文件时**由本插件接管**：自己把图片存进附件夹（一张一张、名字不撞、
 	 * 顺手转成 `vaultConvertFormat`）并写好链接，一次粘多张也不会漏。
 	 *
-	 * Image Converter 的自动粘贴是并发跑的（`handlePaste` 里 `files.map(async …)`）：
-	 * 一次粘多张时每张各算各的输出名，同一秒算出来的名字撞在一起，后写的直接
-	 * `File already exists` 丢图（2026-09 用户报的"粘两张只剩第一张"）。关掉这一项就恢复
-	 * "别人家的粘贴"行为（那时建议把它的「Never process filenames」留空，别两边都不管）。
+	 * 为什么必须自己管：别的图片插件那条自动粘贴是**并发**跑的（Image Converter 的
+	 * `handlePaste` 里 `files.map(async …)`）：一次粘多张时每张各算各的输出名，同一秒算出来的
+	 * 名字撞在一起，后写的直接 `File already exists` 丢图（2026-09 用户报的"粘两张只剩第一张"）。
+	 * 关掉这一项就恢复"别人家的粘贴"行为（观察者 + 文本修复 + 尺寸观望表；别的插件没接管时
+	 * 图片就按 Obsidian 自己的方式落盘）。
 	 */
 	takeOverImagePaste: boolean;
 	// ---- 聊天记录排版 ----
@@ -172,12 +177,17 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	vaultConvertFormat: 'webp',
 	// 质量 75：与常见的 webp 预设一致（100 省不下多少空间，太低截图上的小字会糊）
 	convertQuality: '75',
+	// pngquant 那两项：程序由用户装在系统里（GPL 二进制不随本插件分发），
+	// 路径留空＝按 PATH 与常见安装位置自动找它
+	pngquantPath: '',
+	pngquantQuality: '65-80',
 	// 整理时顺手统一图片格式（默认开）：整理图片就是"把仓库里的图片收拾干净"，
 	// 格式统一是其中一环；目标格式沿用 vaultConvertFormat
 	tidyConvertFormat: true,
-	// 合并完顺手让 Clear Unused Images 收一遍"没人引用的附件"：两者互补（我们合并重复、它清理孤儿）
+	// 合并完顺手清一遍"没人引用的图片"（默认开，自己实现，见 image/unused.ts）：
+	// 与合并互补 —— 合并收的是"同一张图存了两份"，它收的是"一张都没人引用"
 	autoClearUnusedImages: true,
-	// 左侧栏图标：一键整理（想替代 Clear Unused Images 那个按钮的就靠它）
+	// 左侧栏图标：一键整理（图标沿用 Clear Unused Images 那个 `image-file`，方便直接换掉它那个按钮）
 	tidyImagesRibbonIcon: true,
 	imageSizeWidth: '100',
 	imageSizeHeight: '',
@@ -274,6 +284,13 @@ export function getSpacingOptions(settings: ImageTransferSettings): SpacingOptio
 export function resolveConvertPlan(settings: {
 	vaultConvertFormat: string;
 	convertQuality: string;
+	pngquantPath: string;
+	pngquantQuality: string;
 }): ConvertPlan | null {
-	return convertPlanFrom(settings.vaultConvertFormat, settings.convertQuality);
+	return convertPlanFrom(
+		settings.vaultConvertFormat,
+		settings.convertQuality,
+		settings.pngquantPath,
+		settings.pngquantQuality
+	);
 }

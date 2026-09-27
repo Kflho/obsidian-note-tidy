@@ -1,8 +1,9 @@
 import type { Editor, MarkdownFileInfo, MarkdownView, Plugin, TFile } from 'obsidian';
+import { Notice } from 'obsidian';
 import type { ImageTransferSettings } from '../settings';
 import type { PasteImage, TaskActions } from '../tasks';
 import { looksLikeChatLog } from '../text/chat-log';
-import { imageFilesFromClipboard, pastedImageName } from './paste-images';
+import { PasteTakeoverHint, imageFilesFromClipboard, pastedImageName } from './paste-images';
 
 /**
  * 粘贴聊天记录时自动修好 —— **只修刚粘进来的那一段**（设置里可开关，见 `autoFixChatLogOnPaste`）。
@@ -310,6 +311,9 @@ export function registerPasteAutoFix(
 	const sizeWatcher = new PasteSizeWatcher();
 	plugin.register(() => { sizeWatcher.dispose(); });
 
+	// 「这次粘贴被别人抢走了」的提醒（一次会话一次）：见 `PasteTakeoverHint`
+	const takeoverHint = new PasteTakeoverHint(message => { new Notice(message); });
+
 	// ① 粘贴：先看这次粘贴里有没有图片文件 —— 有就是**我们的活**（自己存图 + 写正文），
 	//    没有才回到"只看一眼粘在哪儿、等编辑器变化"那套观察者路子。
 	const handlePaste = (evt: ClipboardEvent, editor: Editor, info: MarkdownView | MarkdownFileInfo): void => {
@@ -317,21 +321,26 @@ export function registerPasteAutoFix(
 		if (!file) return;
 
 		const start = Math.min(offsetOf(editor, 'from'), offsetOf(editor, 'to'));
+		const takeover = getSettings().takeOverImagePaste !== false;
+		const clipboardImages = takeover ? imageFilesFromClipboard(evt.clipboardData) : [];
+
+		// 图片被别的插件抢走了（它已经 preventDefault）：我们不重复处理（那会存两份），
+		// 但一次粘多张时要提醒一句 —— 它那条路会撞名丢图，而让开它的开关在它自己设置里。
+		// 只粘一张时不唠叨：那条路单张是好的（没撞名可言），提示只会变成噪音
+		if (takeover && evt.defaultPrevented && clipboardImages.length > 1) {
+			takeoverHint.maybeShow();
+		}
 
 		// 粘贴图片：剪贴板里带图片文件时我们自己来（`takeOverImagePaste`，默认开）。
 		// 别的插件的自动粘贴是并发跑的，一次粘多张会算出同一个输出名、后写的直接丢图
 		// （2026-09 用户实测"粘两张只剩第一张"），所以这件事得由一张一张来的我们做。
-		// 两个前提：这次粘贴**没人管**（别人 preventDefault 了就说明它已经在存这些图了 ——
-		// Image Converter 那边靠它的「Never process filenames」让开，设置面板上写着），
-		// 以及开关开着。接下来尺寸与排版都在 `pasteImages` 里顺着做掉，不再走下面那两笔。
-		const images = getSettings().takeOverImagePaste === false || evt.defaultPrevented
-			? []
-			: imageFilesFromClipboard(evt.clipboardData);
-		if (images.length > 0) {
+		// 前提：这次粘贴**没人管**、开关开着。接下来尺寸与排版都在 `pasteImages` 里
+		// 顺着做掉，不再走下面那两笔。
+		if (!evt.defaultPrevented && clipboardImages.length > 0) {
 			evt.preventDefault();
 			const to = Math.max(offsetOf(editor, 'from'), offsetOf(editor, 'to'));
 			const text = evt.clipboardData?.getData('text/plain') ?? '';
-			void pasteImagesFromClipboard(actions, file, editor, start, to, images, text);
+			void pasteImagesFromClipboard(actions, file, editor, start, to, clipboardImages, text);
 			return;
 		}
 
