@@ -38,6 +38,8 @@ function check(name: string, actual: unknown, expected: unknown): void {
 type AnyDefinition = {
 	name?: string;
 	heading?: string;
+	/** 真类型是 `string | DocumentFragment`（声明式定义的 desc 允许富文本），这里只关心有没有 */
+	desc?: unknown;
 	type?: string;
 	items?: AnyDefinition[];
 	visible?: boolean | (() => boolean);
@@ -150,6 +152,19 @@ await writeTab.setControlValue('imageNamePreset', '图片 {YYYY}');
 check("普通字段直接写入", written.imageNamePreset, '图片 {YYYY}');
 checkTrue("写入后触发存盘", saveCount() >= 4, `saveSettings 调用 ${saveCount()} 次`);
 check("默认设置未被测试污染", settings.imageNamePreset, DEFAULT_SETTINGS.imageNamePreset);
+
+// 6. 面板结构：按"用户要干什么"分页，页内同类的事挨在一起
+// （2026-09 用户报过"功能加了一大堆，设置面板已经乱了"—— 这一节守住重排后的信息架构）
+const pages = tab.getSettingDefinitions() as unknown as AnyDefinition[];
+check("顶层都是页面（按功能分页，不平铺一堆组）",
+	pages.map(page => page.type), pages.map(() => 'page'));
+check("每个页面都有名字与说明", pages.filter(page => !page.name || !page.desc).length, 0);
+check("每个页面都有分组", pages.filter(page => (page.items ?? []).length === 0).length, 0);
+for (const page of pages) {
+	const headings = (page.items ?? []).map(group => group.heading);
+	check(`「${page.name}」页里没有重名的分组`, headings.filter((h, i) => headings.indexOf(h) !== i), []);
+	check(`「${page.name}」页里每个分组都有标题`, headings.filter(h => !h), []);
+}
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

@@ -63,7 +63,7 @@ src/
   rule-registry.ts      # 规则登记表：规范出处 ↔ 开关 ↔ 实现 ↔ 测试（不进 main.js，只有测试与文档用它）
   settings/
     model.ts            # ImageTransferSettings + DEFAULT_SETTINGS + 设置 → 各功能选项的转换
-    fields/             # 字段表（面板的单一数据源：名字、说明、控件、收敛、显隐）
+    fields/             # 字段表（面板的单一数据源）：image.ts 图片页 / text.ts 文本排版页 / interface.ts 菜单与交互页
     tab.ts              # 设置面板：声明式定义（1.13+）与手写 DOM（1.13 以下）都由字段表生成
   text/                 # 排版（纯函数，不依赖 Obsidian API）
     pipeline.ts         # 流水线：缩进 → 标记 → 聊天记录 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序
@@ -158,6 +158,8 @@ Returns the first physical file path found, or `null`.
 ### Settings and attachment folder resolution
 
 设置分三层：`settings/model.ts`（字段与默认值）、`settings/fields/`（面板的字段表，单一数据源）、`settings/tab.ts`（渲染：Obsidian 1.13+ 走声明式定义，1.13 以下走手写 DOM，两条路由同一张表生成）。加设置项只改字段表一处；`test/settings.test.ts` 会核对"每个字段都有且只有一条定义"。
+
+**面板结构守着三条规矩**（2026-09 用户报"功能加多了，设置面板已经乱了"后重排过一次，加设置项前先读 `fields/index.ts` 头部）：**按"用户要干什么"分页**（顶层只有三个 `page`：图片 / 文本排版 / 菜单与交互，不再平铺一堆 `group`）、**同页里同类的事挨着并用组标题说清**（图片页按"附件与命名 → 格式转换 → 粘贴 → 图片大小 → 一键整理"，文本排版页按流水线顺序）、**每个设置项只属于一处**。`test/settings.test.ts` 第 6 节守住这三条（顶层全是页面、每页都有说明与分组、同页不出现重名分组）。
 
 附件夹定位（`image/attachment-folder.ts`）只看 `attachmentLocation`（`"system"` | `"root"` | `"current"` | `"subfolder"` | `"custom"`）与 `customAttachmentFolder` 两个字段：`resolveAttachmentFolder` 纯算路径，`getTargetAttachmentFolder` 才按需创建；`"system"` 模式读 vault 的系统级 `attachmentFolderPath` 配置。
 
