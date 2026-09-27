@@ -35,6 +35,8 @@ export interface ImageTransferSettings {
 	chatImageOrder: ChatImageOrder;
 	/** 头部信息全部关闭时，是否在相邻消息之间插入空行 */
 	chatBlankLineBetweenMessages: boolean;
+	/** 相邻消息的时间戳与粘贴顺序不一致时，是否按时间先后输出 */
+	chatSortByTime: boolean;
 	/** 粘贴的内容被识别为聊天记录时，自动执行「快速修复聊天记录」（转换外部图片 + 修复排版） */
 	autoFixChatLogOnPaste: boolean;
 	// ---- 通用排版修复 ----
@@ -118,6 +120,9 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	chatIndent: 'tab',
 	chatImageOrder: 'keep',
 	chatBlankLineBetweenMessages: false,
+	// 粘贴顺序有时与聊天窗口里的先后不一致（一次选多条时后一条先落地），
+	// 时间戳就在手边，默认按时间摆正 —— 只在相邻消息之间做，见 text/chat-log.ts
+	chatSortByTime: true,
 	// 粘贴聊天记录就顺手修好：默认开启（判定很窄 —— 要有两条"用户名 + 时间戳"的消息头部才算），
 	// 不想让它自动改笔记的在设置里关掉即可，手动那条命令 / 菜单项不受影响
 	autoFixChatLogOnPaste: true,
