@@ -83,7 +83,7 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'takeOverImagePaste',
 				name: '粘贴图片由本插件接管',
-				desc: '在编辑器里粘贴图片文件时，由本插件自己存进仓库（一张一张、名字不撞、顺手转成目标格式）并写好链接 —— 一次粘多张也不会漏。**建议同时把 Image Converter 的「Never process filenames」填 `*`**，让它的自动粘贴/拖放处理让开，免得两边各存一份。关掉后粘贴恢复交给别的插件（或 Obsidian 默认行为）',
+				desc: '在编辑器里粘贴图片文件时，由本插件自己存进仓库（一张一张、名字不撞、顺手转成目标格式）并写好链接 —— 一次粘多张也不会漏。**若你装了 Image Converter**：建议把它的「Never process filenames」填 `*`，让它的自动粘贴 / 拖放让开（那一项只关这一件事，右键 Process image 与批量功能都还在）—— 否则这次粘贴会先被它接管，本插件只能退让，并提醒你一句。关掉本项则恢复"别人家的粘贴"',
 				control: { type: 'toggle' },
 			},
 		],
