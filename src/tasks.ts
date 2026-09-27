@@ -86,7 +86,7 @@ export interface TaskActions {
 	convertEntireVault(): Promise<void>;
 	/** 转换当前笔记里引用的图片（命令面板入口）：想先在一篇笔记上试就用它 */
 	convertNoteImages(file: TFile | null): Promise<void>;
-	/** 整理图片：合并内容相同的重复副本 + 清理没人引用的附件（命令面板与左侧栏图标入口） */
+	/** 整理图片：转换图片格式 + 合并内容相同的重复副本 + 清理没人引用的附件（命令 / 右键菜单 / 左侧栏图标共用） */
 	tidyImages(confirm?: boolean): Promise<void>;
 }
 
@@ -97,6 +97,14 @@ function summarizeNames(names: string[]): string {
 
 /** 转换前确认弹窗里那句警告（当前笔记 / 全库共用） */
 const CONVERT_WARNING = '⚠️ 转换会重写这些图片文件并改扩展名（例如 png → webp），笔记里的链接由 Obsidian 自动更新；动图（gif）与已经是目标格式的图片不会被动。';
+
+/** 转换一次要用的东西：转码器 + 当前预设 + 目标格式标签（两条转换命令与「整理图片」共用） */
+interface ConversionReady {
+	handle: ConverterHandle;
+	values: ConverterPreset;
+	override?: string;
+	label: string;
+}
 
 export class ImageTasks implements TaskActions {
 	constructor(
@@ -358,19 +366,29 @@ export class ImageTasks implements TaskActions {
 	 * **没装 / 预设读不出来时只提示、什么都不做** —— 这两条命令全靠它转码，
 	 * 但绝不能因为缺它就把仓库里的图片怎么样（图片照旧导入那条路见 `hintIfNoConverter`）。
 	 */
-	private prepareConversion(): { handle: ConverterHandle; values: ConverterPreset; override?: string; label: string } | null {
+	private prepareConversion(): ConversionReady | null {
+		const ready = this.readConversion();
+		if (ready) return ready;
+
+		new Notice(findImageConverter(this.app)
+			? '⚠️ 读不出 image converter 的转换预设：请在它里面配一个（例如 webp），或在设置里把「目标格式」改成具体格式。'
+			: '⚠️ 这条命令靠 image converter 转换格式：请先安装并启用它（社区插件市场搜 "image converter"）。');
+		return null;
+	}
+
+	/**
+	 * 悄悄读一次转换要用的东西；拿不到就返回 `null`（**不弹提示**）。
+	 *
+	 * 「整理图片」走这一条：它是个一键批量任务，缺插件不是错误 —— 把原因写进结果提示里，
+	 * 别在批量期间插一条独立通知（那会被通知屏蔽挡掉，用户反而什么都看不到）。
+	 */
+	private readConversion(): ConversionReady | null {
 		const handle = findImageConverter(this.app);
-		if (!handle) {
-			new Notice('⚠️ 这条命令靠 image converter 转换格式：请先安装并启用它（社区插件市场搜 "image converter"）。');
-			return null;
-		}
+		if (!handle) return null;
 
 		const override = vaultConvertOverride(this.getSettings().vaultConvertFormat);
 		const preset = readConverterPreset(handle.settings, override);
-		if (!preset) {
-			new Notice('⚠️ 读不出 image converter 的转换预设：请在它里面配一个（例如 webp），或在设置里把「目标格式」改成具体格式。');
-			return null;
-		}
+		if (!preset) return null;
 		return { handle, values: preset.values, override, label: formatLabel(preset.values.outputFormat) };
 	}
 
@@ -383,7 +401,7 @@ export class ImageTasks implements TaskActions {
 	 */
 	private async runConversion(
 		targets: TFile[],
-		ready: { handle: ConverterHandle; override?: string; label: string }
+		ready: ConversionReady
 	): Promise<void> {
 		const { handle, override, label } = ready;
 		await this.runner.run(
@@ -429,23 +447,26 @@ export class ImageTasks implements TaskActions {
 		);
 	}
 
-	// ------------------------------------------------------------------ 整理图片（合并 + 清理）
+	// ------------------------------------------------------------------ 整理图片（转换 + 合并 + 清理）
 
 	/**
-	 * 整理图片：**合并重复副本**（内容完全相同、又在同一个文件夹里）+ **清理没人引用的附件**。
+	 * 整理图片：**转换图片格式** + **合并重复副本**（内容完全相同、又在同一个文件夹里）
+	 * + **清理没人引用的附件**。
 	 *
-	 * 为什么限定"同一个文件夹"：同目录里的孪生文件是"同一张图粘了两次"，纯浪费；
+	 * 三件事都是"把仓库里的图片收拾干净"，所以合成一个任务，三个入口共用：
+	 * 命令面板（`tidy-images`）、文件 / 文件夹右键的「图片功能」二级栏、左侧栏的一键图标。
+	 *
+	 * 为什么合并限定"同一个文件夹"：同目录里的孪生文件是"同一张图粘了两次"，纯浪费；
 	 * 而跨目录的同图是本插件「整理图片位置」**特意**给每篇笔记拷的副本
 	 * （笔记走到哪儿都自带图片）—— 删了反而破坏设计。详见 `image/dedupe.ts`。
 	 *
-	 * 合并部分顺序不能反：先把笔记里的引用改写到留下的那张，再把多余的副本删掉。
-	 * 最后（装了的话）顺手执行一次 Clear Unused Images，把"没人引用的附件"一并收走。
+	 * 四步的顺序都不能动，理由逐条写在下面 ① ② ③ ④ 里。
 	 *
-	 * @param confirm 是否先弹确认框。命令面板那条要（`true`，默认）；
-	 *   左侧栏图标是"一键整理"，直接跑（`false`）—— 删的都是内容相同的副本，
-	 *   而且走回收站，随时可还原
+	 * @param confirm 是否先弹确认框。命令面板与右键菜单那两条要（`true`，默认）；
+	 *   左侧栏图标是"一键整理"，直接跑（`false`）
 	 */
 	async tidyImages(confirm = true): Promise<void> {
+		const settings = this.getSettings();
 		const images = this.app.vault.getFiles().filter(file => isManagedImageExtension(file.extension));
 		const docs: Array<{ file: TFile; text: string }> = [];
 		const counts = new Map<string, number>();
@@ -496,11 +517,27 @@ export class ImageTasks implements TaskActions {
 			.filter((file): file is TFile => file instanceof TFile);
 		const megabytes = dropFiles.reduce((sum, file) => sum + file.stat.size, 0) / (1024 * 1024);
 
+		// 格式转换那一段的准备：开关关着 / 没装 image converter / 预设读不出来 → 整步跳过，
+		// 其余两步照常（整理图片不能因为缺一个插件就什么都不做）。
+		// 待转清单要先排掉"马上会被合并掉的副本"—— 那几张第 ② 步就进回收站了，
+		// 再拿去读盘只会得到一次"失败"，把结果提示里的数字弄脏。
+		const dropPaths = new Set(dropFiles.map(file => file.path));
+		const ready = settings.tidyConvertFormat === false ? null : this.readConversion();
+		const convertTargets = ready
+			? selectConvertibleImages(images, ready.values).filter(file => !dropPaths.has(file.path))
+			: [];
+		const convertHint = settings.tidyConvertFormat === false || ready
+			? ''
+			: findImageConverter(this.app)
+				? '读不出 image converter 的转换预设，跳过格式转换'
+				: '没检测到 image converter，跳过格式转换';
+
 		const run = async (): Promise<void> => {
 			await this.runner.run(
 				{
 					label: '🧩 整理图片',
-					files: dropFiles,
+					// 进度总量 = 要合并的 + 要转换的（两件事都是实打实要跑的动作）
+					files: [...dropFiles, ...convertTargets],
 					failureMessage: '❌ 整理图片中断，请检查控制台。',
 				},
 				async (ctx) => {
@@ -532,27 +569,61 @@ export class ImageTasks implements TaskActions {
 						}
 						ctx.progress.step(i + 1);
 					}
+					let step = dropFiles.length;
 
-					// ③ 装了 Clear Unused Images 就顺手执行一次：清掉"没人引用的附件"
+					// ③ 格式转换：还不是目标格式的那些交给 Image Converter。
+					// 排在 ② 之后 —— 已经被合并掉的副本不必白转一趟；
+					// 改名走 Obsidian 原生的 fileManager.renameFile，全库链接（wikilink /
+					// Markdown / canvas）自动跟着更新，与那两条转换命令是同一套做法。
+					let converted = 0;
+					let convertSkipped = 0;
+					let convertFailed = 0;
+					if (ready) {
+						for (const file of convertTargets) {
+							try {
+								const name = await convertVaultImage(this.app, file, ready.handle, ready.override);
+								if (name) converted++;
+								else convertSkipped++;
+							} catch (err) {
+								// 单张出错不拖垮整批：继续跑，最后一起汇报
+								convertFailed++;
+								console.error(`❌ [ImageTransfer] 转换失败：${file.path}`, err);
+							}
+							ctx.progress.step(++step);
+						}
+					}
+
+					// ④ 装了 Clear Unused Images 就顺手执行一次：清掉"没人引用的附件"。
+					// 排最后：前面两步才刚把多余的副本删掉，这时清一遍最干净
 					const cleared = this.runClearUnusedImages();
 
-					if (removed === 0 && !cleared) {
-						ctx.progress.clear();
-						return 'ℹ️ 没有需要整理的图片（没有内容相同的重复副本，也没有可用的清理插件）。';
+					// 结果按实际发生了什么汇报
+					const parts: string[] = [];
+					if (removed > 0) {
+						let merged = `合并掉 ${removed} 张重复图片（${plans.length} 组`;
+						if (touchedNotes > 0) merged += `，改写了 ${touchedNotes} 篇笔记的引用`;
+						parts.push(`${merged}）`);
 					}
-					if (removed > 0) ctx.progress.finish('✅ 整理完成');
+					if (converted > 0) parts.push(`把 ${converted} 张图片转换为 ${ready?.label ?? ''}`);
+					if (cleared) parts.push('执行了一次 clear unused images（清理没人引用的附件）');
+
+					if (parts.length === 0) {
+						ctx.progress.clear();
+						if (convertSkipped > 0) {
+							return `ℹ️ 没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但转完没省下空间，按原样留着）。`;
+						}
+						return `ℹ️ 没有需要整理的图片（没有内容相同的重复副本，也没有需要转换格式的图片${convertHint ? `；${convertHint}` : ''}）。`;
+					}
+
+					if (removed > 0 || converted > 0) ctx.progress.finish('✅ 整理完成');
 					else ctx.progress.clear();
 
-					let message = removed > 0
-						? `🎉 已整理：合并掉 ${removed} 张重复图片（${plans.length} 组`
-						: '🎉 已整理：';
-					if (removed > 0 && touchedNotes > 0) message += `，改写了 ${touchedNotes} 篇笔记的引用`;
-					if (removed > 0) message += '）。';
-					if (cleared) {
-						message += removed > 0
-							? '并已执行一次 clear unused images，清理没人引用的附件。'
-							: '已执行一次 clear unused images，清理没人引用的附件。';
+					let message = `🎉 已整理：${parts.join('，')}。`;
+					if (convertSkipped > 0) {
+						message += `另有 ${convertSkipped} 张没转成（已经是 ${ready?.label ?? ''} 或没省下空间），按原样留着。`;
 					}
+					if (convertFailed > 0) message += `⚠️ 有 ${convertFailed} 张转换出错，详情见控制台。`;
+					if (convertHint) message += `（${convertHint}）`;
 					return message;
 				}
 			);
@@ -563,12 +634,23 @@ export class ImageTasks implements TaskActions {
 			return;
 		}
 
-		new ConfirmRenameModal(this.app, dropFiles.length, run, {
+		const planLines: string[] = [];
+		if (dropFiles.length > 0) {
+			planLines.push(`发现 ${plans.length} 组内容完全相同的图片（同一文件夹内），将合并掉 ${dropFiles.length} 张、回收约 ${megabytes.toFixed(1)} MB。`);
+		} else {
+			planLines.push('没有发现内容相同的重复副本。');
+		}
+		if (convertTargets.length > 0) {
+			planLines.push(`另有 ${convertTargets.length} 张图片不是 ${ready?.label ?? ''}，将一并转换。`);
+		}
+		if (dropFiles.length === 0 && convertTargets.length === 0) {
+			planLines.push('整理仍会执行一次"清理没人引用的附件"。');
+		}
+
+		new ConfirmRenameModal(this.app, dropFiles.length + convertTargets.length, run, {
 			title: '确认整理图片',
-			message: dropFiles.length > 0
-				? `发现 ${plans.length} 组内容完全相同的图片（同一文件夹内），将合并掉 ${dropFiles.length} 张、回收约 ${megabytes.toFixed(1)} MB。`
-				: '没有发现内容相同的重复副本；整理仍会执行一次"清理没人引用的附件"。',
-			warning: '⚠️ 合并掉的是内容一模一样的副本（会进回收站）；笔记里指向它们的链接会改写到留下的那一张，显示效果不变。跨文件夹的同图不动 —— 那是「整理图片位置」特意给每篇笔记拷的副本。',
+			message: planLines.join(''),
+			warning: '⚠️ 合并掉的是内容一模一样的副本（会进回收站）；笔记里指向它们的链接会改写到留下的那一张，显示效果不变。跨文件夹的同图不动 —— 那是「整理图片位置」特意给每篇笔记拷的副本。格式转换会重写图片文件并改扩展名（如 png → webp），链接由 Obsidian 自动更新；动图（gif）与已经是目标格式的图片不会被动。',
 			confirmLabel: '确认整理',
 		}).open();
 	}

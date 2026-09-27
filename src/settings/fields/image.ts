@@ -52,8 +52,8 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			},
 			{
 				key: 'vaultConvertFormat',
-				name: '「转换全库图片格式」的目标格式',
-				desc: '命令「将整个仓库中的图片转换为指定格式」按它决定转成什么。「跟随预设」＝按 Image Converter 当前选中的转换预设；其余选项直接点名格式（质量与缩放仍照预设）。动图（gif）与已经是目标格式的图片一律跳过，转换后扩展名会变（如 png → webp），链接由 Obsidian 自己更新',
+				name: '「转换图片格式」的目标格式',
+				desc: '命令「把整个仓库 / 当前笔记的图片转换为指定格式」按它决定转成什么，「整理图片」开着「整理时转换图片格式」时也用这一项。「跟随预设」＝按 Image Converter 当前选中的转换预设；其余选项直接点名格式（质量与缩放仍照预设）。动图（gif）与已经是目标格式的图片一律跳过，转换后扩展名会变（如 png → webp），链接由 Obsidian 自己更新',
 				control: {
 					type: 'dropdown',
 					options: {
@@ -101,9 +101,15 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 		heading: '图片整理',
 		fields: [
 			{
+				key: 'tidyConvertFormat',
+				name: '整理时转换图片格式',
+				desc: '执行「整理图片」时，顺手把还不是目标格式的图片交给 Image Converter 转换（目标格式取上面「转换图片格式」那一项，默认 webp）。动图（gif）、已经是目标格式的图片、转完没省下空间的图片一律保持原样；没装 Image Converter 时这一步自动跳过，合并重复副本与清理附件照常执行',
+				control: { type: 'toggle' },
+			},
+			{
 				key: 'tidyImagesRibbonIcon',
 				name: '左侧栏放一个「整理图片」图标',
-				desc: '在左侧栏（ribbon）加一个图标，点一下就是「整理图片」：合并内容相同的重复副本 + 清理没人引用的附件 —— 一键完成，不再弹确认框（删的都是内容一模一样的副本，且进回收站可还原）。命令面板里的「整理图片」入口仍会先让你确认',
+				desc: '在左侧栏（ribbon）加一个图标，点一下就是「整理图片」：转换图片格式 + 合并内容相同的重复副本 + 清理没人引用的附件 —— 一键完成，不再弹确认框（合并掉的是内容一模一样的副本，且进回收站可还原；格式转换按上面「转换图片格式」的目标格式）。命令面板与右键菜单里的「整理图片」入口仍会先让你确认',
 				control: { type: 'toggle' },
 			},
 			{
@@ -175,7 +181,7 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 			{
 				key: 'fileMenuImageSubmenu',
 				name: '「图片功能」二级栏',
-				desc: '在文件或文件夹的右键菜单中加入「图片功能」：转换外部图片、重命名乱码图片、按预设重命名、整理图片位置、设置图片大小',
+				desc: '在文件或文件夹的右键菜单中加入「图片功能」：转换外部图片、重命名乱码图片、按预设重命名、整理图片位置、整理图片（转换格式 + 合并重复副本 + 清理没人引用的附件）、设置图片大小',
 				control: { type: 'toggle' },
 			},
 			{

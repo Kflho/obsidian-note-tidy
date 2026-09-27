@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS, ImageTransferSettingTab } from './settings';
 import type { ImageTransferSettings } from './settings';
 import { ImageTasks } from './tasks';
 import { registerFileMenu } from './ui/menus';
-import { registerImageMenu } from './ui/image-menu';
+import { registerImageMenu, TIDY_IMAGES_LABEL } from './ui/image-menu';
 import { registerCopyShortcut } from './ui/copy-shortcut';
 import { registerPasteAutoFix } from './ui/paste-watch';
 import { NoticeSuppressor } from './ui/notice-suppressor';
@@ -59,10 +59,10 @@ export default class ImageTransferPlugin extends Plugin {
 		// 粘贴聊天记录时自动执行「快速修复聊天记录」（设置里可关）
 		registerPasteAutoFix(this, this.tasks, () => this.settings);
 
-		// 左侧栏的「整理图片」图标：**一键整理**（合并重复副本 + 清理没人引用的附件）。
+		// 左侧栏的「整理图片」图标：**一键整理**（转换格式 + 合并重复副本 + 清理没人引用的附件）。
 		// 图标沿用 Clear Unused Images 那个 `image-file` —— 想用它替代对方的按钮时，
-		// 位置与图标都不变，只是干的事变成了"合并 + 清理"。
-		this.ribbonEl = this.addRibbonIcon('image-file', '整理图片（合并重复副本 + 清理没人引用的附件）', () => {
+		// 位置与图标都不变，只是干的事变成了"转换 + 合并 + 清理"。
+		this.ribbonEl = this.addRibbonIcon('image-file', TIDY_IMAGES_LABEL, () => {
 			void this.tasks.tidyImages(false);
 		});
 		this.refreshRibbonIcon();
