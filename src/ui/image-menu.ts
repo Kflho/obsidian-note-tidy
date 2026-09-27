@@ -63,6 +63,15 @@ export const IMAGE_SUBMENU_TITLE = '图片功能';
 export const TEXT_SUBMENU_TITLE = '文本排版';
 
 /**
+ * 「整理图片」的正式名字。
+ *
+ * 命令面板（`tidy-images`）、文件 / 文件夹右键的「图片功能」二级栏、左侧栏图标提示语
+ * 共用这一份 —— 它干的活（转换格式 + 合并重复副本 + 清理没人引用的附件）只写一处，
+ * 免得三个入口各写一遍、改一处漏两处。
+ */
+export const TIDY_IMAGES_LABEL = '整理图片（转换格式 + 合并重复副本 + 清理没人引用的附件）';
+
+/**
  * 这六项各自的图标与说明（管理面板显示用）。
  * 标题不放这儿：`copy` 那条会写成"复制 3 张图片"，按张数算。
  */
@@ -72,7 +81,7 @@ export const OWN_ITEMS: Record<OwnItemKey, { title: string; icon: string; desc: 
 	quickFix: { title: QUICK_FIX_MENU_TITLE, icon: 'zap', desc: '转换本文件内引用的外部路径图片，并把整篇排版修一遍（空格 / 缩进 / 聊天记录 / 标签 / 公式）' },
 	typesetSelection: { title: TYPESET_SELECTION_MENU_TITLE, icon: 'wand-2', desc: '只排版选中的那段内容（含选区里的外部图片转换），笔记其余部分一个字符都不动' },
 	manage: { title: MANAGE_MENU_TITLE, icon: 'settings-2', desc: '打开本面板；关闭后可从命令面板打开' },
-	imageSubmenu: { title: IMAGE_SUBMENU_TITLE, icon: 'image', desc: '转换外部图片、重命名、整理位置、设置大小' },
+	imageSubmenu: { title: IMAGE_SUBMENU_TITLE, icon: 'image', desc: '转换外部图片、重命名、整理位置、整理图片（转换格式 + 合并重复副本 + 清理没人引用的附件）、设置大小' },
 	textSubmenu: { title: TEXT_SUBMENU_TITLE, icon: 'message-square', desc: '修复笔记排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）' },
 };
 

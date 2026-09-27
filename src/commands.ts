@@ -1,7 +1,7 @@
 import { MarkdownView, Notice } from 'obsidian';
 import type { Editor, MarkdownFileInfo, Plugin } from 'obsidian';
 import type { ImageTasks } from './tasks';
-import { editorImagePicks } from './ui/image-menu';
+import { editorImagePicks, TIDY_IMAGES_LABEL } from './ui/image-menu';
 
 /**
  * 命令注册（从 main.ts 抽出）。
@@ -56,7 +56,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'tidy-images',
-		name: '整理图片（合并重复副本 + 清理没人引用的附件）',
+		name: TIDY_IMAGES_LABEL,
 		callback: async () => {
 			await tasks.tidyImages(true);
 		}

@@ -3,7 +3,7 @@ import type { App, Plugin, TAbstractFile } from 'obsidian';
 import type { ImageTransferSettings } from '../settings';
 import type { TaskActions } from '../tasks';
 import { OWN_MENU_ITEM, observeMenuInstance } from './menu-injector';
-import { IMAGE_SUBMENU_TITLE, TEXT_SUBMENU_TITLE, recordDetectedMenuItems } from './image-menu';
+import { IMAGE_SUBMENU_TITLE, TEXT_SUBMENU_TITLE, TIDY_IMAGES_LABEL, recordDetectedMenuItems } from './image-menu';
 
 /**
  * 文件 / 文件夹右键菜单（从 main.ts 抽出）。
@@ -154,6 +154,18 @@ function addImageSubmenu(
 				.setIcon('folder')
 				.onClick(async () => {
 					await actions.organizeImages(files, where);
+				});
+		});
+
+		// 整理图片（整库那件事：转换格式 + 合并重复副本 + 清理没人引用的附件）。
+		// 它不吃 files —— 合并与转换都是全库范围的，所以文件与文件夹两条路给的是同一件事，
+		// 一律先弹确认框（`confirm = true`），避免右键一点就改一堆文件
+		menu.addItem((item) => {
+			item
+				.setTitle(TIDY_IMAGES_LABEL)
+				.setIcon('sparkles')
+				.onClick(async () => {
+					await actions.tidyImages(true);
 				});
 		});
 

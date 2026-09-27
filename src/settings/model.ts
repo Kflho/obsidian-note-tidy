@@ -24,18 +24,29 @@ export interface ImageTransferSettings {
 	 */
 	handOffImportedImages: boolean;
 	/**
-	 * 「转换全库图片格式」这条命令的目标格式：
+	 * 图片格式转换的目标格式，三条路共用：`convert-images-current-note` /
+	 * `convert-images-entire-vault` 两条命令，以及「整理图片」（`tidyConvertFormat` 开着时）。
+	 *
 	 * `preset` = 跟随 Image Converter 当前选中的预设；`webp` / `jpg` / `png` = 直接点名
 	 * （质量、缩放仍照预设，动图与已是目标格式的图片一律跳过）。
 	 */
 	vaultConvertFormat: string;
+	/**
+	 * 「整理图片」时是否顺手把还不是目标格式的图片交给 Image Converter 转换
+	 * （目标格式看 `vaultConvertFormat`，与那两条转换命令同一个开关）。
+	 *
+	 * 整理图片本来就是"把仓库里的图片收拾干净"，统一格式是这份收拾的一部分；
+	 * 没装 Image Converter / 预设读不出来时这一步自动跳过，合并与清理照常
+	 * （见 `image/image-converter-bridge.ts`）。
+	 */
+	tidyConvertFormat: boolean;
 	/**
 	 * 「合并重复图片」跑完是否顺手执行一次 Clear Unused Images
 	 * （`oz-clear-unused-images`）的「清理未使用图片」命令。
 	 * 没装那个插件时这一步自动跳过，不影响合并。
 	 */
 	autoClearUnusedImages: boolean;
-	/** 在左侧栏放一个「整理图片」图标（点一下 = 合并重复副本 + 清理没人引用的附件） */
+	/** 在左侧栏放一个「整理图片」图标（点一下 = 转换格式 + 合并重复副本 + 清理没人引用的附件） */
 	tidyImagesRibbonIcon: boolean;
 	// ---- 图片大小 ----
 	/** 设置图片大小的默认宽度（像素），空字符串表示不指定 */
@@ -139,8 +150,11 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	// 导入的图片交给 Image Converter 转格式（默认开）：它本来就负责把粘进来的图转成 webp，
 	// 而我们导入的外部路径图片它看不见 —— 不交接就会攒一堆 png。没装它时这一项不起作用。
 	handOffImportedImages: true,
-	// 「转换全库图片格式」默认转 webp：仓库里绝大多数图片都该是 webp（省空间、Obsidian 原生支持）
+	// 图片格式转换默认转 webp：仓库里绝大多数图片都该是 webp（省空间、Obsidian 原生支持）
 	vaultConvertFormat: 'webp',
+	// 整理时顺手统一图片格式（默认开）：整理图片就是"把仓库里的图片收拾干净"，
+	// 格式统一是其中一环；目标格式沿用 vaultConvertFormat，没装 Image Converter 时自动跳过
+	tidyConvertFormat: true,
 	// 合并完顺手让 Clear Unused Images 收一遍"没人引用的附件"：两者互补（我们合并重复、它清理孤儿）
 	autoClearUnusedImages: true,
 	// 左侧栏图标：一键整理（想替代 Clear Unused Images 那个按钮的就靠它）

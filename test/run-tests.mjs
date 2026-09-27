@@ -25,6 +25,7 @@ const entryPoints = [
 	"test/image-transfer.test.ts",
 	"test/image-dedupe.test.ts",
 	"test/image-converter-bridge.test.ts",
+	"test/image-tidy.test.ts",
 	"test/image-scan.test.ts",
 	"test/image-copy.test.ts",
 	"test/image-clipboard.test.ts",

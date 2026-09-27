@@ -14,7 +14,7 @@ import { Menu, MenuItem, Notice, TFile } from "obsidian";
 import type { App, PluginManifest } from "obsidian";
 import ImageTransferPlugin from "../src/main";
 import { DEFAULT_SETTINGS } from "../src/settings/model";
-import { INJECTED_ITEM_KEYS, OWN_ITEM_COMMANDS, OWN_ITEM_SCOPES, ownMenuEntries } from "../src/ui/image-menu";
+import { INJECTED_ITEM_KEYS, OWN_ITEM_COMMANDS, OWN_ITEM_SCOPES, TIDY_IMAGES_LABEL, ownMenuEntries } from "../src/ui/image-menu";
 import type { OwnItemKey } from "../src/ui/image-menu";
 import type { MenuScope } from "../src/ui/menu-hidden";
 
@@ -105,6 +105,10 @@ const OPERATIONS: Array<{ menu: RegExp; commands: string[] }> = [
 		commands: ["organize-images-current-note", "organize-images-entire-vault"],
 	},
 	{
+		menu: /^整理图片（转换格式 \+ 合并重复副本 \+ 清理没人引用的附件）$/,
+		commands: ["tidy-images"],
+	},
+	{
 		menu: /^设置.*图片的大小$/,
 		commands: ["set-image-size-current-note", "set-image-size-entire-vault"],
 	},
@@ -157,13 +161,11 @@ const EDITOR_OPERATIONS: Array<{ menu: RegExp; commands: string[] }> = [
  * 又没有菜单入口，就登记在这里 —— 免得漏掉一个"注册了却没人用"的命令）。
  */
 const PANEL_COMMANDS: string[] = [
-	// 图片格式转换：命令面板入口（没有右键菜单项 —— 它要重写图片文件并改扩展名，
-	// 一律先弹确认框，不该在文件夹右键里变成"一键改一堆文件"）
+	// 图片格式转换：命令面板入口（没有单独的右键菜单项 —— 它要重写图片文件并改扩展名，
+	// 一律先弹确认框，不该在文件夹右键里变成"一键改一堆文件"；「整理图片」里那一步
+	// 受 tidyConvertFormat 管，入口已记在 OPERATIONS 表里）
 	"convert-images-entire-vault",
 	"convert-images-current-note",
-	// 整理图片：命令面板入口（左侧栏那个"一键整理"图标走的是同一个任务，
-	// 只是不弹确认框 —— 见下面的 ribbon 检查）
-	"tidy-images",
 ];
 
 /**
@@ -435,12 +437,16 @@ async function audit(): Promise<void> {
 	checkTrue("状态栏注册了两格", plugin.statusBarItems.length === 2, `实际注册 ${plugin.statusBarItems.length} 格`);
 	// 选区监听是 CodeMirror 扩展：Obsidian 的公开事件里没有"选区变化"
 	checkTrue("选区监听扩展已注册", plugin.editorExtensions.length === 1, `实际注册 ${plugin.editorExtensions.length} 个`);
-	// 左侧栏的「整理图片」图标：一键整理（合并 + 清理），点击回调要真的在
+	// 左侧栏的「整理图片」图标：一键整理（转换格式 + 合并 + 清理），点击回调要真的在
 	checkTrue("左侧栏注册了「整理图片」图标", plugin.ribbonItems.length === 1, `实际注册 ${plugin.ribbonItems.length} 个`);
 	const ribbon = plugin.ribbonItems[0];
+	// 提示语与命令名共用同一份文案（TIDY_IMAGES_LABEL）：漂了就说明"整合"没同步到位
 	checkList("左侧栏图标：图标名与提示语",
-		[ribbon?.icon ?? "", ribbon?.title.includes("整理图片") ? "标题含整理图片" : ribbon?.title ?? ""],
-		["image-file", "标题含整理图片"]);
+		[ribbon?.icon ?? "", ribbon?.title ?? ""],
+		["image-file", TIDY_IMAGES_LABEL]);
+	check("整理图片：命令名与左侧栏提示语一致",
+		plugin.commands.find(command => command.id === "tidy-images")?.name ?? "",
+		TIDY_IMAGES_LABEL);
 	checkTrue("左侧栏图标：点击回调已接上", typeof ribbon?.callback === "function", String(typeof ribbon?.callback));
 }
 
