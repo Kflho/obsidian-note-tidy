@@ -42,6 +42,9 @@ export const MANAGE_MENU_TITLE = '管理右键菜单…（Note Tidy）';
 /** 快速设置大小那一项 */
 export const QUICK_SIZE_MENU_TITLE = '快速设置图片大小（Note Tidy）';
 
+/** 快速修复聊天记录那一项（转换本文件内的外部图片 + 修复排版，一步做完） */
+export const QUICK_FIX_MENU_TITLE = '快速修复聊天记录（Note Tidy）';
+
 /** 我们自己往菜单里加的一项 */
 export interface OwnMenuEntry {
 	title: string;
@@ -50,38 +53,40 @@ export interface OwnMenuEntry {
 }
 
 /** 本插件菜单项的键（设置里的开关、管理面板、命令审计都按它对齐） */
-export type OwnItemKey = 'copy' | 'quickSize' | 'manage' | 'imageSubmenu' | 'textSubmenu';
+export type OwnItemKey = 'copy' | 'quickSize' | 'quickFix' | 'manage' | 'imageSubmenu' | 'textSubmenu';
 
 /** 文件菜单里那两个二级栏的标题（`menus.ts` 用它加菜单，面板用它显示） */
 export const IMAGE_SUBMENU_TITLE = '图片功能';
 export const TEXT_SUBMENU_TITLE = '文本排版';
 
 /**
- * 这五项各自的图标与说明（管理面板显示用）。
+ * 这六项各自的图标与说明（管理面板显示用）。
  * 标题不放这儿：`copy` 那条会写成"复制 3 张图片"，按张数算。
  */
 export const OWN_ITEMS: Record<OwnItemKey, { title: string; icon: string; desc: string }> = {
 	copy: { title: '复制图片（Note Tidy）', icon: 'copy', desc: '复制图片文件，可粘贴到文件夹或聊天窗口' },
 	quickSize: { title: QUICK_SIZE_MENU_TITLE, icon: 'image', desc: '使用默认尺寸直接修改当前笔记的图片大小，不弹出设置窗口' },
+	quickFix: { title: QUICK_FIX_MENU_TITLE, icon: 'zap', desc: '转换本文件内引用的外部路径图片，并把整篇排版修一遍（空格 / 缩进 / 聊天记录 / 标签 / 公式）' },
 	manage: { title: MANAGE_MENU_TITLE, icon: 'settings-2', desc: '打开本面板；关闭后可从命令面板打开' },
 	imageSubmenu: { title: IMAGE_SUBMENU_TITLE, icon: 'image', desc: '转换外部图片、重命名、整理位置、设置大小' },
 	textSubmenu: { title: TEXT_SUBMENU_TITLE, icon: 'message-square', desc: '修复笔记排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）' },
 };
 
 /**
- * 本插件的五项分别出现在哪些菜单里（管理面板按这一层分节显示）。
+ * 本插件的六项分别出现在哪些菜单里（管理面板按这一层分节显示）。
  * 与实现是同一份事实，改一处记得改另一处 —— test/image-menu.test.ts 会对着核。
  */
 export const OWN_ITEM_SCOPES: Record<OwnItemKey, MenuScope[]> = {
 	copy: ['image', 'note'],
 	quickSize: ['image', 'note'],
+	quickFix: ['image', 'note'],
 	manage: ['image', 'note', 'folder'],
 	imageSubmenu: ['folder'],
 	textSubmenu: ['folder'],
 };
 
 /** 由本模块**插进菜单**的项；其余自有项（文件菜单那两个二级栏）由 `menus.ts` 加 */
-export const INJECTED_ITEM_KEYS: OwnItemKey[] = ['copy', 'quickSize', 'manage'];
+export const INJECTED_ITEM_KEYS: OwnItemKey[] = ['copy', 'quickSize', 'quickFix', 'manage'];
 
 /**
  * 本插件自己的菜单项 ↔ 命令 ID。
@@ -93,6 +98,7 @@ export const INJECTED_ITEM_KEYS: OwnItemKey[] = ['copy', 'quickSize', 'manage'];
 export const OWN_ITEM_COMMANDS: Record<OwnItemKey, string | null> = {
 	copy: 'copy-images-to-clipboard',
 	quickSize: 'quick-set-image-size-current-note',
+	quickFix: 'quick-fix-chat-log-current-note',
 	manage: 'manage-image-menu',
 	imageSubmenu: null,
 	textSubmenu: null,
@@ -119,8 +125,8 @@ export function copyMenuTitle(count: number): string {
 /**
  * 我们自己这一轮要加进菜单的项（顺序即显示顺序）。
  *
- * - 「复制图片」「快速设置图片大小」：只在**笔记内**两个菜单里有（图片菜单 + 正文菜单）——
- *   文件夹菜单里没有图可复制，也没有"当前笔记"可改大小；
+ * - 「复制图片」「快速设置图片大小」「快速修复聊天记录」：只在**笔记内**两个菜单里
+ *   （图片菜单 + 正文菜单）—— 文件夹菜单里没有图可复制，也没有"当前笔记"可改大小 / 修排版；
  * - 「管理右键菜单」：**三个菜单里都给**。它就是这套管理功能的入口，
  *   哪个菜单里没有它，用户在那个菜单里就找不到北（2026-09 的反馈）。
  *
@@ -132,10 +138,11 @@ export function ownMenuEntries(options: {
 	settings: ImageTransferSettings;
 	/** 这次涉及哪些图片（空数组 = 不插"复制图片"） */
 	refs: ImageRef[];
-	/** 有没有笔记可操作（"快速设置图片大小"要整篇笔记） */
+	/** 有没有笔记可操作（"快速设置图片大小"与"快速修复聊天记录"要整篇笔记） */
 	hasFile: boolean;
 	copy: () => void;
 	quickSize: () => void;
+	quickFix: () => void;
 	manage: () => void;
 }): OwnMenuEntry[] {
 	const entries: OwnMenuEntry[] = [];
@@ -146,6 +153,9 @@ export function ownMenuEntries(options: {
 	}
 	if (insideNote && options.settings.imageMenuQuickSizeItem !== false && options.hasFile) {
 		entries.push({ title: QUICK_SIZE_MENU_TITLE, icon: OWN_ITEMS.quickSize.icon, action: options.quickSize });
+	}
+	if (insideNote && options.settings.imageMenuQuickFixItem !== false && options.hasFile) {
+		entries.push({ title: QUICK_FIX_MENU_TITLE, icon: OWN_ITEMS.quickFix.icon, action: options.quickFix });
 	}
 	if (options.settings.imageMenuManageItem !== false) {
 		entries.push({ title: MANAGE_MENU_TITLE, icon: OWN_ITEMS.manage.icon, action: options.manage });
@@ -277,6 +287,7 @@ export function registerImageMenu(
 				hasFile: file !== null,
 				copy: () => { if (file) void actions.copyImages(file, refs, picks.selection); },
 				quickSize: () => { if (file) void actions.quickSetImageSize(file); },
+				quickFix: () => { if (file) void actions.quickFixChatLog(file); },
 				manage: () => actions.openMenuManager(),
 			}));
 		})
@@ -301,6 +312,7 @@ export function registerImageMenu(
 				hasFile: file !== null,
 				copy: () => { if (file) void actions.copyImages(file, refs); },
 				quickSize: () => { if (file) void actions.quickSetImageSize(file); },
+				quickFix: () => { if (file) void actions.quickFixChatLog(file); },
 				manage: () => actions.openMenuManager(),
 			});
 			addOwnMenuItems(menu, entries);

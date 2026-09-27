@@ -81,6 +81,10 @@ The layout is configurable (see **Settings** below):
 - Turn **tag layout** on to move inline `#tags` to the end of their block, and **tag sorting** to order them alphabetically
 - Turn **content block sorting** on to sort a note's blocks by first letter
 
+**Quick chat-log fix** — one entry in the command palette and in the right-click menus that does both jobs at once: transfer the external-path images referenced by this note, then fix the note's layout (spaces / indent / chat log / tags / formulas). Chat logs pasted out of QQ / WeChat usually carry `file:///D:\…` images and messy spacing, so one click leaves them clean.
+
+**Fix on paste** (on by default, **Settings → 排版格式 → 聊天记录**) runs that same command automatically when what you paste looks like a chat log — at least **two** message headers (a username before a timestamp), so mentioning `会议 14:30:25` in prose does not trigger it and copying a single message (which carries no header) does not either. It deliberately waits: the text is not in the document yet while the paste event fires, so the fix runs once the note has been saved, which means it rewrites the note *including* what you just pasted (with a 5-second fallback if the editor never saves). Turn the switch off and nothing is touched automatically — the command and the menu entries still work.
+
 ### 4. Set image size in one click
 
 Replaces the usual find-and-replace chore with a command. Pick an image size once, then apply it to a note, a folder, or the whole vault.
@@ -307,8 +311,8 @@ Because items are inserted into the existing menus (rather than taking them over
 
 | Menu | What it is | This plugin adds |
 |------|------------|------------------|
-| 图片 | right-click a rendered image in a note | 复制图片 · 快速设置图片大小 · 管理右键菜单 |
-| 笔记 | right-click the note text | 复制图片 · 快速设置图片大小 · 管理右键菜单 |
+| 图片 | right-click a rendered image in a note | 复制图片 · 快速设置图片大小 · 快速修复聊天记录 · 管理右键菜单 |
+| 笔记 | right-click the note text | 复制图片 · 快速设置图片大小 · 快速修复聊天记录 · 管理右键菜单 |
 | 文件夹 | right-click a file or folder in the file explorer | 管理右键菜单 (your own 图片功能 / 文本排版 submenus are already there) |
 
 - right-click once in the menu you care about, then use **管理右键菜单…（Note Tidy）** in it (or run **管理右键菜单** from the command palette) → the panel lists what was in that menu — Obsidian's own entries, other plugins' and this plugin's;
@@ -323,10 +327,10 @@ The right-click menu is grouped into two submenus so it stays short: **图片功
 
 | Method | Action |
 |--------|--------|
-| Right-click a `.md` file | **图片功能**: convert / rename / organize locations / set size · **文本排版**: fix layout (spaces / indent / chat log / tags / formulas) |
+| Right-click a `.md` file | **图片功能**: convert / rename / organize locations / set size · **文本排版**: fix layout (spaces / indent / chat log / tags / formulas), quick chat-log fix (transfer external images + fix layout) |
 | Right-click a folder | The same two submenus, applied to every note in that folder |
-| Right-click an image (in a note, or its link in the editor) | **复制图片（Note Tidy）** is added to the menu — copies the image file itself, so it can be pasted into a folder, or into QQ / Word as a picture. Select a range first to copy several images at once (**复制 3 张图片（Note Tidy）**). The same menu also gets **快速设置图片大小（Note Tidy）** (applies the default size to the note, no dialog) and, in the image menu, **管理右键菜单…（Note Tidy）**, which lists the entries of the 图片 / 笔记 / 文件夹 menus and lets you switch them off |
-| Command palette (`Ctrl+P`) | Every menu action is also a command: convert images (current note / entire vault), rename garbled images (current note / entire vault), rename all images vault-wide (normal or forced), organize image locations (current note / entire vault), set image size (current note / entire vault), copy images to the clipboard, fix layout — spaces, indent, chat log, tags and formulas (current note / entire vault) |
+| Right-click an image (in a note, or its link in the editor) | **复制图片（Note Tidy）** is added to the menu — copies the image file itself, so it can be pasted into a folder, or into QQ / Word as a picture. Select a range first to copy several images at once (**复制 3 张图片（Note Tidy）**). The same menu also gets **快速设置图片大小（Note Tidy）** (applies the default size to the note, no dialog), **快速修复聊天记录（Note Tidy）** (transfers the note's external images and fixes its layout in one go) and, in the image menu, **管理右键菜单…（Note Tidy）**, which lists the entries of the 图片 / 笔记 / 文件夹 menus and lets you switch them off |
+| Command palette (`Ctrl+P`) | Every menu action is also a command: convert images (current note / entire vault), rename garbled images (current note / entire vault), rename all images vault-wide (normal or forced), organize image locations (current note / entire vault), set image size (current note / entire vault), copy images to the clipboard, fix layout — spaces, indent, chat log, tags and formulas (current note / entire vault), and the quick chat-log fix (transfer external images + fix layout) |
 
 ### Settings
 
@@ -351,6 +355,7 @@ Chat log formatting:
 - **Body indent** — tab, 2 spaces, 4 spaces, or none
 - **Image position in mixed messages** — image above the text, below the text, or keep the original order
 - **Blank line between messages** — only available when username, date and time are all turned off; inserts an empty line between adjacent messages so they stay visually distinct
+- **Fix on paste** — on by default. When what you paste in the editor looks like a chat log (at least two "username + timestamp" message headers), the **quick chat-log fix** runs automatically: transfer this note's external-path images, then fix its layout. The fix waits until the paste has been saved, so it rewrites the note *including* the pasted text; turn it off and pasting never changes anything by itself
 
 All defaults reproduce the previous layout exactly, so existing notes are not reformatted until you change a setting.
 
@@ -399,6 +404,7 @@ Chat log:
 - **Body indent** — tab, 2 spaces, 4 spaces, or none
 - **Image position in mixed messages** — image above the text, below the text, or keep the original order
 - **Blank line between messages** — only available when username, date and time are all turned off; inserts an empty line between adjacent messages so they stay visually distinct
+- **Fix on paste** — on by default; pasting a chat log (two or more message headers) runs the quick chat-log fix by itself once the note has been saved
 
 - **Show image count for the selection** — off by default. When on, selecting text in the editor shows how many images the selection contains in the bottom-right status bar (`🖼 选中 3 张图片`). Only embeds count (`![[photo.png]]`, `![alt](photo.png)`, including sizes / aliases / fragments and `avif` / `svg`); a plain link to an image file does not, and neither do links inside fenced code blocks or inline code. The cell stays empty while nothing is selected or the selection has no images.
 
@@ -406,6 +412,7 @@ Context menus:
 
 - **Show "copy image"** — on by default; inserts **复制图片（Note Tidy）** into the image menu and the note menu (nothing is replaced)
 - **Show "quick image size"** — on by default; inserts **快速设置图片大小（Note Tidy）** — applies the default size above to the current note without the dialog
+- **Show "quick chat-log fix"** — on by default; inserts **快速修复聊天记录（Note Tidy）** — transfers this note's external-path images and fixes its layout in one go
 - **Show "manage context menus"** — on by default; inserts the entry that opens the management panel (turn it off and use the command palette instead)
 - **Hidden menu entries** — one `scope：title` per line, scope being `图片` / `笔记` / `文件夹` (a line without a scope counts as `图片`); those entries are not shown in that menu. This list covers Obsidian's own entries and other plugins' ones — this plugin's own entries are governed by the switches above, so they can never hide themselves. The management panel fills this in for you
 
@@ -482,6 +489,12 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 3. Reload Obsidian and enable **Note Tidy** (the old entry can be removed)
 
 ## Changelog
+
+### v1.3.11
+- New: **quick chat-log fix** — transfers the external-path images this note references *and* fixes its layout (spaces / indent / chat log / tags / formulas) in one go. It is a command, an entry in the note / image right-click menus, and an entry in the file explorer's **文本排版** submenu (single notes only). Both steps run inside one batch task (images first, then layout), and the result notice says what was actually changed
+- New: **fix on paste** (**Settings → 排版格式 → 聊天记录**, on by default) — pasting something that looks like a chat log runs the quick fix automatically. The detection is deliberately narrow: at least two "username + timestamp" message headers (copying a single message carries no header, and a mention of `会议 14:30:25` in prose is not enough). It does **not** act while the paste event fires — the text is not in the document yet — but waits for the note to be saved, so the fix applies to the note *including* what you pasted (5-second fallback if the editor never saves). Turn it off and nothing is changed automatically; the command and menu entries keep working
+- New: `looksLikeChatLog` in `src/text/chat-log.ts` and `src/ui/paste-watch.ts` (with `test/paste-watch.test.ts`); rule `cross.auto-fix-paste` added to the registry
+- Fixed: two `as TFile` casts in `test/commands.test.ts` (lint warnings)
 
 ### v1.3.5
 - Fixed: **plain-text math only accepts properly spaced expressions** — a binary operator needs **one space on each side** to count (math symbols 1: operators and relation signs take a space on both sides, unless the context is not mathematical, e.g. the shortcut `ctrl+c`): `x = 0`, `x - 1`, `a + b` are still wrapped, while `x=0`, `a+b+c`, `5/10mm`, `A-7`, `F-22`, `cd /d` and `x -1` are left alone — they may be a deliberate designation, a hyphen, a shell command, or simply missing spaces, and the layout does not guess. Prefix signs are modifiers (math symbols 3: no space around them), so `x = -1` and `f(-1)` are unaffected

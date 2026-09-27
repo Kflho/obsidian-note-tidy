@@ -19,6 +19,7 @@ import {
 	INJECTED_ITEM_KEYS,
 	OWN_ITEM_COMMANDS,
 	OWN_ITEM_SCOPES,
+	QUICK_FIX_MENU_TITLE,
 	QUICK_SIZE_MENU_TITLE,
 	addOwnMenuItems,
 	copyMenuTitle,
@@ -99,47 +100,52 @@ function entryTests(): void {
 		hasFile: true,
 		copy: () => { /* 不做事 */ },
 		quickSize: () => { /* 不做事 */ },
+		quickFix: () => { /* 不做事 */ },
 		manage: () => { /* 不做事 */ },
 	};
 
-	// 图片菜单：三项（复制 / 快速设置大小 / 管理）
-	checkEqual("图片菜单：三项", ownMenuEntries({ ...base, scope: "image", refs: [REF_A] }).map(entry => entry.title),
-		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
+	// 图片菜单：四项（复制 / 快速设置大小 / 快速修复聊天记录 / 管理）
+	checkEqual("图片菜单：四项", ownMenuEntries({ ...base, scope: "image", refs: [REF_A] }).map(entry => entry.title),
+		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, QUICK_FIX_MENU_TITLE, MANAGE_MENU_TITLE]);
 	checkEqual("图片菜单：多张时带张数",
 		ownMenuEntries({ ...base, scope: "image", refs: [REF_A, { ...REF_A, target: "另一张.png" }] })[0]?.title,
 		"复制 2 张图片（Note Tidy）");
 
-	// 笔记正文菜单：三项（管理入口也在 —— 三个菜单里都能进管理面板）
-	checkEqual("笔记菜单：三项", ownMenuEntries({ ...base, scope: "note", refs: [REF_A] }).map(entry => entry.title),
-		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
+	// 笔记正文菜单：四项（管理入口也在 —— 三个菜单里都能进管理面板）
+	checkEqual("笔记菜单：四项", ownMenuEntries({ ...base, scope: "note", refs: [REF_A] }).map(entry => entry.title),
+		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, QUICK_FIX_MENU_TITLE, MANAGE_MENU_TITLE]);
 	checkEqual("笔记菜单：没有图片时不插复制项",
 		ownMenuEntries({ ...base, scope: "note", refs: [] }).map(entry => entry.title),
-		[QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
+		[QUICK_SIZE_MENU_TITLE, QUICK_FIX_MENU_TITLE, MANAGE_MENU_TITLE]);
 
-	// 文件夹菜单：只有管理入口（没有图可复制，也没有"当前笔记"可改大小）
+	// 文件夹菜单：只有管理入口（没有图可复制，也没有"当前笔记"可改大小 / 修排版）
 	checkEqual("文件夹菜单：只有管理入口",
 		ownMenuEntries({ ...base, scope: "folder", refs: [], hasFile: false }).map(entry => entry.title),
 		[MANAGE_MENU_TITLE]);
 
-	// 三个开关各自独立，且关掉之后不出现
+	// 几个开关各自独立，且关掉之后不出现
 	const noCopy = { ...DEFAULT_SETTINGS, imageMenuCopyItem: false };
 	checkEqual("关掉复制项", ownMenuEntries({ ...base, settings: noCopy, scope: "image", refs: [REF_A] }).map(entry => entry.title),
-		[QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
+		[QUICK_SIZE_MENU_TITLE, QUICK_FIX_MENU_TITLE, MANAGE_MENU_TITLE]);
 	const noQuick = { ...DEFAULT_SETTINGS, imageMenuQuickSizeItem: false };
 	checkEqual("关掉快速设置大小", ownMenuEntries({ ...base, settings: noQuick, scope: "image", refs: [REF_A] }).map(entry => entry.title),
-		["复制图片（Note Tidy）", MANAGE_MENU_TITLE]);
+		["复制图片（Note Tidy）", QUICK_FIX_MENU_TITLE, MANAGE_MENU_TITLE]);
+	const noQuickFix = { ...DEFAULT_SETTINGS, imageMenuQuickFixItem: false };
+	checkEqual("关掉快速修复聊天记录", ownMenuEntries({ ...base, settings: noQuickFix, scope: "image", refs: [REF_A] }).map(entry => entry.title),
+		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
 	const noManage = { ...DEFAULT_SETTINGS, imageMenuManageItem: false };
 	checkEqual("关掉管理入口", ownMenuEntries({ ...base, settings: noManage, scope: "image", refs: [REF_A] }).map(entry => entry.title),
-		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE]);
+		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, QUICK_FIX_MENU_TITLE]);
 
-	// 没有笔记（比如图片菜单里拿不到 file）时不插"快速设置图片大小"
-	checkEqual("没有笔记时不插快速设置大小",
+	// 没有笔记（比如图片菜单里拿不到 file）时不插"快速设置图片大小"与"快速修复聊天记录"
+	checkEqual("没有笔记时不插需要整篇笔记的项",
 		ownMenuEntries({ ...base, hasFile: false, scope: "image", refs: [REF_A] }).map(entry => entry.title),
 		["复制图片（Note Tidy）", MANAGE_MENU_TITLE]);
 
 	// 动作真的接上了
 	let copied = 0;
 	let quick = 0;
+	let fixed = 0;
 	let managed = 0;
 	const entries = ownMenuEntries({
 		...base,
@@ -147,16 +153,18 @@ function entryTests(): void {
 		refs: [REF_A],
 		copy: () => { copied++; },
 		quickSize: () => { quick++; },
+		quickFix: () => { fixed++; },
 		manage: () => { managed++; },
 	});
 	for (const entry of entries) entry.action();
-	checkEqual("三项各调自己的动作", [copied, quick, managed], [1, 1, 1]);
+	checkEqual("四项各调自己的动作", [copied, quick, fixed, managed], [1, 1, 1, 1]);
 
 	// 加进菜单
 	const menu = new Menu() as unknown as StubMenu;
 	addOwnMenuItems(menu as unknown as Menu, entries);
-	checkEqual("加进菜单的标题", menu.items.map(item => item.title), ["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
-	checkEqual("图标", menu.items.map(item => item.icon), ["copy", "image", "settings-2"]);
+	checkEqual("加进菜单的标题", menu.items.map(item => item.title),
+		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, QUICK_FIX_MENU_TITLE, MANAGE_MENU_TITLE]);
+	checkEqual("图标", menu.items.map(item => item.icon), ["copy", "image", "zap", "settings-2"]);
 	checkTrue("点了有回调", typeof menu.items[0]?.clickHandler === "function", String(menu.items[0]?.clickHandler));
 
 	const empty = new Menu() as unknown as StubMenu;
@@ -182,7 +190,7 @@ function injectorTests(): void {
 	const menuClass = Menu as unknown as typeof Menu;
 	const settings: ImageTransferSettings = { ...DEFAULT_SETTINGS };
 	let armed: ArmedMenu | null = null;
-	const actions = { copied: 0, quick: 0, managed: 0 };
+	const actions = { copied: 0, quick: 0, fixed: 0, managed: 0 };
 	// 检测结果按作用域记下来（真实实现把它写进 image-menu.ts 的模块状态，这里看同一份数据）
 	const detected: Record<string, string[]> = { image: [], note: [], folder: [] };
 
@@ -200,6 +208,7 @@ function injectorTests(): void {
 				hasFile: context.file != null,
 				copy: () => { actions.copied++; },
 				quickSize: () => { actions.quick++; },
+				quickFix: () => { actions.fixed++; },
 				manage: () => { actions.managed++; },
 			}));
 		},
@@ -224,22 +233,25 @@ function injectorTests(): void {
 	}
 
 	const native = ["复制图片", "另存为图片…"];
+	const ownFour = ["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, QUICK_FIX_MENU_TITLE, MANAGE_MENU_TITLE];
 
 	const first = rightClick("image", native);
-	checkEqual("图片菜单：原生项都在，后面接上我们三项",
+	checkEqual("图片菜单：原生项都在，后面接上我们四项",
 		first.items.map(item => item.title),
-		["复制图片", "另存为图片…", "复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
+		["复制图片", "另存为图片…", ...ownFour]);
 
 	const second = rightClick("image", native);
 	checkEqual("第二次右键照样插得进去（不能只有第一次有）",
 		second.items.map(item => item.title),
-		["复制图片", "另存为图片…", "复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
+		["复制图片", "另存为图片…", ...ownFour]);
 
 	// 点我们那几项：真的调到对应的动作
 	second.items[2]?.clickHandler?.();
 	second.items[3]?.clickHandler?.();
 	second.items[4]?.clickHandler?.();
-	checkEqual("复制 / 快速设置大小 / 管理各调一次", [actions.copied, actions.quick, actions.managed], [1, 1, 1]);
+	second.items[5]?.clickHandler?.();
+	checkEqual("复制 / 快速设置大小 / 快速修复聊天记录 / 管理各调一次",
+		[actions.copied, actions.quick, actions.fixed, actions.managed], [1, 1, 1, 1]);
 
 	checkEqual("检测到的是那次菜单里的项（按作用域分）", detected.image, native);
 
@@ -265,6 +277,7 @@ function injectorTests(): void {
 		hasFile: true,
 		copy: () => { /* 不做事 */ },
 		quickSize: () => { /* 不做事 */ },
+		quickFix: () => { /* 不做事 */ },
 		manage: () => { /* 不做事 */ },
 	}));
 	(noteMenu as unknown as Menu).addItem((item: MenuItem) => item.setTitle("复制"));
@@ -272,7 +285,7 @@ function injectorTests(): void {
 	armed = null;
 	checkEqual("笔记菜单里我们自己的项不吃隐藏名单",
 		noteMenu.items.map(item => item.title),
-		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE, "复制"]);
+		["复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, QUICK_FIX_MENU_TITLE, MANAGE_MENU_TITLE, "复制"]);
 	checkEqual("我们自己的项不进检测结果", detected.note, ["复制"]);
 
 	// 二级菜单先建、主菜单后建：只有"真要显示的那份"才算数
@@ -299,7 +312,7 @@ function injectorTests(): void {
 	const filtered = rightClick("image", native);
 	checkEqual("图片菜单过滤掉名单里的项",
 		filtered.items.map(item => item.title),
-		["复制图片", "复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
+		["复制图片", ...ownFour]);
 
 	const noteFiltered = rightClick("note", ["复制", "粘贴"]);
 	checkEqual("笔记菜单按自己的名单过滤（图片那份不影响它）",
@@ -311,19 +324,21 @@ function injectorTests(): void {
 	const selfHide = rightClick("image", native);
 	checkEqual("本插件自己的项不吃隐藏名单",
 		selfHide.items.map(item => item.title),
-		["复制图片", "另存为图片…", "复制图片（Note Tidy）", QUICK_SIZE_MENU_TITLE, MANAGE_MENU_TITLE]);
+		["复制图片", "另存为图片…", ...ownFour]);
 
-	// 三个开关各自管一项
+	// 几个开关各自管一项
 	settings.menuHiddenItems = "";
 	settings.imageMenuCopyItem = false;
 	settings.imageMenuQuickSizeItem = false;
+	settings.imageMenuQuickFixItem = false;
 	settings.imageMenuManageItem = false;
 	const off = rightClick("image", native);
-	checkEqual("三个开关都关掉时只剩别人的项", off.items.map(item => item.title), native);
+	checkEqual("四个开关都关掉时只剩别人的项", off.items.map(item => item.title), native);
 
 	// 没上膛时一个字节都不碰
 	settings.imageMenuCopyItem = true;
 	settings.imageMenuQuickSizeItem = true;
+	settings.imageMenuQuickFixItem = true;
 	settings.imageMenuManageItem = true;
 	const plain = new Menu() as unknown as StubMenu;
 	(plain as unknown as Menu).addItem((item: MenuItem) => item.setTitle("随便一个菜单"));
@@ -446,9 +461,14 @@ function orderTests(): void {
 
 // ------------------------------- 8. 开关表与实际菜单项一致
 function scopeTableTests(): void {
-	const expectedTitle = (key: OwnItemKey): string => key === "copy"
-		? "复制图片（Note Tidy）"
-		: key === "quickSize" ? QUICK_SIZE_MENU_TITLE : MANAGE_MENU_TITLE;
+	const titles: Record<OwnItemKey, string> = {
+		copy: "复制图片（Note Tidy）",
+		quickSize: QUICK_SIZE_MENU_TITLE,
+		quickFix: QUICK_FIX_MENU_TITLE,
+		manage: MANAGE_MENU_TITLE,
+		imageSubmenu: "图片功能",
+		textSubmenu: "文本排版",
+	};
 
 	for (const scope of ["image", "note", "folder"] as MenuScope[]) {
 		// 只比"注入进去"的那几项：文件菜单那两个二级栏由 menus.ts 加，不在这条路上
@@ -460,12 +480,14 @@ function scopeTableTests(): void {
 			hasFile: scope !== "folder",
 			copy: () => { /* 不做事 */ },
 			quickSize: () => { /* 不做事 */ },
+			quickFix: () => { /* 不做事 */ },
 			manage: () => { /* 不做事 */ },
 		});
-		checkEqual(`开关表与实际菜单项一致（${scope}）`, entries.map(entry => entry.title), keys.map(expectedTitle));
+		checkEqual(`开关表与实际菜单项一致（${scope}）`, entries.map(entry => entry.title), keys.map(key => titles[key]));
 	}
 
-	checkEqual("五项都有登记（注入项配命令，二级栏是容器）", Object.keys(OWN_ITEM_COMMANDS).sort(), ["copy", "imageSubmenu", "manage", "quickSize", "textSubmenu"]);
+	checkEqual("六项都有登记（注入项配命令，二级栏是容器）", Object.keys(OWN_ITEM_COMMANDS).sort(),
+		["copy", "imageSubmenu", "manage", "quickFix", "quickSize", "textSubmenu"]);
 }
 
 // ------------------------------- 9. 两层都在时，隐藏项也要留在检测结果里

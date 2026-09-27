@@ -42,6 +42,24 @@ export const DEFAULT_CHAT_LOG_OPTIONS: ChatLogOptions = {
 const TIME_ANCHOR_RE =
 	/(?:\d{1,4}[-/]\d{1,2}[-/]\d{1,2}(?::?\s+)?\d{1,2}:\d{2}:\d{2})|(?:\d{1,2}[-/]\d{1,2}(?::?\s+)?\d{1,2}:\d{2}:\d{2})|(?:\d{1,2}:\d{2}:\d{2})/g;
 
+/** 一个时间戳锚点在原文中的位置与原文 */
+interface TimeAnchor {
+	start: number;
+	end: number;
+	text: string;
+}
+
+/** 扫出文本里所有时间戳锚点（排版与"这像不像聊天记录"共用同一把尺子） */
+function findTimeAnchors(text: string): TimeAnchor[] {
+	const anchors: TimeAnchor[] = [];
+	const regex = new RegExp(TIME_ANCHOR_RE.source, 'g');
+	let m: RegExpExecArray | null;
+	while ((m = regex.exec(text)) !== null) {
+		anchors.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+	}
+	return anchors;
+}
+
 /** 时间戳之前最后一个非空白 token —— 旧实现用来识别用户名 */
 const USER_BEFORE_ANCHOR_RE = /([^\n[\]\s:|：]+)\s*[:：]?\s*$/;
 
@@ -165,6 +183,34 @@ function findUsernameLessHeaderLine(rawContent: string, anchorStart: number, anc
 	return NORMALIZED_HEADER_RE.test(rawContent.substring(anchorStart, anchorEnd)) ? lineStart : -1;
 }
 
+/** 这个时间戳是不是"一条消息的头部" */
+function isMessageHeader(text: string, anchor: TimeAnchor): boolean {
+	// ① 本插件写出的无用户名头部：整行只有归一化时间戳
+	if (findUsernameLessHeaderLine(text, anchor.start, anchor.end) >= 0) return true;
+	// ② QQ / 微信 的头部：时间戳在同一行，前面是用户名
+	const lineStart = text.lastIndexOf('\n', anchor.start - 1) + 1;
+	return USER_BEFORE_ANCHOR_RE.test(text.substring(lineStart, anchor.start));
+}
+
+/**
+ * 这段文本像不像"粘贴进来的聊天记录"（决定要不要自动执行快速修复）。
+ *
+ * 判据用的是排版引擎自己的那把尺子：**至少两条消息头部**才算 —— 头部 = 时间戳前面
+ * 同一行有用户名（`张三 2024/1/5 14:30:25`），或者整行就是本插件写出的无用户名时间戳。
+ *
+ * 为什么是两条而不是一条：只认一条太容易误伤（正文里写一句 `会议 14:30:25` 就命中了），
+ * 而复制单条消息本来也不带头部 —— QQ / 微信 只在你一次复制多条时才写出"用户名 + 时间戳"。
+ */
+export function looksLikeChatLog(text: string): boolean {
+	let headers = 0;
+	for (const anchor of findTimeAnchors(text)) {
+		if (!isMessageHeader(text, anchor)) continue;
+		headers++;
+		if (headers >= 2) return true;
+	}
+	return false;
+}
+
 /**
  * 调整一条消息内的图文顺序。
  * 仅当图片与文字同时存在时才重排；纯图片或纯文字保持原样，避免无谓改动。
@@ -207,12 +253,7 @@ export function formatChatLog(
 ): string {
 	const currentYear = now.getFullYear().toString();
 
-	const anchors: { start: number; end: number; timeStr: string }[] = [];
-	const anchorRegex = new RegExp(TIME_ANCHOR_RE.source, 'g');
-	let m: RegExpExecArray | null;
-	while ((m = anchorRegex.exec(rawContent)) !== null) {
-		anchors.push({ start: m.index, end: m.index + m[0].length, timeStr: m[0] });
-	}
+	const anchors = findTimeAnchors(rawContent);
 
 	if (anchors.length === 0) return rawContent;
 
@@ -304,7 +345,7 @@ export function formatChatLog(
 		}
 
 		// 2. 归一化日期与时间
-		const rawTime = anchor.timeStr.trim().replace(/-/g, '/');
+		const rawTime = anchor.text.trim().replace(/-/g, '/');
 		const timePartMatch = rawTime.match(/(\d{1,2}:\d{2}:\d{2})$/);
 		const datePartStr = rawTime.replace(/\s*(\d{1,2}:\d{2}:\d{2})$/, "").trim();
 

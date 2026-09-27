@@ -180,4 +180,19 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 			await tasks.typeset(app.vault.getMarkdownFiles(), '整个仓库');
 		}
 	});
+
+	plugin.addCommand({
+		id: 'quick-fix-chat-log-current-note',
+		name: '快速修复聊天记录（转换外部图片 + 修复排版）',
+		// 不用 editorCallback：那个在阅读模式下会让命令从面板里消失，而聊天记录多半是在阅读模式里看的
+		checkCallback: (checking: boolean) => {
+			const view = app.workspace.getActiveViewOfType(MarkdownView);
+			const file = view?.file ?? null;
+			if (!file) return false;
+			if (!checking) {
+				void tasks.quickFixChatLog(file);
+			}
+			return true;
+		}
+	});
 }

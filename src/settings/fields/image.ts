@@ -117,6 +117,12 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 				control: { type: 'toggle' },
 			},
 			{
+				key: 'imageMenuQuickFixItem',
+				name: '「快速修复聊天记录」菜单项',
+				desc: '在笔记中右键时，菜单中加入「快速修复聊天记录（Note Tidy）」：把本文件里引用的外部路径图片收进仓库，并把整篇排版修一遍（空格 / 缩进 / 聊天记录 / 标签 / 公式）。相当于「转换当前笔记中的外部图片」与「修复当前笔记的排版」两步一次做完',
+				control: { type: 'toggle' },
+			},
+			{
 				key: 'imageMenuManageItem',
 				name: '「管理右键菜单」菜单项',
 				desc: '在图片、笔记与文件夹的右键菜单中加入「管理右键菜单…（Note Tidy）」，用于查看菜单中的项目并控制显示',

@@ -11,7 +11,7 @@
  * 第 3 级针对的是刻意构造的对抗性输入（如 `[图片]:` 这类无法解析的伪用户名
  * 搭配纯时分秒时间戳）：这类输入旧版同样无法一次到底，但绝不允许无限增长或丢字。
  */
-import { formatChatLog, DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/text/chat-log";
+import { formatChatLog, looksLikeChatLog, DEFAULT_CHAT_LOG_OPTIONS, resolveIndent } from "../src/text/chat-log";
 import type { ChatLogOptions, ChatIndent, ChatImageOrder } from "../src/text/chat-log";
 
 const IMG = "![[Pasted image 20240101120000.png]]";
@@ -404,6 +404,31 @@ function fuzzConvergenceTests(): void {
 	);
 }
 
+// --------------------------------------- 4. 这像不像聊天记录（粘贴自动修复的判据）
+function looksLikeTests(): void {
+	const chatLogs: Array<[string, string]> = [
+		["两条消息（QQ 竖排）", "张三 2024/1/5 14:30:25\n你好\n李四 2024/1/5 14:31:02\n在的"],
+		["两条消息（QQ 同行）", "张三: 2024/1/5 14:30:25 你好 李四: 2024/1/5 14:31:02 在的"],
+		["本插件排版过的结果（无用户名头部）", "2024/01/05 14:30:25\n\t你好\n2024/01/05 14:31:02\n\t在的"],
+		["带图片的聊天记录", "张三 2024/1/5 14:30:25\n" + IMG + "\n李四 2024/1/5 14:31:02\n在的"],
+	];
+	for (const [name, text] of chatLogs) {
+		checkTrue(`像聊天记录：${name}`, looksLikeChatLog(text), show(text));
+	}
+
+	// 只认一条太容易误伤（正文里提一句时间就命中了），而复制单条消息本来也不带头部
+	const others: Array<[string, string]> = [
+		["普通笔记", "这是一段普通笔记，没有任何时间戳。"],
+		["只有一条消息头部", "张三 2024/1/5 14:30:25\n你好，文件收到了吗"],
+		["正文里提到一个时间", "会议 14:30:25 开始，记得提前十分钟到。"],
+		["两条没有用户名的纯时间", "14:30:25 开始\n15:00:00 结束"],
+		["空文本", ""],
+	];
+	for (const [name, text] of others) {
+		checkTrue(`不像聊天记录：${name}`, !looksLikeChatLog(text), show(text));
+	}
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 1. 期望输出 ===");
 goldenTests();
@@ -413,6 +438,9 @@ strictIdempotencyTests();
 
 console.log("=== 3. 病态输入收敛性 ===");
 fuzzConvergenceTests();
+
+console.log("=== 4. 像不像聊天记录 ===");
+looksLikeTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

@@ -8,9 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Images**: transfers external-path images (e.g. `file:///D:\...`) into the vault as internal `![[...]]` links, renames garbled image files, sets image sizes, and re-links images copied across folders.
 - **Text**: typesets notes — plain-text math → `$…$`, LaTeX code layout, CJK/English/formula spacing, punctuation width by language, leading indentation, block markers, list numbering, heading levels, tag placement and sorting, content block sorting, and QQ/WeChat chat log reformatting.
+- **Quick chat-log fix**: one command / menu entry doing "transfer this note's external images" **and** "fix this note's layout" inside one batch task (`quick-fix-chat-log-current-note` → `tasks.quickFixChatLog`). With `autoFixChatLogOnPaste` (on by default) it also runs by itself after a chat log is pasted (`ui/paste-watch.ts`).
 - **Status bar** (optional, off by default): shows how many images the current editor selection contains (`showSelectionImageCount`).
 - **Clipboard**: copies image *files* to the system clipboard (right-click an image, or the command) so they can be pasted into a folder — not just into QQ/Word. Multiple images at once by selecting them, and when the selection also contains text the text rides along as HTML so QQ/WeChat/Word paste "sentence + pictures"; an optional Ctrl+C takeover in the editor does the same without going through the menu (`takeOverCopyShortcut`, off by default).
-- **Context menus**: three menus (image / note / file explorer) can be inspected and have their entries switched on and off; this plugin only ever *inserts* its own items (复制图片 / 快速设置图片大小 / 管理右键菜单) and never takes a menu over.
+- **Context menus**: three menus (image / note / file explorer) can be inspected and have their entries switched on and off; this plugin only ever *inserts* its own items (复制图片 / 快速设置图片大小 / 快速修复聊天记录 / 管理右键菜单) and never takes a menu over.
 
 ## Commands
 
@@ -56,7 +57,7 @@ The esbuild config (`esbuild.config.mjs`) bundles `src/main.ts` into `main.js` (
 ```
 src/
   main.ts               # 插件入口：只做生命周期与装配（读设置、把各部件接起来、注册命令与菜单）
-  commands.ts           # 15 条命令的注册（命令 ID 是稳定接口，test/commands.test.ts 逐条比对菜单）
+  commands.ts           # 16 条命令的注册（命令 ID 是稳定接口，test/commands.test.ts 逐条比对菜单）
   tasks.ts              # 任务编排：每种操作一份实现，命令面板 / 右键菜单 / 弹窗三条路都落到这里
   batch.ts              # 批量外壳：互斥锁 + 通知屏蔽 + 状态栏进度 + 出错兜底 + 结果通知
   rule-registry.ts      # 规则登记表：规范出处 ↔ 开关 ↔ 实现 ↔ 测试（不进 main.js，只有测试与文档用它）
@@ -71,7 +72,7 @@ src/
     list-numbering.ts   # 列表序号整理（保证每个列表首项编号是 1）
     heading-levels.ts   # 标题级别整理（子标题与父标题恰好差一级，多标题并行算）
     chapter-title.ts    # 章节 / 课次 / 附录这类标题标记的判定（空格排版与智能公式共用一份）
-    chat-log.ts         # QQ/微信聊天记录排版
+    chat-log.ts         # QQ/微信聊天记录排版 + looksLikeChatLog（这段文本像不像聊天记录）
     math-wrap.ts        # 智能公式：正文里的 `矩阵 A`、`n维`、`V(F)`、`x = 0`、`λ` 自动包 `$…$`
     latex.ts            # 代码格式：$$…$$ 与行内 $…$ 的 LaTeX 代码
     spacing/            # 空格排版：index.ts（接口 + fixSpacing）/ tokenize.ts（分词）/ gap.ts（词间判定）
@@ -102,6 +103,7 @@ src/
     menu-hidden.ts      # 隐藏名单（`作用域：标题`）的解析与生成（纯函数）
     menu-manage-modal.ts# 右键菜单管理面板：图片 / 笔记 / 文件夹三节，开关各项
     copy-shortcut.ts    # 可选的"接管编辑器里的 Ctrl+C"：选中图片时改走复制文件那条路
+    paste-watch.ts      # 粘贴聊天记录时自动执行「快速修复聊天记录」（editor-paste 只看不动，等落盘后再修）
     image-size-modal.ts # 图片大小弹窗
     confirm-rename-modal.ts # 批量重命名确认
     progress.ts         # 状态栏进度
@@ -202,14 +204,28 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 - **抢到就 `preventDefault` + `stopPropagation`**，否则 Obsidian 自己还会复制一遍，把刚写进去的文件挤掉；
 - **选区里还有文字时连文字一起复制**（用户按 Ctrl+C 就是"选了什么复制什么"）：走图文混排那条路 —— 聊天窗口里贴出"文字 + 图片"。只有纯图片选区才走"只放文件列表"那条老路，所以**要往文件夹里粘文件，就选纯图片**（或右键用「复制图片」菜单项）。
 
+### 「快速修复聊天记录」与粘贴自动修复（`tasks.quickFixChatLog` + `ui/paste-watch.ts`）
+
+一条命令把两件事做完：**转换本文件内的外部图片**（`image.transfer`）+ **修一遍排版**（`text.*` 整条流水线）。从 QQ / 微信 复制出来的聊天记录正文里往往是 `file:///D:\…` 这类外部图片、排版也乱，用户要的是"一下就干净"。入口：命令面板（`quick-fix-chat-log-current-note`）、笔记正文 / 笔记里图片的右键菜单（`QUICK_FIX_MENU_TITLE`，受 `imageMenuQuickFixItem` 管）、文件浏览器「文本排版」二级栏（只给单篇笔记 —— 文件夹那一路是一键改一堆笔记，不该没有确认步骤）。
+
+- **两步必须在同一个批量壳里**：`BatchRunner` 有互斥锁，分两次调用第二次会被"已有任务在执行"挡掉。顺序是先收图片再排版（排版会把聊天记录里的图片挪到消息尾部，收进来的 `![[…]]` 也一并排好）；
+- **结果按实际发生了什么汇报**：只有真的改了东西才说"修复完成"，什么都没改时提示"没有需要修复的内容"。
+
+粘贴自动修复（`autoFixChatLogOnPaste`，**默认开**）挂在官方的 `editor-paste` 上：
+
+- **只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），只读剪贴板的纯文本；`evt.defaultPrevented` 为真说明别的插件已经接管了，我们就不看。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）；
+- **判定很窄**（`looksLikeChatLog`，与排版共用时间戳正则）：至少**两条**"消息头部"（时间戳前同一行有用户名，或整行是本插件写出的无用户名时间戳）。只认一条会把 `会议 14:30:25` 这种正文误判，而复制单条消息本来也不带时间戳头部；
+- **粘贴那一刻绝不动手**：事件派发时粘贴的内容还没落进文档，此刻读到的是粘贴之前的正文 —— 修完写盘会被编辑器随后的保存覆盖（"改了又弹回去"）。所以只登记一笔（`PasteFixScheduler`），等这篇笔记**落盘**（`vault` 的 `modify`）再跑；编辑器迟迟不保存时用 `PASTE_FALLBACK_MS` 兜底；
+- **等待表的三条规矩**：同一篇连着粘只留最后一次；跑之前先把自己从表里删掉（我们自己的写盘也会触发 `modify`，不删就会自己触发自己）；插件卸载时 `dispose()` 清空，卸载后不再写仓库。
+
 ### 右键菜单怎么插项、怎么管理（`ui/image-menu.ts` + `menu-injector.ts`）
 
 Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件基本都自己弹一份（`preventDefault` 掉原生那份），代价是原生项与其它插件加的项全没了。本插件的做法是**只插自己的项，谁都不删**，顺带把三个菜单都变成"可看、可开关"的：
 
 | 菜单 | 作用域 | 怎么加我们的项 | 我们的项 |
 | --- | --- | --- | --- |
-| 笔记里渲染出来的图片 | `image` | 菜单将要显示时插进去（`menu-injector.ts`） | 复制图片 / 快速设置图片大小 / 管理右键菜单 |
-| 笔记正文 | `note` | 官方的 `editor-menu` 事件，只追加 | 复制图片 / 快速设置图片大小 / 管理右键菜单 |
+| 笔记里渲染出来的图片 | `image` | 菜单将要显示时插进去（`menu-injector.ts`） | 复制图片 / 快速设置图片大小 / 快速修复聊天记录 / 管理右键菜单 |
+| 笔记正文 | `note` | 官方的 `editor-menu` 事件，只追加 | 复制图片 / 快速设置图片大小 / 快速修复聊天记录 / 管理右键菜单 |
 | 文件浏览器 | `folder` | 菜单将要显示时插进去 | 管理右键菜单（"图片功能 / 文本排版"二级栏原本就走 `file-menu`） |
 
 「管理右键菜单」**三个菜单里都给** —— 它就是这套管理功能的入口，哪个菜单里没有它，用户在那个菜单里就找不到北。
@@ -223,7 +239,7 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 - **不能认"第一份菜单"**：Obsidian 的编辑器菜单带二级菜单（格式 / 块类型那一套：正文、1 级标题…、引用、任务列表、表格、脚注、标注），而二级菜单可能比主菜单**先**建 —— 认错了就会把二级菜单的项当成"笔记菜单里有什么"（2026-09 的 bug）。现在按菜单各记各的，`show*` 时才决定谁算数；
 - **菜单对象会被复用**：记号（Symbol）存的是"这次上膛的编号"而不是布尔，编号对不上就说明是上一次右键留下的记号；
 - **我们自己的项要在构建函数上打 `OWN_MENU_ITEM` 记号**（`addOwnMenuItems` 与 `menus.ts` 的 `addSubmenuEntry` 负责打）：我们的项同样走 `menu.addItem`，**任何加法路径**都得豁免过滤与摘除，否则会被隐藏名单误伤（"管理右键菜单"被自己藏掉 / 「图片功能」被摘掉 —— 2026-09 的 bug）、还会混进"检测到的项"里；
-- **本插件自己的项只认自己的开关**（`imageMenuCopyItem` / `imageMenuQuickSizeItem` / `imageMenuManageItem` / `fileMenuImageSubmenu` / `fileMenuTextSubmenu`，单一数据源见 `image-menu.ts` 的 `OWN_ITEMS` / `OWN_ITEM_SCOPES` / `OWN_ITEM_COMMANDS`）；
+- **本插件自己的项只认自己的开关**（`imageMenuCopyItem` / `imageMenuQuickSizeItem` / `imageMenuQuickFixItem` / `imageMenuManageItem` / `fileMenuImageSubmenu` / `fileMenuTextSubmenu`，单一数据源见 `image-menu.ts` 的 `OWN_ITEMS` / `OWN_ITEM_SCOPES` / `OWN_ITEM_COMMANDS`）；
 - **面板上的开关一律"开着 = 显示"**（别做成"勾上 = 隐藏"，用户会把"开启"理解成勾上，然后把自己的入口关掉）；
 - **插项要在 `show*` 时做**：在第一个 `addItem` 时插会插进菜单中间；顺序同样只能在显示后用 `moveOwnItemsFirst` 重排（另有一次微任务兜底，认最后建的那份菜单）。
 
@@ -242,7 +258,7 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 
 **加一个设置项**：只改 `src/settings/model.ts` + `src/settings/fields/`。面板的两条渲染路径（1.13+ 声明式 / 1.13 以下手写 DOM）都由字段表生成，`test/settings.test.ts` 核对"每个字段有且只有一条定义"；同时要让 `rule-registry.ts` 里某条规则用上这个开关（测试会查"有没有没人管的开关"）。
 
-**加一条命令 / 菜单项**：`src/commands.ts` + `src/ui/menus.ts`。命令 ID 是已发布版本的稳定接口，`test/commands.test.ts` 会逐条比对菜单与命令表 —— **文件菜单**（`file-menu`）记在 `OPERATIONS`，**编辑器 / 图片右键菜单**（`editor-menu`，如「复制图片」）记在 `EDITOR_OPERATIONS`，两张表各自与命令一一对应。
+**加一条命令 / 菜单项**：`src/commands.ts` + `src/ui/menus.ts`，插进笔记 / 图片菜单的项还要在 `src/ui/image-menu.ts` 登记（`OWN_ITEMS` 标题说明图标、`OWN_ITEM_SCOPES` 出现在哪几层、`OWN_ITEM_COMMANDS` 对应哪条命令、`INJECTED_ITEM_KEYS` 参与注入），设置里给它一个开关并在 `tasks.ts` 的 `openMenuManager` 里接上，最后同步管理面板。命令 ID 是已发布版本的稳定接口，`test/commands.test.ts` 会逐条比对菜单与命令表 —— **文件菜单**（`file-menu`）记在 `OPERATIONS`，**编辑器 / 图片右键菜单**（`editor-menu`，如「复制图片」）记在 `EDITOR_OPERATIONS`，**注入进图片 / 文件夹菜单的项**记在 `INJECTED_OPERATIONS` 与 `EXPECTED_OWN_ITEMS`，几张表各自与命令一一对应。
 
 **改了规范笔记之后**：先改 `src/rule-registry.ts` 里的章节路径与条目号，跑 `npm test` —— 对不上会直接列出是哪几条；再重新生成 `docs/规则登记表.md`。规范笔记不在仓库里（在 vault 的 `data/data note/data note.md`），`SPEC_NOTE_PATH` 找不到时**只打印一行 ℹ️ 就跳过核对**（CI 上正常），本地要看到核对结果就确认那个路径对得上，必要时用 `NOTE_TIDY_SPEC` 指过去。注意测试能抓到"找不到第 N 条"，但抓不到"编号没变、内容换了"（例如 `英文符号 2` 从引号改成了省略号），所以改完要顺手核对该条目说的还是不是那条规则。
 

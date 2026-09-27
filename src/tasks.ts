@@ -48,6 +48,8 @@ export interface TaskActions {
 	openImageSize(files: TFile[], scopeLabel: string): void;
 	/** 快速设置一篇笔记的图片大小：直接用设置里的默认尺寸，不弹窗 */
 	quickSetImageSize(file: TFile): Promise<void>;
+	/** 快速修复聊天记录：转换本文件内的外部图片 + 修复排版（两步一次做完） */
+	quickFixChatLog(file: TFile | null): Promise<void>;
 	/** 复制图片到系统剪贴板（可在文件夹里粘出文件，聊天窗口里贴出图片） */
 	copyImages(file: TFile, refs: ImageRef[], selection?: CopySelection | null): Promise<void>;
 	/** 打开「图片右键菜单」管理面板（看检测到的菜单项、开关哪些显示） */
@@ -440,6 +442,7 @@ export class ImageTasks implements TaskActions {
 			ownItems: {
 				copy: settings.imageMenuCopyItem !== false,
 				quickSize: settings.imageMenuQuickSizeItem !== false,
+				quickFix: settings.imageMenuQuickFixItem !== false,
 				manage: settings.imageMenuManageItem !== false,
 				imageSubmenu: settings.fileMenuImageSubmenu !== false,
 				textSubmenu: settings.fileMenuTextSubmenu !== false,
@@ -447,6 +450,7 @@ export class ImageTasks implements TaskActions {
 			save: async ({ hidden, ownItems }) => {
 				settings.imageMenuCopyItem = ownItems.copy;
 				settings.imageMenuQuickSizeItem = ownItems.quickSize;
+				settings.imageMenuQuickFixItem = ownItems.quickFix;
 				settings.imageMenuManageItem = ownItems.manage;
 				settings.fileMenuImageSubmenu = ownItems.imageSubmenu;
 				settings.fileMenuTextSubmenu = ownItems.textSubmenu;
@@ -470,6 +474,46 @@ export class ImageTasks implements TaskActions {
 			(count, processed, failed) =>
 				`🎉 ${where}共修复了 ${count} 篇笔记的排版。` +
 				`本次处理 ${processed} 篇${failed > 0 ? `（${failed} 篇出错）` : ''}；${this.describeLayoutSwitches()}`
+		);
+	}
+
+	/**
+	 * 快速修复聊天记录：**本文件内的外部图片收进仓库 + 整篇排版修一遍**，一次点完。
+	 *
+	 * 就是「转换当前笔记的外部图片」与「修复当前笔记的排版」两步连做 —— 从 QQ / 微信
+	 * 复制出来的聊天记录，正文里是 `file:///D:\…` 这类外部图片、排版也乱七八糟，
+	 * 用户要的是"一下就干净"，而不是分两次点两下。
+	 *
+	 * 两步**必须待在同一个批量壳里**：壳里有互斥锁，分两次调用第二次会被当成
+	 * "已有任务在执行"挡掉。先收图片再排版 —— 排版把聊天记录的图片挪到消息尾部，
+	 * 收进来的 `![[…]]` 也一并按规矩排好。
+	 */
+	async quickFixChatLog(file: TFile | null): Promise<void> {
+		await this.runner.run(
+			{
+				label: '⚡ 快速修复聊天记录',
+				files: file ? [file] : [],
+				failureMessage: '❌ 处理过程中发生意外错误，请检查控制台。',
+			},
+			async (ctx) => {
+				if (!file) return '⚠️ 无法获取当前文件，请确保您打开了一篇笔记！';
+
+				// ① 外部路径的图片 → 收进仓库并换成内部链接
+				const transferred = await transferExternalImages(this.app, this.getSettings(), file);
+				// ② 文本排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）
+				const typeset = await this.typesetOne(file);
+
+				if (!transferred && !typeset) {
+					ctx.progress.clear();
+					return 'ℹ️ 没有需要修复的内容：本文件里没有外部图片，排版也已经规范。';
+				}
+
+				ctx.progress.finish('✅ 修复完成');
+				const done: string[] = [];
+				if (transferred) done.push('已转换外部图片');
+				if (typeset) done.push('已修复排版');
+				return `🎉 聊天记录快速修复完成（${done.join('，')}）。${this.describeLayoutSwitches()}`;
+			}
 		);
 	}
 

@@ -7,6 +7,7 @@ import { ImageTasks } from './tasks';
 import { registerFileMenu } from './ui/menus';
 import { registerImageMenu } from './ui/image-menu';
 import { registerCopyShortcut } from './ui/copy-shortcut';
+import { registerPasteAutoFix } from './ui/paste-watch';
 import { NoticeSuppressor } from './ui/notice-suppressor';
 import { StatusBarProgress } from './ui/progress';
 import { SelectionImageCount } from './ui/selection-count';
@@ -50,6 +51,8 @@ export default class ImageTransferPlugin extends Plugin {
 		registerImageMenu(this, this.tasks, () => this.settings);
 		// 可选的 Ctrl+C 接管（设置里开启后才生效）
 		registerCopyShortcut(this, this.tasks, () => this.settings);
+		// 粘贴聊天记录时自动执行「快速修复聊天记录」（设置里可关）
+		registerPasteAutoFix(this, this.tasks, () => this.settings);
 
 		this.addSettingTab(new ImageTransferSettingTab(this.app, this));
 
