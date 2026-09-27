@@ -360,6 +360,57 @@ export function findImageConverter(app: App): ConverterHandle | null {
 	return candidate as unknown as ConverterHandle;
 }
 
+/** 一次转换计划：预设参数 + 目标文件名 + 目标扩展名 */
+interface ConversionPlan {
+	values: ConverterPreset;
+	raw: unknown;
+	/** 转换后的文件名（与源文件名同词干、换扩展名） */
+	targetName: string;
+	/** 目标扩展名（小写、不带点），例如 `webp` */
+	extension: string;
+}
+
+/**
+ * 这张图交给转码器会怎么转（纯判定，不读字节、不碰仓库）。
+ *
+ * **判定只有这一处**：`convertImageBytes` 照它决定转不转、写什么名字，
+ * `handOffExtension` 拿它回答"这张图最终是什么格式"。
+ */
+function planConversion(
+	handle: ConverterHandle | null,
+	sourceName: string,
+	formatOverride?: string
+): ConversionPlan | null {
+	if (!handle) return null;
+	const preset = readConverterPreset(handle.settings, formatOverride);
+	if (!preset) return null;
+	const { values, raw } = preset;
+	if (!shouldConvertFile(sourceName, values)) return null;
+	const targetName = convertedFileName(sourceName, values.outputFormat);
+	const extension = targetExtension(values.outputFormat);
+	if (!targetName || !extension) return null;
+	return { values, raw, targetName, extension };
+}
+
+/**
+ * 这张图最终会是什么扩展名（`webp` / `jpg`…，不带点）：没装、预设不转换、
+ * 跳过模式命中、已经是目标格式时返回 `null`（= 按原格式导入）。
+ *
+ * 用途只有一个 —— 起名字**之前**先问一句（`transfer.ts` 的导入循环）：交接转格式时
+ * 落盘的是目标格式那个名字，命名得把"转换后那一路"也占上。同一个词干下两张源格式不同的图
+ * （png + jpg）落在同一秒时，只检查源格式的名字会让第二张转出来的 `.webp` 撞上第一张，
+ * 转码器撞名即放弃 —— 于是"只有第一张转了 webp，后面几张还是 png/jpg"（2026-09 用户报的）。
+ *
+ * @param fileName 源格式的文件名：判"是不是已经是目标格式"、跳过模式命中与否都看它
+ */
+export function handOffExtension(
+	handle: ConverterHandle | null,
+	fileName: string,
+	formatOverride?: string
+): string | null {
+	return planConversion(handle, fileName, formatOverride)?.extension ?? null;
+}
+
 /**
  * 全库扫描用：这批文件里哪些该转换（纯判定，便于测试）。
  *
@@ -394,14 +445,11 @@ export async function convertImageBytes(
 	if (!handle) return null;
 
 	try {
-		const preset = readConverterPreset(handle.settings, formatOverride);
-		if (!preset) return null;
-		const { values, raw } = preset;
+		// 转不转、叫什么名字：判定与 `handOffExtension` 共用一份（见 `planConversion`）
+		const plan = planConversion(handle, input.name, formatOverride);
+		if (!plan) return null;
+		const { values, raw, targetName } = plan;
 
-		if (!shouldConvertFile(input.name, values)) return null;
-
-		const targetName = convertedFileName(input.name, values.outputFormat);
-		if (!targetName) return null;
 		const folder = input.folder ?? '';
 		const targetPath = vaultPathFor(folder, targetName);
 		// 撞名就放弃：宁可按原格式留着，也不覆盖仓库里已有的文件
