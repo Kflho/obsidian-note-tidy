@@ -123,6 +123,12 @@ export const IMAGE_SECTIONS: FieldSection[] = [
 				control: { type: 'toggle' },
 			},
 			{
+				key: 'imageMenuTypesetItem',
+				name: '「排版选中内容」菜单项',
+				desc: '在笔记正文里选中一段内容后右键，菜单中加入「排版选中内容（Note Tidy）」：只把这段内容排版修一遍（并转换选区里引用的外部路径图片），笔记其余部分一个字符都不动。整篇排版需要在"一条消息的正文到哪儿结束"上做取舍，选中一段再排版就没有这个歧义——想精确控制只排哪一段时用它',
+				control: { type: 'toggle' },
+			},
+			{
 				key: 'imageMenuManageItem',
 				name: '「管理右键菜单」菜单项',
 				desc: '在图片、笔记与文件夹的右键菜单中加入「管理右键菜单…（Note Tidy）」，用于查看菜单中的项目并控制显示',

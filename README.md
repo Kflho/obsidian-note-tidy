@@ -77,13 +77,49 @@ The layout is configurable (see **Settings** below):
 - Toggle each piece of header info independently — username, date, time
 - Choose the body indent — tab, 2 spaces, 4 spaces, or none
 - When a message contains both an image and text, choose whether the image goes above or below the text (or keep the original order)
+- **Adjacent messages in time order** (on by default) — see below
+- **Drop @-mentions** (off by default) — see below
 - Choose how aggressively leading indentation is rewritten (off / smart / strict) — this also switches the block-marker fixes on and off
 - Turn **tag layout** on to move inline `#tags` to the end of their block, and **tag sorting** to order them alphabetically
 - Turn **content block sorting** on to sort a note's blocks by first letter
 
+**Adjacent messages are put back in time order.** QQ / WeChat do not copy a selection in the order you see it: the text messages are grouped together and the images are appended at the end (or the other way round), so a pair like "text at 19:41:37, two screenshots at 19:41:38" arrives with the images first — the layout then faithfully reproduces that, and the images end up above the text of the *previous* message. With this switch on (the default) the formatting compares the timestamps of **adjacent** messages and emits them in time order:
+
+- only messages that are adjacent — nothing but blank space between them — are reordered. Content of your own between two messages (a `06集` heading, a paragraph) is never moved, and the messages around it are left alone;
+- a run is only reordered when every message in it has a comparable timestamp of the same shape (all with a date, or all time-only). A mix, or a timestamp the plugin cannot read, means "leave it as it is";
+- turn it off and the paste order is kept exactly as it arrived.
+
+**Only the blank line and the next message header end a body.** A message body runs until a blank line or the next message header — which is how multi-line messages work. Formatting a whole note therefore has one honest limit: if you write something of your own directly under a message with no blank line in between (an episode heading such as `06集`, a note, your own screenshots), the whole-note pass has no way to tell it apart from that message's text, so it is treated as part of the body and indented with it. The same thing happens in reverse when your own line is the indented one (the editor's auto-indent) and the pasted text is not. That is not something more rules can fix reliably — **select the block you want formatted and use 排版选中内容 instead** (see below), which has no such ambiguity.
+
+**Typeset just the selection** (command **排版选中的内容**, entry **排版选中内容（Note Tidy）** in the note right-click menu, on by default) — formats *only* the selected text and leaves the rest of the note untouched, one character included. It runs the same two steps as the quick chat-log fix, but scoped to the selection:
+
+1. images the selection references by absolute path (`file:///D:\…`, `C:\…`) are copied into the vault and the links become `![[…]]`;
+2. the layout rules run on that text only.
+
+The result replaces the selection in the editor (so <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it, and nothing is written to disk), and the menu entry only appears while something is selected. Practical use: paste a chat log, select it, run this — the messages around it are never touched, so no pass has to guess where a message ends.
+
+**@-mentions can be dropped** (**Settings → 排版格式 → 聊天记录 → 去掉 @ 提及**, off by default, because it deletes words): in a group chat every reply starts with `@昵称`, and the nickname points at nobody once the log is in your vault. With the switch on:
+
+| Before | After |
+|--------|-------|
+| `@徐晃何许人也 这才叫邪恶反派` | `这才叫邪恶反派` |
+| `你说的对 @张三 就是这样` | `你说的对 就是这样` |
+| `@张三 @李四 大家好` | `大家好` |
+| `＠张三 大家好` (full-width `＠`) | `大家好` |
+| `发到 foo@bar.com 就行` | unchanged (`@` inside a word is not a mention) |
+| `@张三` on a line of its own | the whole line goes away (no indentation-only line is left behind) |
+
 **Quick chat-log fix** — one entry in the command palette and in the right-click menus that does both jobs at once: transfer the external-path images referenced by this note, then fix the note's layout (spaces / indent / chat log / tags / formulas). Chat logs pasted out of QQ / WeChat usually carry `file:///D:\…` images and messy spacing, so one click leaves them clean.
 
-**Fix on paste** (on by default, **Settings → 排版格式 → 聊天记录**) runs that same command automatically when what you paste looks like a chat log — at least **two** message headers (a username before a timestamp), so mentioning `会议 14:30:25` in prose does not trigger it and copying a single message (which carries no header) does not either. It deliberately does not act while the paste event fires (the text is not in the document yet), but it does not wait for Obsidian's own autosave either — that one only fires 2 seconds after you stop typing. The note is flushed to disk the moment the paste lands in the editor, so the rewritten note *including* what you just pasted is there almost immediately (with a 5-second fallback if nothing ever saves). Turn the switch off and nothing is touched automatically — the command and the menu entries still work.
+**Fix on paste** (on by default, **Settings → 排版格式 → 聊天记录**) tidies a chat log the moment you paste it — and it only touches **the text you just pasted**. The gate is at least **two** message headers (a username before a timestamp), so mentioning `会议 14:30:25` in prose does not trigger it and copying a single message (which carries no header) does not either.
+
+How it knows which part is "just pasted": the paste event itself is only used to note *where* the paste happened (that event fires before the text is in the document — the insertion is done by CodeMirror's own handler afterwards), and as soon as the editor reports the change, everything from that position to the cursor is the pasted text. That range is read back, checked with the same "does this look like a chat log" test, and then reformatted in place: the images it references by absolute path are copied into the vault, the layout rules run on it, and the result is written back through the editor. So:
+
+- **your own lines are never touched** — no pass has to guess where a message ends (see the selection command above for the manual version);
+- nothing is written to disk by the plugin: the change goes through the editor's normal save path, and one <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it;
+- if the editor never reports a change (that paste was swallowed by another plugin, or the view is not a Markdown view), the pending fix is dropped after 5 seconds — better to do nothing than to touch the note.
+
+Turn the switch off and nothing happens automatically — the commands and the menu entries still work.
 
 ### 4. Set image size in one click
 
@@ -329,7 +365,7 @@ The right-click menu is grouped into two submenus so it stays short: **图片功
 |--------|--------|
 | Right-click a `.md` file | **图片功能**: convert / rename / organize locations / set size · **文本排版**: fix layout (spaces / indent / chat log / tags / formulas), quick chat-log fix (transfer external images + fix layout) |
 | Right-click a folder | The same two submenus, applied to every note in that folder |
-| Right-click an image (in a note, or its link in the editor) | **复制图片（Note Tidy）** is added to the menu — copies the image file itself, so it can be pasted into a folder, or into QQ / Word as a picture. Select a range first to copy several images at once (**复制 3 张图片（Note Tidy）**). The same menu also gets **快速设置图片大小（Note Tidy）** (applies the default size to the note, no dialog), **快速修复聊天记录（Note Tidy）** (transfers the note's external images and fixes its layout in one go) and, in the image menu, **管理右键菜单…（Note Tidy）**, which lists the entries of the 图片 / 笔记 / 文件夹 menus and lets you switch them off |
+| Right-click an image (in a note, or its link in the editor) | **复制图片（Note Tidy）** is added to the menu — copies the image file itself, so it can be pasted into a folder, or into QQ / Word as a picture. Select a range first to copy several images at once (**复制 3 张图片（Note Tidy）**). The same menu also gets **快速设置图片大小（Note Tidy）** (applies the default size to the note, no dialog), **快速修复聊天记录（Note Tidy）** (transfers the note's external images and fixes its layout in one go), **排版选中内容（Note Tidy）** (select some text first — only that text is formatted, the rest of the note is untouched) and, in the image menu, **管理右键菜单…（Note Tidy）**, which lists the entries of the 图片 / 笔记 / 文件夹 menus and lets you switch them off |
 | Command palette (`Ctrl+P`) | Every menu action is also a command: convert images (current note / entire vault), rename garbled images (current note / entire vault), rename all images vault-wide (normal or forced), organize image locations (current note / entire vault), set image size (current note / entire vault), copy images to the clipboard, fix layout — spaces, indent, chat log, tags and formulas (current note / entire vault), and the quick chat-log fix (transfer external images + fix layout) |
 
 ### Settings
@@ -348,16 +384,9 @@ Image size:
 
 > The same three values are what the **快速设置图片大小（Note Tidy）** item (and the matching command) applies — it skips the dialog entirely.
 
-Chat log formatting:
+Chat log, indentation and the other layout options are grouped under **排版格式** below.
 
-- **Show username** — keep or drop the sender name
-- **Show date** / **Show time** — keep or drop the date (`{YYYY}/{MM}/{DD}`) and time (`{HH}:{mm}:{ss}`)
-- **Body indent** — tab, 2 spaces, 4 spaces, or none
-- **Image position in mixed messages** — image above the text, below the text, or keep the original order
-- **Blank line between messages** — only available when username, date and time are all turned off; inserts an empty line between adjacent messages so they stay visually distinct
-- **Fix on paste** — on by default. When what you paste in the editor looks like a chat log (at least two "username + timestamp" message headers), the **quick chat-log fix** runs automatically: transfer this note's external-path images, then fix its layout. It does not act on the paste event itself (the text is not in the document yet), but the note is flushed to disk as soon as the paste lands, so the fix applies to the note *including* the pasted text without a perceptible wait; turn it off and pasting never changes anything by itself
-
-All defaults reproduce the previous layout exactly, so existing notes are not reformatted until you change a setting.
+All defaults reproduce the previous layout, so existing notes are not reformatted until you change a setting. The one default that can rearrange a *fresh* paste is **Adjacent messages in time order** (see section 3): it only acts when a paste arrives with its messages out of order, and notes that are already formatted carry no timestamps for it to compare, so they are never touched.
 
 Blank lines already present in the source text are always preserved.
 
@@ -377,6 +406,7 @@ Word spacing:
 - **Chinese ↔ numbers** — no space (`none`, default, removes existing spaces), one space (`space`), or keep as is
 - **English ↔ numbers** — keep as is (default) or one space. Keeping it avoids splitting `GPT4`, `3D`, `v1.2.2`
 - **Formula ↔ text** — one space (default) or keep as is; the space goes outside the `$…$` only
+- **Space after a chapter / lesson / appendix marker** — on by default; a marker written straight against its content gets one space: `第一章矩阵` → `第一章 矩阵`, `第1课五十音` → `第1课 五十音`, `附录A矩阵` → `附录A 矩阵`. Two marker shapes are recognized — `第` + a number + 章 / 课 / 节 / 讲 / 篇, and `附录` + a number (`附录A` `附录1` `附录一`; the number is required). Nothing happens when a marker is followed by punctuation (`第一章、矩阵`) or by nothing at all (a line holding just `第一章`), and a space that is already there is kept as written
 
 Punctuation and symbols:
 
@@ -403,8 +433,12 @@ Chat log:
 - **Show date** / **Show time** — keep or drop the date (`{YYYY}/{MM}/{DD}`) and time (`{HH}:{mm}:{ss}`)
 - **Body indent** — tab, 2 spaces, 4 spaces, or none
 - **Image position in mixed messages** — image above the text, below the text, or keep the original order
+- **Adjacent messages in time order** — on by default. Compares the timestamps of adjacent messages and emits them in time order, which fixes the QQ / WeChat paste that groups the texts together and appends the images at the end. Only messages separated by blank space are reordered (your own content between messages is never moved), and only when every message in the run has a comparable timestamp of the same shape. See section 3
+- **Drop @-mentions** — off by default (it deletes words). Removes `@昵称` from message bodies: `@` must start a word (so `foo@bar.com` is untouched), a line holding nothing but a mention goes away entirely, and the rest of the line is kept. It only acts while a chat log is being formatted, so a region that no longer carries timestamps (because the headers are hidden) is never rewritten. See section 3
 - **Blank line between messages** — only available when username, date and time are all turned off; inserts an empty line between adjacent messages so they stay visually distinct
-- **Fix on paste** — on by default; pasting a chat log (two or more message headers) runs the quick chat-log fix by itself as soon as the paste lands in the editor (no wait for the 2-second autosave)
+- **Fix on paste** — on by default; pasting a chat log (two or more message headers) tidies **just the text you pasted**: the images it references by absolute path are copied into the vault, the layout rules run on that range, and the result is written back through the editor (no disk write by the plugin, one <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it). The rest of the note is never touched — see section 3
+
+Status bar:
 
 - **Show image count for the selection** — off by default. When on, selecting text in the editor shows how many images the selection contains in the bottom-right status bar (`🖼 选中 3 张图片`). Only embeds count (`![[photo.png]]`, `![alt](photo.png)`, including sizes / aliases / fragments and `avif` / `svg`); a plain link to an image file does not, and neither do links inside fenced code blocks or inline code. The cell stays empty while nothing is selected or the selection has no images.
 
@@ -413,6 +447,7 @@ Context menus:
 - **Show "copy image"** — on by default; inserts **复制图片（Note Tidy）** into the image menu and the note menu (nothing is replaced)
 - **Show "quick image size"** — on by default; inserts **快速设置图片大小（Note Tidy）** — applies the default size above to the current note without the dialog
 - **Show "quick chat-log fix"** — on by default; inserts **快速修复聊天记录（Note Tidy）** — transfers this note's external-path images and fixes its layout in one go
+- **Show "typeset selection"** — on by default; inserts **排版选中内容（Note Tidy）** into the note right-click menu (only while something is selected) — formats just the selected text, plus the external-path images it references
 - **Show "manage context menus"** — on by default; inserts the entry that opens the management panel (turn it off and use the command palette instead)
 - **Hidden menu entries** — one `scope：title` per line, scope being `图片` / `笔记` / `文件夹` (a line without a scope counts as `图片`); those entries are not shown in that menu. This list covers Obsidian's own entries and other plugins' ones — this plugin's own entries are governed by the switches above, so they can never hide themselves. The management panel fills this in for you
 
@@ -448,7 +483,7 @@ Feature logic is split into focused modules so it can be tested without Obsidian
 | `src/text/pipeline.ts` | runs the layout steps in a fixed order: indent → markers → chat log → list numbering → heading levels → plain-text math → formulas → word spacing → tags → block sorting, and **iterates the whole pipeline to a fixed point** (at most 5 rounds): a later step changes text an earlier step looked at — normalizing `$w\approx 0$` to `$w \approx 0$` changes the key block sorting uses. Without the loop, "run it twice" would edit more lines than "run it once", so every save would rewrite the file |
 | `src/text/list-numbering.ts` | list numbering: every list starts at 1 (lists that already start at 1 are never touched) |
 | `src/text/heading-levels.ts` | heading levels: a sub-heading sits exactly one level below its parent; when several headings change, all new levels are computed from the original ones in one pass |
-| `src/text/chat-log.ts` | chat log layout (username / date / time toggles, indent, image order, blank lines) |
+| `src/text/chat-log.ts` | chat log layout (username / date / time toggles, indent, image order, blank lines), adjacent messages put back in time order, `@mention` stripping, and the cut that keeps your own top-level lines out of the message above them |
 | `src/text/math-wrap.ts` | plain-text math detection — `矩阵 A`, `n维`, `V(F)`, `x = 0`, `λ` → `$…$`, plus the variable table that reads variables out of the note's existing formulas |
 | `src/text/inline-scan.ts` | shared inline protection — code spans, links, URLs, tags, comments, existing formulas; **also the single place that recognises and pairs `$…$` / `$$…$$`** (tag layout and block sorting ask `mathOpaqueLines` whether a line may be touched) |
 | `src/text/indent.ts` | general layout fixes — leading indentation (4 spaces = 1 tab) |
@@ -490,6 +525,21 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 
 ## Changelog
 
+### v1.3.15
+- New: **typeset just the selection** — command **排版选中的内容**, and the entry **排版选中内容（Note Tidy）** in the note right-click menu (shown only while something is selected; switch **Settings → Note Tidy → 右键菜单 → 「排版选中内容」菜单项**, on by default). It runs the same two steps as the quick chat-log fix, but scoped to the selection: absolute-path images the selection references are copied into the vault and re-linked, then the layout rules run on that text alone, and the result replaces the selection through the editor — one <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back, nothing is written to disk. Formatting a whole note has to decide where a message body ends; a selection has no such ambiguity, which is the entire point of having this entry. See section 3
+- Changed: **fix on paste now touches only the text you pasted.** The automatic fix used to reformat the *whole note*; it now reads back the range from where the paste started to the cursor, applies the same "does this look like a chat log" gate, and reformats that range in place. Your own text above and below is never touched, and no pass has to guess where a message ends. Everything else is unchanged (it still fires on the editor change rather than on the paste event, still gives up after 5 seconds, still undoes with one <kbd>Ctrl</kbd>+<kbd>Z</kbd> and never writes to disk itself). See section 3
+- Reverted: **the "a line at the left margin ends the message" rule added in v1.3.14 is gone.** It had to guess *which* left-margin line was the author's and *when* an unindented line was merely pasted content, and it guessed wrong in both directions; no further rules are being layered on top of it. A message body again runs until a blank line or the next message header — so a line of your own typed directly under a message with no blank line in between counts as part of that body. That is the honest trade-off, now written down in section 3 and in the rule registry. To keep such a line out of a body, select the block and use **排版选中内容**
+- Internal: `tasks.typesetSelection` and `tasks.fixPastedRange` share one range-scoped helper that goes through the editor (`getRange` → pipeline → `replaceRange`); `src/ui/paste-watch.ts` no longer touches the vault or `MarkdownView.save()` at all — it registers `editor-paste` + `editor-change` only. New rule `cross.typeset-selection` in the registry, `test/paste-watch.test.ts` rewritten for the range API, and `test/commands.test.ts` covers the new command and menu entry
+
+### v1.3.14
+- New: **drop @-mentions** (**Settings → 排版格式 → 聊天记录 → 去掉 @ 提及**, off by default) — group-chat logs are full of `@昵称` reply markers, and the nickname points at nobody once the log is in your vault. With the switch on, `@徐晃何许人也 这才叫邪恶反派` becomes `这才叫邪恶反派`, `你说的对 @张三 就是这样` becomes `你说的对 就是这样`, a full-width `＠` counts, consecutive mentions are all removed, a line holding nothing but a mention disappears entirely, and `foo@bar.com` is left alone (`@` must start a word). Only message bodies are rewritten, and only while a chat log is being formatted — see section 3
+- Fixed: **a message body no longer swallows the lines you write underneath it.** A body runs until a blank line or the next message header, so a line of your own typed right under a message (an episode heading such as `06集`, a note) was pulled into that message and re-indented — and everything after it came along. Inside a region whose bodies are indented, a line starting at the left margin now ends the message: that line and everything below it are kept exactly as written. Text pasted straight from QQ is unindented as a whole and is unaffected; with **body indent** set to *none* there is no such signal, so the rule is skipped
+- Internal: `test/chat-log.test.ts` grew to 47 real cases (mention stripping, the top-level-line cut, ordering) — all of them checked for strict idempotency across 192 settings combinations
+
+### v1.3.13
+- New: **adjacent messages are put back in time order** (**Settings → 排版格式 → 聊天记录 → 相邻消息按时间排序**, on by default). QQ / WeChat do not copy a selection in the order you see it — the texts are grouped together and the images are appended at the end — so a pair like "text at 19:41:37, two screenshots at 19:41:38" arrived with the images first and the layout faithfully reproduced that, putting the images above the text of the *previous* message. The timestamps are right there in the paste, so the formatting now emits adjacent messages in time order. Only messages separated by blank space are reordered (your own content between two messages is never moved), and only when every message in the run has a comparable timestamp of the same shape — a mix of dated and time-only stamps is left as it is. Turn the switch off to keep the paste order exactly. See section 3
+- Internal: the chat log formatter now collects its output as blocks (text / message + a time key) and joins them at the end, so "insert an empty line between messages" is applied to the *reordered* neighbours instead of the paste order
+
 ### v1.3.12
 - Fixed: **no more visible delay after pasting a chat log** — the automatic fix used to wait for the editor's own autosave, and Obsidian saves 2 seconds after you stop typing (`TextFileView.requestSave` debounces by 2000 ms), so the layout visibly changed a second or two after the paste. The note is now flushed to disk as soon as the paste lands in the editor (`editor-change` → `MarkdownView.save()`), and the resulting `modify` event drives the same fix as before; detection, fallback and the "never take the paste over" rule are unchanged
 - Fixed: **batch result notices were 5 seconds late** — per-file spam notices are hidden during a batch, and the old code then waited 5 seconds for them to expire before un-hiding *and* showing the summary, so every task notice arrived 5 seconds late. Un-hiding now happens at once and the summary appears immediately; the notices that have not expired yet are hidden individually (`note-tidy-suppressed`) and disappear on their own (with a 6-second safety net so a notice that never auto-hides cannot be hidden forever)
@@ -500,6 +550,27 @@ v1.3.0 renamed the plugin from `absolute-image-transfer` to `note-tidy`. Obsidia
 - New: **fix on paste** (**Settings → 排版格式 → 聊天记录**, on by default) — pasting something that looks like a chat log runs the quick fix automatically. The detection is deliberately narrow: at least two "username + timestamp" message headers (copying a single message carries no header, and a mention of `会议 14:30:25` in prose is not enough). It does **not** act while the paste event fires — the text is not in the document yet — but waits for the note to be saved, so the fix applies to the note *including* what you pasted (5-second fallback if the editor never saves). Turn it off and nothing is changed automatically; the command and menu entries keep working
 - New: `looksLikeChatLog` in `src/text/chat-log.ts` and `src/ui/paste-watch.ts` (with `test/paste-watch.test.ts`); rule `cross.auto-fix-paste` added to the registry
 - Fixed: two `as TFile` casts in `test/commands.test.ts` (lint warnings)
+
+### v1.3.10
+- New: **chapter / lesson / appendix titles get their space** — a title marker written straight against its content is split so the spacing rules can put one space between the two: `第一章矩阵` → `第一章 矩阵`, `第一节内容` → `第一节 内容`, `附录A矩阵` → `附录A 矩阵`. The marker and the content are recognized from one shared definition (`src/text/chapter-title.ts`, rule 文字格式 / 中文 1), used by both the spacing layout and the plain-text-math scanner — the latter needs it so that the `A` in `附录A矩阵` is not wrapped as a variable (`$A$` would break the marker apart and the spacing rule could never see the title again). A marker followed by punctuation or by a connector (`第一章的用法`, `第一章中的定理`) is prose, not a title, and is left alone; a space that is already there is kept as written
+
+### v1.3.9
+- Fixed: **entries switched off in the 管理右键菜单 panel could not be found again** — a hidden entry was skipped when the panel collected the menu's contents, so turning an entry off removed it from the list on the next open and the switch could never be turned back on. Hidden entries are now collected as well (and the panel's own switch column shows them off)
+- Fixed: **`versions.json` missed new versions** — `version-bump.mjs` checked whether the *minimum app version* had been recorded instead of the *plugin version*, so a release that kept the same `minAppVersion` (1.7.0 for a long while) was never added to the map. It now checks the version number itself
+- Internal: the source repository moved out of the vault (`.obsidian/plugins/note-tidy/` now holds only `main.js`, `manifest.json`, `styles.css` and Obsidian's own `data.json`); `deploy.mjs` copies the build back after `npm run dev` / `npm run build`, and skips silently when the plugin folder is absent (CI)
+
+### v1.3.8
+- New: **copy images as files** (section 11) — the plugin puts the actual image file on the clipboard, so pasting into a folder in Explorer produces `图片.png` instead of nothing. Images in a selection are copied together, deduplicated, and same-name ambiguity is skipped rather than guessed. When the selection also contains text, the text comes along as HTML with the pictures inlined, so QQ / WeChat / Word paste "sentence + pictures" in place. Available as a menu item on images and in the editor, as a command, and (off by default) by taking over <kbd>Ctrl</kbd>+<kbd>C</kbd> inside the note body
+- New: **selection image count** in the status bar (**Settings → Note Tidy → 状态栏**, off by default) — selecting text shows `🖼 选中 3 张图片`; only embeds count, and a plain link to an image file does not
+- New: **manage the context menus** (section "Managing the context menus") — the panel lists what the 图片 / 笔记 / 文件夹 menus contain (Obsidian's own entries, other plugins' and this plugin's) and switches any of them on and off, stored as a plain-text list in the settings. The plugin only ever *inserts* its own entries; nothing is replaced or taken over
+- Internal: `src/ui/menu-injector.ts` (observe the native menu, record it, filter it, insert into it), `src/image/clipboard.ts` + `src/image/rich-copy.ts` (PowerShell `DataObject` / Win32 `SetClipboardData`, since Electron cannot write a file list), `src/ui/selection-status.ts`; new tests for the menu layer, clipboard payloads and the status bar
+
+### v1.3.7
+- Fixed: **links and addresses are protected as whole segments** — `magnet:?xt=…` (no `//`), `ed2k:`, `data:` / `mailto:` / `tel:`, bare domains (`www.example.com/x?y=1`), `localhost:8080`, e-mail addresses and HTML entities (`&nbsp;`) are now treated as one opaque piece: not a single character inside them is touched. They used to be laid out as prose — a space after the colon, one around every `&`, `10bit` split into `10 bit`, a half-width `;` turned full-width — which is exactly what leaves you with a dead link when you copy it back out
+- Fixed: **a "formula" that only looks like one because it spans table cells is not recognized** — table rows are read cell by cell (the same rule the tag layout uses), so a pair of `$` may not cross the `|` separator: a missing `$` used to pair with the `$` in the next cell, and the fake formula that came out of it swallowed the padding spaces that keep the row aligned
+
+### v1.3.6
+- Fixed: **same-line messages no longer leak a phantom blank line** — copying several messages out of QQ often puts them on one line separated by a single space, and that space had already been consumed by the previous body's trim while `skipIndentBefore` walked back past it. `substring(start, end)` swaps its arguments when `start > end` (unlike `slice`, which returns an empty string), so an indentation-only line was emitted between every pair of messages and the spacing layout turned it into a real blank line — the symptom being "I turned the blank line off and still get blank lines". The fragment is now clipped at the previous body's end
 
 ### v1.3.5
 - Fixed: **plain-text math only accepts properly spaced expressions** — a binary operator needs **one space on each side** to count (math symbols 1: operators and relation signs take a space on both sides, unless the context is not mathematical, e.g. the shortcut `ctrl+c`): `x = 0`, `x - 1`, `a + b` are still wrapped, while `x=0`, `a+b+c`, `5/10mm`, `A-7`, `F-22`, `cd /d` and `x -1` are left alone — they may be a deliberate designation, a hyphen, a shell command, or simply missing spaces, and the layout does not guess. Prefix signs are modifiers (math symbols 3: no space around them), so `x = -1` and `f(-1)` are unaffected

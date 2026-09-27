@@ -21,6 +21,7 @@ import {
 	OWN_ITEM_SCOPES,
 	QUICK_FIX_MENU_TITLE,
 	QUICK_SIZE_MENU_TITLE,
+	TYPESET_SELECTION_MENU_TITLE,
 	addOwnMenuItems,
 	copyMenuTitle,
 	editorImageRefs,
@@ -465,6 +466,7 @@ function scopeTableTests(): void {
 		copy: "复制图片（Note Tidy）",
 		quickSize: QUICK_SIZE_MENU_TITLE,
 		quickFix: QUICK_FIX_MENU_TITLE,
+		typesetSelection: TYPESET_SELECTION_MENU_TITLE,
 		manage: MANAGE_MENU_TITLE,
 		imageSubmenu: "图片功能",
 		textSubmenu: "文本排版",
@@ -486,8 +488,50 @@ function scopeTableTests(): void {
 		checkEqual(`开关表与实际菜单项一致（${scope}）`, entries.map(entry => entry.title), keys.map(key => titles[key]));
 	}
 
-	checkEqual("六项都有登记（注入项配命令，二级栏是容器）", Object.keys(OWN_ITEM_COMMANDS).sort(),
-		["copy", "imageSubmenu", "manage", "quickFix", "quickSize", "textSubmenu"]);
+	// 「排版选中内容」只出现在笔记本体菜单里，而且要有选区
+	const noSelection = ownMenuEntries({
+		scope: "note",
+		settings: { ...DEFAULT_SETTINGS },
+		refs: [],
+		hasFile: true,
+		copy: () => { /* 不做事 */ },
+		quickSize: () => { /* 不做事 */ },
+		quickFix: () => { /* 不做事 */ },
+		typesetSelection: () => { /* 不做事 */ },
+		manage: () => { /* 不做事 */ },
+	});
+	checkEqual("没有选区时不插「排版选中内容」", noSelection.map(entry => entry.title).includes(TYPESET_SELECTION_MENU_TITLE), false);
+
+	const withSelection = ownMenuEntries({
+		scope: "note",
+		settings: { ...DEFAULT_SETTINGS },
+		refs: [],
+		hasFile: true,
+		hasSelection: true,
+		copy: () => { /* 不做事 */ },
+		quickSize: () => { /* 不做事 */ },
+		quickFix: () => { /* 不做事 */ },
+		typesetSelection: () => { /* 不做事 */ },
+		manage: () => { /* 不做事 */ },
+	});
+	checkEqual("有选区时插「排版选中内容」", withSelection.map(entry => entry.title).includes(TYPESET_SELECTION_MENU_TITLE), true);
+
+	const toggledOff = ownMenuEntries({
+		scope: "note",
+		settings: { ...DEFAULT_SETTINGS, imageMenuTypesetItem: false },
+		refs: [],
+		hasFile: true,
+		hasSelection: true,
+		copy: () => { /* 不做事 */ },
+		quickSize: () => { /* 不做事 */ },
+		quickFix: () => { /* 不做事 */ },
+		typesetSelection: () => { /* 不做事 */ },
+		manage: () => { /* 不做事 */ },
+	});
+	checkEqual("开关关掉后不插", toggledOff.map(entry => entry.title).includes(TYPESET_SELECTION_MENU_TITLE), false);
+
+	checkEqual("七项都有登记（注入项配命令，二级栏与选中项是容器）", Object.keys(OWN_ITEM_COMMANDS).sort(),
+		["copy", "imageSubmenu", "manage", "quickFix", "quickSize", "textSubmenu", "typesetSelection"]);
 }
 
 // ------------------------------- 9. 两层都在时，隐藏项也要留在检测结果里

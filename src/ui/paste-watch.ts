@@ -1,56 +1,54 @@
-import { MarkdownView, TFile } from 'obsidian';
-import type { App, Editor, MarkdownFileInfo, Plugin } from 'obsidian';
+import type { Editor, MarkdownFileInfo, MarkdownView, Plugin, TFile } from 'obsidian';
 import type { ImageTransferSettings } from '../settings';
 import type { TaskActions } from '../tasks';
 import { looksLikeChatLog } from '../text/chat-log';
 
 /**
- * 粘贴聊天记录时自动执行「快速修复聊天记录」（设置里可开关，见 `autoFixChatLogOnPaste`）。
+ * 粘贴聊天记录时自动修好 —— **只修刚粘进来的那一段**（设置里可开关，见 `autoFixChatLogOnPaste`）。
  *
- * ## 为什么挂在 `editor-paste` 上
+ * ## 为什么不再修整篇
  *
- * Obsidian 有官方的 `editor-paste` 事件（粘贴时把 `ClipboardEvent` 与视图一起交给我们），
- * 不用自己接 DOM 的 paste，也不会像"接管 Ctrl+C"那样抢按键：我们**不阻止这次粘贴**，
- * 只是看一眼剪贴板里的纯文本像不像聊天记录。
+ * 整篇排版绕不开一个取舍：*一条消息的正文到哪儿结束*。作者自己接在消息下面写的行
+ * （`06集` 这类小标题、自己插的截图）与消息正文之间没有空行时，整篇排版只能把它们算作正文
+ * —— 猜过两次都猜错（见 `structure.chat-log` 的登记说明）。
  *
- * ## 时机：粘贴那一刻不动手，落进编辑器那一刻催落盘，落盘了才动手
+ * 而"刚粘进来的那一段"是**确定的**：粘贴开始时记下光标位置，粘贴落进编辑器后，
+ * 从那个位置到光标之间的就是这次粘贴进文档的全部内容。于是不需要猜，也不会碰到
+ * 你自己写的东西。
  *
- * 一、**粘贴那一刻读到的正文还是旧的**。`editor-paste` 是 Obsidian 的剪贴板管理器在自己的
- * paste 处理器里发出的，而真正往文档里插内容是 CodeMirror 内置的处理器（排在后面，一返回 true
- * 就 break）—— 此刻读到的正文里还没有刚粘进来的东西。此刻修完写盘，要么白修，要么被编辑器
- * 随后的保存覆盖回去（"改了又弹回去"）。
+ * ## 三步
  *
- * 二、**不能干等 Obsidian 的自动保存**。`vault` 的 `modify` 确实是"能动手"的信号（那一刻磁盘上
- * 才是含粘贴内容的正文），但 Obsidian 的自动保存是**停手 2 秒后**（`TextFileView.requestSave`
- * 的 debounce 就是 2000 毫秒）—— 干等它，用户看到的就是"粘完一两秒才修好"。
- * 所以中间加了一步：内容一落进编辑器（`editor-change`）就调 `view.save()` 把这篇笔记
- * **立刻**写盘，`modify` 随之而来，修复几乎与粘贴同时发生。
- *
- * 三、**万一没人落盘**（这次粘贴被别的插件吞了、视图不是 Markdown 视图……）还有兜底定时器
- * （`PASTE_FALLBACK_MS`）：宁可多跑一次"没有需要修复的内容"，也不要静悄悄地什么都不做。
- *
- * ## 判定与"真去修"分开
- *
- * - `looksLikeChatLog`（`text/chat-log.ts`）：像不像聊天记录，用的是排版引擎自己的尺子；
- * - `shouldAutoFixPaste`：开关 + 有笔记 + 像聊天记录，三条都满足才动手；
- * - `PasteFixScheduler`：谁在等、什么时候催落盘、什么时候真跑（定时器可注入，测试里手动控制）。
+ * 1. `editor-paste`：只登记（那时内容还没进文档 —— Obsidian 的剪贴板管理器发这个事件，
+ *    真正插入内容的是 CodeMirror 的处理器，排在我们后面）。不阻止这次粘贴。
+ * 2. `editor-change`：粘贴落进编辑器了。读回那一段文字，用排版引擎自己的尺子
+ *    （`looksLikeChatLog`）判定"像不像聊天记录"，像才动手：转换这段里的外部路径图片 → 排版
+ *    → `editor.replaceRange` 写回。**不写盘**（走编辑器自己的保存路径），
+ *    撤销一次即可回退，笔记其余部分一个字符都不动。
+ * 3. 兜底定时器（`PASTE_FALLBACK_MS`）：编辑器迟迟没有变化（这次粘贴被别的插件吞了、
+ *    视图不是 Markdown 视图……）就把这笔等待丢掉 —— 宁可什么都不做，也绝不去动整篇。
  */
 
-/** 等落盘的兜底时长：编辑器一直没把这次粘贴写下去就按这个时间先跑一次 */
+/** 等待表里这一笔的最长寿命：到点还没等到编辑器变化就丢掉 */
 export const PASTE_FALLBACK_MS = 5000;
 
-/** 该不该因为这次粘贴自动修复：开关开着、有笔记、粘贴内容像聊天记录 */
+/** 该不该因为这次粘贴自动修复：开关开着、有笔记、粘贴进来的这段像聊天记录 */
 export function shouldAutoFixPaste(options: { enabled: boolean; text: string; hasFile: boolean }): boolean {
 	if (!options.enabled || !options.hasFile) return false;
 	return looksLikeChatLog(options.text);
 }
 
+/** 这次粘贴落在哪儿：哪个编辑器、从哪个字符偏移开始 */
+export interface PasteTarget {
+	editor: Editor;
+	file: TFile;
+	/** 粘贴起点（粘贴前选区 / 光标的字符偏移） */
+	start: number;
+}
+
 export interface PasteFixSchedulerOptions {
-	/** 真正去修（任务的 `quickFixChatLog`） */
-	run: (file: TFile) => void;
-	/** 催这篇笔记立刻落盘（`MarkdownView.save()`），落盘后才有 `modify` 可等 */
-	flush: (file: TFile) => void;
-	/** 等不到落盘时的兜底时长，默认 `PASTE_FALLBACK_MS` */
+	/** 时间到了 / 编辑器变了：把这一笔交给调用方（由它读回那段文字并决定修不修） */
+	take: (target: PasteTarget) => void;
+	/** 兜底时长，默认 `PASTE_FALLBACK_MS` */
 	fallbackMs?: number;
 	/** 定时器（测试里换成手动控制） */
 	setTimer?: (handler: () => void, ms: number) => number;
@@ -58,77 +56,58 @@ export interface PasteFixSchedulerOptions {
 }
 
 /**
- * "粘贴之后修哪篇笔记"的等待表。
+ * "刚粘过、等着修"的等待表（按笔记路径记，一篇只留最后一笔）。
  *
- * 一笔等待走过三步：`schedule`（粘贴，只登记）→ `onEditorChange`（内容落地，催落盘）
- * → `onModified`（落盘，真去修）。
- *
- * 同一篇笔记连着粘两次只留最后一笔（编辑器会把两次粘贴一起存盘，跑一次就够）；
- * 真跑之前先把这一笔从表里删掉 —— 我们自己写盘也会触发 `modify`，
- * 不删就会自己把自己再触发一次。
+ * 一笔等待只有两种下场：编辑器真的变了（`onEditorChange` → 取出交给调用方），
+ * 或者超时（兜底定时器 → 直接丢掉）。**摘掉之后才回调** —— 我们自己的
+ * `replaceRange` 也会触发 `editor-change`，不摘就会自己触发自己。
  */
 export class PasteFixScheduler {
-	private readonly pending = new Map<string, { file: TFile; timer: number; flushed: boolean }>();
-	private readonly run: (file: TFile) => void;
-	private readonly flush: (file: TFile) => void;
+	private readonly pending = new Map<string, { target: PasteTarget; timer: number }>();
+	private readonly take: (target: PasteTarget) => void;
 	private readonly fallbackMs: number;
 	private readonly setTimer: (handler: () => void, ms: number) => number;
 	private readonly clearTimer: (id: number) => void;
 
 	constructor(options: PasteFixSchedulerOptions) {
-		this.run = options.run;
-		this.flush = options.flush;
+		this.take = options.take;
 		this.fallbackMs = options.fallbackMs ?? PASTE_FALLBACK_MS;
 		this.setTimer = options.setTimer ?? ((handler, ms) => window.setTimeout(handler, ms));
 		this.clearTimer = options.clearTimer ?? ((id) => { window.clearTimeout(id); });
 	}
 
-	/** 还在等落盘的笔记数（测试与调试用） */
+	/** 还在等编辑器变化的笔数（测试与调试用） */
 	get size(): number {
 		return this.pending.size;
 	}
 
-	/** 记下"这篇笔记刚粘了聊天记录"：等内容落地、落盘，再修 */
-	schedule(file: TFile): void {
-		this.forget(file.path);
-		const timer = this.setTimer(() => { this.fire(file.path); }, this.fallbackMs);
-		this.pending.set(file.path, { file, timer, flushed: false });
+	/** 记下"刚往这篇笔记里粘了东西"：等编辑器变化，再交出这一笔 */
+	schedule(target: PasteTarget): void {
+		this.forget(target.file.path);
+		const timer = this.setTimer(() => { this.forget(target.file.path); }, this.fallbackMs);
+		this.pending.set(target.file.path, { target, timer });
 	}
 
 	/**
-	 * 编辑器里的内容真的变了（粘贴落进去了）：催它立刻落盘，别再等那 2 秒的自动保存。
-	 * 同一笔只催一次 —— 用户粘完接着打字会连着触发，催第二遍没有意义。
+	 * 编辑器里的内容变了：是等着的那篇就把这一笔交出去（返回是否命中）。
 	 *
-	 * @returns 是否真的催了（没有这笔等待、或已经催过，都返回 false）
+	 * @param editor 变化的那个编辑器实例；与登记时不是同一个（换了面板 / 弹出窗口）则不放行，
+	 *   免得拿着别处的偏移去改这篇笔记
 	 */
-	onEditorChange(file: TFile): boolean {
+	onEditorChange(editor: Editor, file: TFile): boolean {
 		const entry = this.pending.get(file.path);
-		if (!entry || entry.flushed) return false;
-		entry.flushed = true;
-		this.flush(entry.file);
+		if (!entry) return false;
+		if (entry.target.editor !== editor) return false;
+		this.forget(file.path);
+		this.take(entry.target);
 		return true;
 	}
 
-	/** 文件落盘了：正是等着的那篇就立刻修（返回是否命中） */
-	onModified(file: TFile): boolean {
-		if (!this.pending.has(file.path)) return false;
-		this.fire(file.path);
-		return true;
-	}
-
-	/** 插件卸载：清掉所有等待，卸载之后不再去写仓库 */
+	/** 插件卸载：清掉所有等待，卸载之后不再动手 */
 	dispose(): void {
 		for (const path of [...this.pending.keys()]) {
 			this.forget(path);
 		}
-	}
-
-	/** 真的跑一次（先从表里删掉，免得我们自己的写盘又把它触发一遍） */
-	private fire(path: string): void {
-		const entry = this.pending.get(path);
-		if (!entry) return;
-		this.forget(path);
-		this.run(entry.file);
 	}
 
 	/** 撤销一笔等待（连同它的兜底定时器） */
@@ -140,20 +119,12 @@ export class PasteFixScheduler {
 	}
 }
 
-/**
- * 催这篇笔记立刻落盘。
- *
- * 同一篇笔记可能开着好几个视图（分屏），干净的那几份 `save()` 自己会早退（内容没变不写盘），
- * 所以不用挑哪一份是"刚粘过的那份"。
- *
- * 失败不用我们操心：Obsidian 会打日志并弹"保存失败"的通知，这里再吵一次只会重复。
- */
-function saveViewsOf(app: App, file: TFile): void {
-	for (const leaf of app.workspace.getLeavesOfType('markdown')) {
-		const view = leaf.view;
-		if (view instanceof MarkdownView && view.file?.path === file.path) {
-			void view.save().catch(() => undefined);
-		}
+/** 光标/选区在编辑器里的字符偏移（不好取时按 0 算：那一段会读成空，等于不修） */
+function offsetOf(editor: Editor, which: 'from' | 'to'): number {
+	try {
+		return editor.posToOffset(editor.getCursor(which));
+	} catch {
+		return 0;
 	}
 }
 
@@ -167,42 +138,46 @@ export function registerPasteAutoFix(
 	actions: TaskActions,
 	getSettings: () => ImageTransferSettings
 ): void {
-	const scheduler = new PasteFixScheduler({
-		run: (file) => { void actions.quickFixChatLog(file); },
-		flush: (file) => { saveViewsOf(plugin.app, file); },
-	});
+	const fixNow = (target: PasteTarget): void => {
+		const end = offsetOf(target.editor, 'to');
+		if (end <= target.start) return;
+
+		const text = target.editor.getRange(
+			target.editor.offsetToPos(target.start),
+			target.editor.offsetToPos(end)
+		);
+
+		// 判定用的是**真正插进文档的那段文字**（不是剪贴板里的），与排版引擎看到的是同一份
+		const enabled = getSettings().autoFixChatLogOnPaste === true;
+		if (!shouldAutoFixPaste({ enabled, text, hasFile: true })) return;
+
+		void actions.fixPastedRange(target.file, target.editor, target.start);
+	};
+
+	const scheduler = new PasteFixScheduler({ take: fixNow });
 	plugin.register(() => { scheduler.dispose(); });
 
-	// ① 粘贴：只看剪贴板里的纯文本，不像聊天记录就一个字节都不碰（这次粘贴照常进行）
-	//
-	// 处理函数单独写成一个具名函数：**它是观察者，不是接管者** ——
-	// 我们故意不 `preventDefault()`，那会把这次粘贴整个吞掉（内容根本进不了笔记），
-	// 而我们要的恰恰是"粘进去之后顺手修好"。`evt.defaultPrevented` 倒是要看：
-	// 别的插件已经接管了这次粘贴，我们就不凑热闹了。
-	const handlePaste = (evt: ClipboardEvent, _editor: Editor, info: MarkdownView | MarkdownFileInfo): void => {
+	// ① 粘贴：只看一眼"粘在哪儿"，不判定也不动手（此刻内容还没进文档）；
+	//    处理函数是**具名函数**：它是观察者，故意不 preventDefault ——
+	//    那会把这次粘贴整个吞掉，而我们要的恰恰是"粘进去之后顺手修好"。
+	//    `evt.defaultPrevented` 要看：别的插件已经接管了这次粘贴，我们就不凑热闹了。
+	const handlePaste = (evt: ClipboardEvent, editor: Editor, info: MarkdownView | MarkdownFileInfo): void => {
 		if (evt.defaultPrevented) return;
 
 		const file = info.file ?? null;
-		const text = evt.clipboardData?.getData('text/plain') ?? '';
-		const enabled = getSettings().autoFixChatLogOnPaste === true;
-		if (!shouldAutoFixPaste({ enabled, text, hasFile: file !== null })) return;
-		if (file) scheduler.schedule(file);
+		if (!file) return;
+
+		const start = Math.min(offsetOf(editor, 'from'), offsetOf(editor, 'to'));
+		scheduler.schedule({ editor, file, start });
 	};
 
 	plugin.registerEvent(plugin.app.workspace.on('editor-paste', handlePaste));
 
-	// ② 粘贴落进编辑器：催这篇笔记立刻写盘（默认要等停手 2 秒，见模块头注释）
-	const handleEditorChange = (_editor: Editor, info: MarkdownView | MarkdownFileInfo): void => {
+	// ② 粘贴落进编辑器：正是等着的那一篇就把刚粘的那段交出去修
+	const handleEditorChange = (editor: Editor, info: MarkdownView | MarkdownFileInfo): void => {
 		const file = info.file ?? null;
-		if (file) scheduler.onEditorChange(file);
+		if (file) scheduler.onEditorChange(editor, file);
 	};
 
 	plugin.registerEvent(plugin.app.workspace.on('editor-change', handleEditorChange));
-
-	// ③ 落盘：编辑器把这次粘贴写进文件之后才动手（这时正文里才有刚粘的内容）
-	plugin.registerEvent(
-		plugin.app.vault.on('modify', (file) => {
-			if (file instanceof TFile) scheduler.onModified(file);
-		})
-	);
 }

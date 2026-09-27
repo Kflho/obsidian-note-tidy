@@ -182,6 +182,22 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 	});
 
 	plugin.addCommand({
+		id: 'typeset-selection',
+		name: '排版选中的内容（转换选区里的外部图片 + 修复排版）',
+		// 不用 editorCallback：那个在阅读模式下会让命令从面板里消失；这里本来也要求有选区
+		checkCallback: (checking: boolean) => {
+			const view = app.workspace.getActiveViewOfType(MarkdownView);
+			const file = view?.file ?? null;
+			const editor = view?.editor;
+			if (!file || !editor) return false;
+			if (!checking) {
+				void tasks.typesetSelection(file, editor);
+			}
+			return true;
+		}
+	});
+
+	plugin.addCommand({
 		id: 'quick-fix-chat-log-current-note',
 		name: '快速修复聊天记录（转换外部图片 + 修复排版）',
 		// 不用 editorCallback：那个在阅读模式下会让命令从面板里消失，而聊天记录多半是在阅读模式里看的
