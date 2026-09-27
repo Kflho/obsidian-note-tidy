@@ -1,13 +1,17 @@
 /**
- * 外部图片导入的交接与回滚（`src/image/transfer.ts`）
+ * 外部图片导入：转格式、退回原格式、回滚（`src/image/transfer.ts`）
  *
  * 运行：npm test
  *
- * 盯四件事：
- *   1. 交接：导入的图片交给 Image Converter 转格式后，**链接写的是转换后的文件名**（`.webp`）
- *   2. 退回：没装插件 / 关了开关时按原格式导入，链接仍是 `.png`
- *   3. 回滚：写回失败时把刚导入的文件删掉 —— 不留孤儿附件（2026-09 用户库里 40 张的成因）
- *   4. 回滚的删除走 Obsidian 的回收站，删不动也不炸
+ * 盯五件事：
+ *   1. 转格式：导入的图片按设置转成目标格式后，**链接写的是转换后的文件名**（`.webp`）
+ *   2. 退回：关了开关 / 目标格式认不出来时按原格式导入，链接仍是 `.png`
+ *   3. 同一批多张图：源格式不同、落在同一秒，也要**每张都转**、名字各自错开
+ *   4. 回滚：写回失败时把刚导入的文件删掉 —— 不留孤儿附件（2026-09 用户库里 40 张的成因）
+ *   5. 回滚的删除走 Obsidian 的回收站，删不动也不炸
+ *
+ * 转码用插件自带的 canvas 编码器（`image/convert.ts`），Node 里跑不了 ——
+ * 这里用 `installCanvasStub()` 装上替身，跑的还是**真**编码器那条路。
  */
 import { TFile } from "obsidian";
 import type { App } from "obsidian";
@@ -20,7 +24,7 @@ import {
 	transferImagesInText,
 } from "../src/image/transfer";
 import type { TransferSettings } from "../src/image/transfer";
-import type { ConverterHandle } from "../src/image/image-converter-bridge";
+import { installCanvasStub, stubPngBytes, stubWebpBytes } from "./canvas-stub";
 
 // -------------------------------------------------------------------- 断言
 let checks = 0;
@@ -38,14 +42,6 @@ function check(name: string, actual: unknown, expected: unknown): void {
 }
 
 // -------------------------------------------------------------------- 工具
-function webpBytes(payload = 'webp'): ArrayBuffer {
-	const bytes = new Uint8Array(12 + payload.length);
-	const head = 'RIFF\u0000\u0000\u0000\u0000WEBP';
-	for (let i = 0; i < head.length; i++) bytes[i] = head.charCodeAt(i);
-	for (let i = 0; i < payload.length; i++) bytes[12 + i] = payload.charCodeAt(i);
-	return bytes.buffer;
-}
-
 function pngBytes(): ArrayBuffer {
 	const bytes = new Uint8Array(16);
 	bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
@@ -70,9 +66,6 @@ function tf(pathStr: string): TFile {
 function createApp(options: {
 	modifyFails?: boolean;
 	content?: string;
-	withConverter?: boolean;
-	/** 换一个转码器替身（例如"转出来的还是原格式"，用来验转码失败时的退路） */
-	converter?: ConverterHandle;
 } = {}): {
 	app: App;
 	files: Map<string, ArrayBuffer>;
@@ -106,36 +99,15 @@ function createApp(options: {
 		},
 	};
 	const app = { vault, fileManager } as unknown as App;
-	// 交接靠 `app.plugins.plugins['image-converter']` 找插件实例 —— 装上插件才有交接这回事
-	if (options.withConverter) {
-		(app as unknown as { plugins: unknown }).plugins = {
-			plugins: { 'image-converter': options.converter ?? fakeConverter() },
-		};
-	}
 	return { app, files, log };
-}
-
-/** 转码器替身：默认返回 webp 字节（`produce` 换成别的就能造出"转码失败"） */
-function fakeConverter(produce: () => ArrayBuffer = webpBytes): ConverterHandle {
-	return {
-		settings: {
-			conversionPresets: [{
-				name: 'WEBP(Exclude gif)', outputFormat: 'WEBP', quality: 75, colorDepth: 1,
-				resizeMode: 'None', desiredWidth: 800, desiredHeight: 600, desiredLongestEdge: 1000,
-				enlargeOrReduce: 'Auto', allowLargerFiles: false,
-				revertToOriginalIfLarger: false, minimumCompressionSavingsInKB: 30,
-				skipConversionPatterns: '*.gif',
-			}],
-			selectedConversionPreset: 'WEBP(Exclude gif)',
-		},
-		imageProcessor: { processImage: async (): Promise<ArrayBuffer> => produce() },
-	};
 }
 
 const BASE_SETTINGS: TransferSettings = {
 	attachmentLocation: 'root',
 	customAttachmentFolder: '',
 	imageNamePreset: 'img_{ss}',
+	vaultConvertFormat: 'webp',
+	convertQuality: '75',
 };
 
 // window.moment 的替身。
@@ -208,68 +180,76 @@ async function handOffTests(): Promise<void> {
 		console.log(SKIP_DISK_NOTE);
 		return;
 	}
-	// 装了插件、开关默认开（undefined 也算开）：链接写 .webp，创建的也是 webp 文件
-	{
-		const { app, log } = createApp({ withConverter: true });
-		const result = await transferImagesInText(
-			app, { ...BASE_SETTINGS, handOffImportedImages: true }, tf('note.md'),
-			`正文\n![](${externalLink})\n结尾`,
-		);
-		check("交接：链接换成 webp", result.content.includes('![[img_M.webp]]'), true);
-		check("交接：不再有外部路径", result.content.includes('file:///'), false);
-		check("交接：内容算改了", result.changed, true);
-		check("交接：created 记的是转换后的文件", result.created.map(f => f.name), ['img_M.webp']);
-		check("交接：写进仓库的只有 webp（没有中转 png）", log.created, ['img_M.webp']);
-		check("交接：不需要删除任何文件", log.deleted, []);
-	}
+	// 整段装着 canvas 替身：开关开着时那几张会真的转一遍（替身"编"出来的是 webp）
+	// 替身"编"出来的 webp 只有 12 字节，比磁盘上那 16 字节的假 png 小 —— 才会被采用
+	const canvas = installCanvasStub(() => stubWebpBytes(''));
+	try {
+		// 开关默认开（undefined 也算开）：链接写 .webp，创建的也是 webp 文件
+		{
+			const { app, log } = createApp();
+			const result = await transferImagesInText(
+				app, { ...BASE_SETTINGS, convertImportedImages: true }, tf('note.md'),
+				`正文\n![](${externalLink})\n结尾`,
+			);
+			check("交接：链接换成 webp", result.content.includes('![[img_M.webp]]'), true);
+			check("交接：不再有外部路径", result.content.includes('file:///'), false);
+			check("交接：内容算改了", result.changed, true);
+			check("交接：created 记的是转换后的文件", result.created.map(f => f.name), ['img_M.webp']);
+			check("交接：写进仓库的只有 webp（没有中转 png）", log.created, ['img_M.webp']);
+			check("交接：不需要删除任何文件", log.deleted, []);
+		}
 
-	// 开关写着 undefined：按默认（开）走 —— 设置项默认值就是 true
-	{
-		const { app } = createApp({ withConverter: true });
-		const result = await transferImagesInText(
-			app, BASE_SETTINGS, tf('note.md'), `![](${externalLink})`,
-		);
-		check("交接：默认就是开", result.created.map(f => f.name), ['img_M.webp']);
-	}
+		// 开关写着 undefined：按默认（开）走 —— 设置项默认值就是 true
+		{
+			const { app } = createApp();
+			const result = await transferImagesInText(
+				app, BASE_SETTINGS, tf('note.md'), `![](${externalLink})`,
+			);
+			check("交接：默认就是开", result.created.map(f => f.name), ['img_M.webp']);
+		}
 
-	// 关掉开关：按原格式导入，链接仍是 .png（插件装着也不交接）
-	{
-		const { app, log } = createApp({ withConverter: true });
-		const result = await transferImagesInText(
-			app, { ...BASE_SETTINGS, handOffImportedImages: false }, tf('note.md'),
-			`![](${externalLink})`,
-		);
-		check("退回：关掉开关时链接是 png", result.content.includes('![[img_M.png]]'), true);
-		check("退回：created 记的是原格式文件", result.created.map(f => f.name), ['img_M.png']);
-		check("退回：写进仓库的是 png", log.created, ['img_M.png']);
-	}
+		// 关掉开关：按原格式导入，链接仍是 .png
+		{
+			const { app, log } = createApp();
+			const result = await transferImagesInText(
+				app, { ...BASE_SETTINGS, convertImportedImages: false }, tf('note.md'),
+				`![](${externalLink})`,
+			);
+			check("退回：关掉开关时链接是 png", result.content.includes('![[img_M.png]]'), true);
+			check("退回：created 记的是原格式文件", result.created.map(f => f.name), ['img_M.png']);
+			check("退回：写进仓库的是 png", log.created, ['img_M.png']);
+		}
 
-	// 没装 image converter（app 上没有它的实例）：照旧导入，链接是 png —— 功能不坏，只是不转格式
-	{
-		const { app, log } = createApp();
-		const result = await transferImagesInText(
-			app, { ...BASE_SETTINGS, handOffImportedImages: true }, tf('note.md'),
-			`![](${externalLink})`,
-		);
-		check("退路：没装插件时链接是 png", result.content.includes('![[img_M.png]]'), true);
-		check("退路：没装插件时照旧入库", log.created, ['img_M.png']);
-	}
+		// 目标格式认不出来（手改过 data.json / 老版本的 preset、avif）：照旧导入，链接是 png
+		// —— 功能不坏，只是不转格式（宁可不动，也不猜一个格式下手）
+		{
+			const { app, log } = createApp();
+			const result = await transferImagesInText(
+				app, { ...BASE_SETTINGS, vaultConvertFormat: 'preset' }, tf('note.md'),
+				`![](${externalLink})`,
+			);
+			check("退路：目标格式认不出来时链接是 png", result.content.includes('![[img_M.png]]'), true);
+			check("退路：目标格式认不出来时照旧入库", log.created, ['img_M.png']);
+		}
 
-	// 没有外部图片：什么都不做，created 空
-	{
-		const { app } = createApp();
-		const result = await transferImagesInText(app, BASE_SETTINGS, tf('note.md'), '只有正文');
-		check("空跑：内容没变", result.changed, false);
-		check("空跑：没有新建文件", result.created.length, 0);
-	}
+		// 没有外部图片：什么都不做，created 空
+		{
+			const { app } = createApp();
+			const result = await transferImagesInText(app, BASE_SETTINGS, tf('note.md'), '只有正文');
+			check("空跑：内容没变", result.changed, false);
+			check("空跑：没有新建文件", result.created.length, 0);
+		}
 
-	// 图片带说明文字与尺寸：说明文字照旧跟着链接走
-	{
-		const { app } = createApp({ withConverter: true });
-		const result = await transferImagesInText(
-			app, BASE_SETTINGS, tf('note.md'), `![|300](${externalLink})`,
-		);
-		check("交接：说明文字跟着链接", result.content.includes('![[img_M.webp|300]]'), true);
+		// 图片带说明文字与尺寸：说明文字照旧跟着链接走
+		{
+			const { app } = createApp();
+			const result = await transferImagesInText(
+				app, BASE_SETTINGS, tf('note.md'), `![|300](${externalLink})`,
+			);
+			check("交接：说明文字跟着链接", result.content.includes('![[img_M.webp|300]]'), true);
+		}
+	} finally {
+		canvas.restore();
 	}
 }
 
@@ -277,17 +257,23 @@ async function handOffTests(): Promise<void> {
 async function rollbackTests(): Promise<void> {
 	// ①②需要真的从磁盘导入一张图（原因见文件上方关于平台的说明）
 	if (CAN_TOUCH_DISK) {
-		// ① 写盘失败：刚导入的文件要被丢弃，错误照旧抛出去
-		{
-			const { app, log } = createApp({ modifyFails: true, withConverter: true });
-			let threw = false;
-			try {
-				await transferExternalImages(app, BASE_SETTINGS, tf('note.md'));
-			} catch {
-				threw = true;
+		// 替身"编"出来的 webp 只有 12 字节，比磁盘上那 16 字节的假 png 小 —— 才会被采用
+	const canvas = installCanvasStub(() => stubWebpBytes(''));
+		try {
+			// ① 写盘失败：刚导入的文件要被丢弃，错误照旧抛出去
+			{
+				const { app, log } = createApp({ modifyFails: true });
+				let threw = false;
+				try {
+					await transferExternalImages(app, BASE_SETTINGS, tf('note.md'));
+				} catch {
+					threw = true;
+				}
+				check("回滚：写盘失败照旧抛错", threw, true);
+				check("回滚：写盘失败时不留文件", log.trashed, ['img_M.webp']);
 			}
-			check("回滚：写盘失败照旧抛错", threw, true);
-			check("回滚：写盘失败时不留文件", log.trashed, ['img_M.webp']);
+		} finally {
+			canvas.restore();
 		}
 
 		// ② 正常写回：返回 true，且没有任何文件被丢弃
@@ -346,75 +332,86 @@ async function sameSecondBatchTests(): Promise<void> {
 		return;
 	}
 
-	// ① png + jpg 同一秒：两张都要转成 webp，名字各自错开一秒
-	{
-		const { app, log } = createApp({ withConverter: true });
-		useTickingMoment();
-		const result = await transferImagesInText(
-			app, BASE_SETTINGS, tf('note.md'),
-			`![](${externalLink})\n![](${externalJpgLink})`,
-		);
-		useFixedMoment();
-		check("同秒多图：两张都落了 webp", log.created, ['img_0.webp', 'img_1.webp']);
-		check("同秒多图：链接都指向 webp", [/!\[\[img_0\.webp\]\]/.test(result.content), /!\[\[img_1\.webp\]\]/.test(result.content)], [true, true]);
-		check("同秒多图：没有一张按原格式留下", /\.(png|jpg)\]\]/.test(result.content), false);
-		check("同秒多图：created 与落盘一致", result.created.map(f => f.name), ['img_0.webp', 'img_1.webp']);
+	// 除了 ③（故意不转格式）与 ⑤（故意编错格式），这一节都装着替身
+	// 替身"编"出来的 webp 只有 12 字节，比磁盘上那 16 字节的假 png 小 —— 才会被采用
+	const canvas = installCanvasStub(() => stubWebpBytes(''));
+	try {
+		// ① png + jpg 同一秒：两张都要转成 webp，名字各自错开一秒
+		{
+			const { app, log } = createApp();
+			useTickingMoment();
+			const result = await transferImagesInText(
+				app, BASE_SETTINGS, tf('note.md'),
+				`![](${externalLink})\n![](${externalJpgLink})`,
+			);
+			useFixedMoment();
+			check("同秒多图：两张都落了 webp", log.created, ['img_0.webp', 'img_1.webp']);
+			check("同秒多图：链接都指向 webp", [/!\[\[img_0\.webp\]\]/.test(result.content), /!\[\[img_1\.webp\]\]/.test(result.content)], [true, true]);
+			check("同秒多图：没有一张按原格式留下", /\.(png|jpg)\]\]/.test(result.content), false);
+			check("同秒多图：created 与落盘一致", result.created.map(f => f.name), ['img_0.webp', 'img_1.webp']);
+		}
+
+		// ② 目标格式的名字**早就被仓库里的文件占着**（上一批粘贴留下的）：照样推一秒后转格式，
+		//    而不是"撞名就按 png 留着"
+		{
+			const { app, log } = createApp();
+			await app.vault.createBinary('img_0.webp', stubWebpBytes());
+			log.created.length = 0;
+			useTickingMoment();
+			const result = await transferImagesInText(app, BASE_SETTINGS, tf('note.md'), `![](${externalLink})`);
+			useFixedMoment();
+			check("目标名被占：往后推一秒", log.created, ['img_1.webp']);
+			check("目标名被占：链接写的是转换后的名字", result.content.includes('![[img_1.webp]]'), true);
+		}
+
+		// ④ 动图（gif）不转：它按 `.gif` 起名字，后面那张 png 照旧转格式
+		{
+			const { app, log } = createApp();
+			useTickingMoment();
+			const result = await transferImagesInText(
+				app, BASE_SETTINGS, tf('note.md'),
+				`![](${externalGifLink})\n![](${externalLink})`,
+			);
+			useFixedMoment();
+			check("同秒多图：gif 保持原样、png 转 webp", log.created, ['img_0.gif', 'img_0.webp']);
+			check("同秒多图：gif 的链接没被换成 webp", result.content.includes('![[img_0.gif]]'), true);
+		}
+	} finally {
+		canvas.restore();
 	}
 
-	// ② 目标格式的名字**早就被仓库里的文件占着**（上一批粘贴留下的）：照样推一秒后转格式，
-	//    而不是"撞名就按 png 留着"
-	{
-		const { app, log } = createApp({ withConverter: true });
-		await app.vault.createBinary('img_0.webp', webpBytes());
-		log.created.length = 0;
-		useTickingMoment();
-		const result = await transferImagesInText(app, BASE_SETTINGS, tf('note.md'), `![](${externalLink})`);
-		useFixedMoment();
-		check("目标名被占：往后推一秒", log.created, ['img_1.webp']);
-		check("目标名被占：链接写的是转换后的名字", result.content.includes('![[img_1.webp]]'), true);
-	}
-
-	// ③ 没装 Image Converter：不交接，按原格式各用各的名字（行为与以前完全一样）
+	// ③ 关掉「导入的图片转成目标格式」：不转，按原格式各用各的名字
 	{
 		const { app, log } = createApp();
 		useTickingMoment();
 		const result = await transferImagesInText(
-			app, BASE_SETTINGS, tf('note.md'),
+			app, { ...BASE_SETTINGS, convertImportedImages: false }, tf('note.md'),
 			`![](${externalLink})\n![](${externalJpgLink})`,
 		);
 		useFixedMoment();
-		check("不交接：各按原格式落盘", log.created, ['img_0.png', 'img_0.jpg']);
-		check("不交接：链接是原格式", [result.content.includes('![[img_0.png]]'), result.content.includes('![[img_0.jpg]]')], [true, true]);
+		check("不转格式：各按原格式落盘", log.created, ['img_0.png', 'img_0.jpg']);
+		check("不转格式：链接是原格式", [result.content.includes('![[img_0.png]]'), result.content.includes('![[img_0.jpg]]')], [true, true]);
 	}
 
-	// ④ 动图（gif）不转：它按 `.gif` 起名字，后面那张 png 照旧转格式
+	// ⑤ 名字是按目标格式生成的，可编码器**没编出目标格式**（拿原图糊弄）：必须换回原扩展名落盘，
+	//    不能把 png 字节写成 `.webp` 文件。此时两张图可以同词干不同扩展名（链接带着扩展名，谁也不会指错）
 	{
-		const { app, log } = createApp({ withConverter: true });
-		useTickingMoment();
-		const result = await transferImagesInText(
-			app, BASE_SETTINGS, tf('note.md'),
-			`![](${externalGifLink})\n![](${externalLink})`,
-		);
-		useFixedMoment();
-		check("同秒多图：gif 保持原样、png 转 webp", log.created, ['img_0.gif', 'img_0.webp']);
-		check("同秒多图：gif 的链接没被换成 webp", result.content.includes('![[img_0.gif]]'), true);
-	}
-
-	// ⑤ 名字是按目标格式生成的，可转码**没成**（它把输入原样退了回来）：必须换回原扩展名落盘，
-	//    不能把 png 字节写成 `.webp` 文件。此时两张图可以与"没装转码器"那一档一样同词干不同扩展名
-	//    （链接带着扩展名，谁也不会指错）
-	{
-		const { app, log } = createApp({ withConverter: true, converter: fakeConverter(pngBytes) });
-		useTickingMoment();
-		const result = await transferImagesInText(
-			app, BASE_SETTINGS, tf('note.md'),
-			`![](${externalLink})\n![](${externalJpgLink})`,
-		);
-		useFixedMoment();
-		check("转码没成：按原扩展名落盘", log.created, ['img_0.png', 'img_0.jpg']);
-		check("转码没成：链接跟着原扩展名", [result.content.includes('![[img_0.png]]'), result.content.includes('![[img_0.jpg]]')], [true, true]);
-		check("转码没成：一个 .webp 都没建（不拿 png 字节冒充）",
-			log.created.some(name => name.endsWith('.webp')), false);
+		const wrong = installCanvasStub(() => stubPngBytes());
+		try {
+			const { app, log } = createApp();
+			useTickingMoment();
+			const result = await transferImagesInText(
+				app, BASE_SETTINGS, tf('note.md'),
+				`![](${externalLink})\n![](${externalJpgLink})`,
+			);
+			useFixedMoment();
+			check("编错格式：按原扩展名落盘", log.created, ['img_0.png', 'img_0.jpg']);
+			check("编错格式：链接跟着原扩展名", [result.content.includes('![[img_0.png]]'), result.content.includes('![[img_0.jpg]]')], [true, true]);
+			check("编错格式：一个 .webp 都没建（不拿 png 字节冒充）",
+				log.created.some(name => name.endsWith('.webp')), false);
+		} finally {
+			wrong.restore();
+		}
 	}
 }
 

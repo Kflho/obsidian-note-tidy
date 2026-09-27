@@ -17,7 +17,7 @@
 import { Notice, TFile } from "obsidian";
 import type { App, PluginManifest } from "obsidian";
 import ImageTransferPlugin from "../src/main";
-import { CLEAR_UNUSED_IMAGES_COMMAND } from "../src/image/dedupe";
+import { installCanvasStub, stubWebpBytes } from "./canvas-stub";
 import type { ImageTransferSettings } from "../src/settings/model";
 
 // -------------------------------------------------------------------- 断言
@@ -83,8 +83,8 @@ function installDomStubs(): void {
 }
 
 interface StubOptions {
-	/** 有没有装 Image Converter（默认装了） */
-	converter?: boolean;
+	/** 目标格式认不出来（模拟手改坏 data.json）：这一步整步跳过 */
+	brokenFormat?: boolean;
 	/** 覆盖默认设置 */
 	settings?: Partial<ImageTransferSettings>;
 }
@@ -94,7 +94,7 @@ interface TidyStub {
 	images: Map<string, Uint8Array>;
 	/** 笔记内容 */
 	notes: Map<string, string>;
-	/** 交给转码器的图片字节数（按调用顺序） */
+	/** 交给编码器的图片字节数（按解码顺序，= 该转的那几张的原始大小） */
 	convertedSizes: number[];
 	/** 执行过的命令 ID */
 	commands: string[];
@@ -117,8 +117,12 @@ async function createStub(options: StubOptions = {}): Promise<TidyStub> {
 	installDomStubs();
 	noticeLog.messages.length = 0;
 
+	// 编码器（canvas）替身：装上它，`image/convert.ts` 的默认编码器就能在 Node 里跑
+	const canvas = installCanvasStub(() => stubWebpBytes(''));
+	const convertedSizes = canvas.decodedSizes;
+
 	const notes = new Map<string, string>([
-		["笔记.md", "![[a.png]]\n![[b.png]]\n![[d.png]]\n"],
+		["笔记.md", "![[a.png]]\n![[b.png]]\n![[d.png]]\n![[c.webp]]\n![[e.gif]]\n"],
 	]);
 	const images = new Map<string, Uint8Array>([
 		["img/a.png", imageBytes(0x11, 64)],
@@ -126,8 +130,10 @@ async function createStub(options: StubOptions = {}): Promise<TidyStub> {
 		["img/c.webp", webpBytes(48)],
 		["img/d.png", imageBytes(0x22, 40)],
 		["img/e.gif", imageBytes(0x33, 24)],
+		// 没有任何笔记 / canvas 引用 → 第 ④ 步该把它清掉
+		// （用 webp 是刻意的：它已经是目标格式，不会被第 ③ 步转换，测试里的转换清单才好断言）
+		["img/orphan.webp", webpBytes(32)],
 	]);
-	const convertedSizes: number[] = [];
 	const commands: string[] = [];
 
 	const files = new Map<string, TFile>();
@@ -148,22 +154,6 @@ async function createStub(options: StubOptions = {}): Promise<TidyStub> {
 	for (const [path, data] of images) register(path, data.byteLength);
 	const noteFiles: TFile[] = [];
 	for (const path of notes.keys()) noteFiles.push(register(path, 0));
-
-	/** Image Converter 的替身：只实现我们借用的那两个字段 */
-	const converter = options.converter === false ? undefined : {
-		settings: {
-			conversionPresets: [
-				{ name: "webp", outputFormat: "WEBP", quality: 80, revertToOriginalIfLarger: false },
-			],
-			selectedConversionPreset: "webp",
-		},
-		imageProcessor: {
-			processImage: async (blob: Blob): Promise<ArrayBuffer> => {
-				convertedSizes.push(blob.size);
-				return webpBytes(64).buffer;
-			},
-		},
-	};
 
 	const app = {
 		vault: {
@@ -208,11 +198,11 @@ async function createStub(options: StubOptions = {}): Promise<TidyStub> {
 				files.delete(file.path);
 			},
 		},
-		// Clear Unused Images（oz-clear-unused-images）的替身：记下被调用的命令，当作"装了"
+		// 让"执行别家命令"这件事一眼可见：整段测试都不该再用它（清理附件是我们自己实现的）
 		commands: {
 			executeCommandById: (id: string): boolean => { commands.push(id); return true; },
 		},
-		plugins: { plugins: converter ? { "image-converter": converter } : {} },
+		plugins: { plugins: {} },
 		workspace: { on: (event: string) => ({ event }) },
 	} as unknown as App;
 
@@ -234,8 +224,8 @@ async function tidy(stub: TidyStub, confirm = false): Promise<string> {
 	return noticeLog.messages[noticeLog.messages.length - 1] ?? "";
 }
 
-// ------------------------------- 1. 装了 Image Converter：转换 + 合并 + 清理一次做完
-async function withConverter(): Promise<void> {
+// ------------------------------- 1. 转换 + 合并 + 清理一次做完
+async function withConvert(): Promise<void> {
 	const stub = await createStub();
 	const message = await tidy(stub);
 
@@ -246,30 +236,32 @@ async function withConverter(): Promise<void> {
 	check("已经是目标格式的图片不动", stub.images.has("img/c.webp"), true);
 	check("动图不转", stub.images.has("img/e.gif"), true);
 	// 64 = a.png（b.png 与它同内容，已被合并），40 = d.png；顺序 = 仓库里 getFiles 的顺序
-	check("转码器只收到该转的那两张", stub.convertedSizes, [64, 40]);
-	check("笔记里的链接跟着合并与改名走", stub.notes.get("笔记.md"), "![[a.webp]]\n![[a.webp]]\n![[d.webp]]\n");
-	check("清理没人引用的附件也执行了", stub.commands, [CLEAR_UNUSED_IMAGES_COMMAND]);
-	checkTrue("结果提示把三件事都说清楚了",
+	check("编码器只收到该转的那两张", stub.convertedSizes, [64, 40]);
+	check("笔记里的链接跟着合并与改名走", stub.notes.get("笔记.md"), "![[a.webp]]\n![[a.webp]]\n![[d.webp]]\n![[c.webp]]\n![[e.gif]]\n");
+	check("没人引用的那张被清掉了（自己实现，不调别家命令）", stub.images.has("img/orphan.webp"), false);
+	check("有人引用的都没被清理", [stub.images.has("img/a.webp"), stub.images.has("img/d.webp"), stub.images.has("img/e.gif")], [true, true, true]);
+	check("没有调用任何别家插件的命令", stub.commands, []);
+	checkTrue("结果提示把四件事都说清楚了",
 		message.includes("合并掉 1 张重复图片")
 		&& message.includes("把 2 张图片转换为 webp")
-		&& message.includes("clear unused images"),
+		&& message.includes("清理掉 1 张没人引用的图片"),
 		`实际提示：${message}`);
 }
 
-// --------------------------- 2. 没装 Image Converter：合并与清理照常，只是不转换
-async function withoutConverter(): Promise<void> {
-	const stub = await createStub({ converter: false });
+// --------------------------- 2. 目标格式认不出来：合并与清理照常，只是不转换
+async function brokenFormat(): Promise<void> {
+	const stub = await createStub({ settings: { vaultConvertFormat: 'preset' } });
 	const message = await tidy(stub);
 
-	check("没装插件：合并照常", stub.images.has("img/b.png"), false);
-	check("没装插件：一张都不转换", [stub.images.has("img/a.webp"), stub.images.has("img/d.png")], [false, true]);
-	check("没装插件：清理照常", stub.commands, [CLEAR_UNUSED_IMAGES_COMMAND]);
+	check("目标格式坏值：合并照常", stub.images.has("img/b.png"), false);
+	check("目标格式坏值：一张都不转换", [stub.images.has("img/a.webp"), stub.images.has("img/d.png")], [false, true]);
+	check("目标格式坏值：清理照常（与转换无关）", [stub.images.has("img/orphan.webp"), stub.commands], [false, []]);
 	checkTrue("提示里说明了跳过转换的原因",
-		message.includes("没检测到 image converter"),
+		message.includes("读不出「转换图片格式」的目标格式"),
 		`实际提示：${message}`);
 }
 
-// --------------------------- 3. 关掉「整理时转换图片格式」：装了插件也不转换、不念叨
+// --------------------------- 3. 关掉「整理时转换图片格式」：不转换、不念叨
 async function convertSwitchOff(): Promise<void> {
 	const stub = await createStub({ settings: { tidyConvertFormat: false } });
 	const message = await tidy(stub);
@@ -277,21 +269,35 @@ async function convertSwitchOff(): Promise<void> {
 	check("开关关着：一张都不转换", stub.convertedSizes, []);
 	check("开关关着：图片保持原格式", [stub.images.has("img/a.png"), stub.images.has("img/d.png")], [true, true]);
 	check("开关关着：合并照常", stub.images.has("img/b.png"), false);
-	check("开关关着：清理照常", stub.commands, [CLEAR_UNUSED_IMAGES_COMMAND]);
-	checkTrue("开关关着：不拿「没检测到 image converter」来唠叨",
-		!message.includes("image converter"),
+	check("开关关着：清理照常（这一步有自己的开关）", stub.images.has("img/orphan.webp"), false);
+	checkTrue("开关关着：不拿「跳过格式转换」来唠叨",
+		!message.includes("跳过格式转换"),
+		`实际提示：${message}`);
+}
+
+// --------------------------- 4. 关掉「整理时清理没人引用的附件」：不清理、不念叨
+async function clearSwitchOff(): Promise<void> {
+	const stub = await createStub({ settings: { autoClearUnusedImages: false } });
+	const message = await tidy(stub);
+
+	check("清理开关关着：没人引用的那张留着", stub.images.has("img/orphan.webp"), true);
+	checkTrue("清理开关关着：提示里不提清理",
+		!message.includes("没人引用的图片"),
 		`实际提示：${message}`);
 }
 
 // -------------------------------------------------------------------- 运行
-console.log("=== 整理图片：转换 + 合并 + 清理（装了 Image Converter） ===");
-await withConverter();
+console.log("=== 整理图片：转换 + 合并 + 清理 ===");
+await withConvert();
 
-console.log("=== 整理图片：没装 Image Converter 的退路 ===");
-await withoutConverter();
+console.log("=== 整理图片：目标格式认不出来时的退路 ===");
+await brokenFormat();
 
 console.log("=== 整理图片：关掉转换开关 ===");
 await convertSwitchOff();
+
+console.log("=== 整理图片：关掉清理开关 ===");
+await clearSwitchOff();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

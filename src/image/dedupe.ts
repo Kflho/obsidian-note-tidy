@@ -179,12 +179,3 @@ export function collectImageTargets(text: string): string[] {
 function escapeRegExp(text: string): string {
 	return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-
-/**
- * Clear Unused Images（`oz-clear-unused-images`）的「清理未使用图片」命令 ID。
- *
- * 合并完顺手执行一次：我们只合并"同一张图的重复副本"，而它负责"没有任何笔记引用的附件"，
- * 两者互补。它没装 / 没启用时 `app.commands.executeCommandById` 返回 false，什么都不会发生。
- * （它还有一个 `clear-unused-attachments` 清全部附件；这里只清图片，范围更保守。）
- */
-export const CLEAR_UNUSED_IMAGES_COMMAND = 'oz-clear-unused-images:clear-images-obsidian';

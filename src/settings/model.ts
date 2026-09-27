@@ -3,6 +3,8 @@ import { DEFAULT_LEADING_INDENT_MODE } from '../text/indent';
 import type { LeadingIndentMode } from '../text/indent';
 import { DEFAULT_SPACING_OPTIONS, resolveCjkDigitMode, resolveSpacingMode } from '../text/spacing';
 import type { SpacingOptions } from '../text/spacing';
+import { convertPlanFrom } from '../image/convert';
+import type { ConvertPlan } from '../image/convert';
 
 /**
  * 插件设置的**数据模型**：字段定义、默认值、以及"设置 → 各功能选项"的转换。
@@ -16,28 +18,26 @@ export interface ImageTransferSettings {
 	imageNamePreset: string;
 	renameLinkFormat: string;
 	/**
-	 * 导入的图片顺手交给 Image Converter 转格式（用它当前选中的转换预设）。
+	 * 导入的图片转成目标格式（用插件自带的 canvas 编码器，见 `image/convert.ts`）。
 	 *
-	 * Image Converter 只在"剪贴板里带图片文件"的粘贴上自动转换，看不到我们导入的
-	 * `file:///D:\…` 文本路径 —— 不交接的话图片进了库却一直是 png/jpg。
-	 * 它没装 / 转换失败时按原格式导入，不影响图片进库（见 `image/image-converter-bridge.ts`）。
+	 * 关掉就按原格式导入（图片照进仓库，只是不动格式）。
 	 */
-	handOffImportedImages: boolean;
+	convertImportedImages: boolean;
 	/**
-	 * 图片格式转换的目标格式，三条路共用：`convert-images-current-note` /
-	 * `convert-images-entire-vault` 两条命令，以及「整理图片」（`tidyConvertFormat` 开着时）。
+	 * 图片格式转换的目标格式，四条路共用：导入的图片、粘贴进来的图片、
+	 * `convert-images-current-note` / `convert-images-entire-vault` 两条命令，
+	 * 以及「整理图片」（`tidyConvertFormat` 开着时）。
 	 *
-	 * `preset` = 跟随 Image Converter 当前选中的预设；`webp` / `jpg` / `png` = 直接点名
-	 * （质量、缩放仍照预设，动图与已是目标格式的图片一律跳过）。
+	 * `webp` / `jpg` / `png` 三选一（浏览器 canvas 能编出来的就是这三种）。
 	 */
 	vaultConvertFormat: string;
+	/** 转换质量 `1`–`100`（默认 `'75'`）：canvas 编码器的质量参数，png 忽略它 */
+	convertQuality: string;
 	/**
-	 * 「整理图片」时是否顺手把还不是目标格式的图片交给 Image Converter 转换
+	 * 「整理图片」时是否顺手把还不是目标格式的图片转换成目标格式
 	 * （目标格式看 `vaultConvertFormat`，与那两条转换命令同一个开关）。
 	 *
-	 * 整理图片本来就是"把仓库里的图片收拾干净"，统一格式是这份收拾的一部分；
-	 * 没装 Image Converter / 预设读不出来时这一步自动跳过，合并与清理照常
-	 * （见 `image/image-converter-bridge.ts`）。
+	 * 整理图片本来就是"把仓库里的图片收拾干净"，统一格式是这份收拾的一部分。
 	 */
 	tidyConvertFormat: boolean;
 	/**
@@ -58,11 +58,21 @@ export interface ImageTransferSettings {
 	/**
 	 * 粘贴进来的图片自动套用上面的默认宽度 / 高度（与「快速设置图片大小」同一套参数）。
 	 *
-	 * 只管**刚粘进来的那一段**：Obsidian 存下的截图、Image Converter 转完插进来的图、
+	 * 只管**刚粘进来的那一段**：本插件自己接管的粘贴、别的插件存下的截图、
 	 * 粘贴文本里带的图片链接都算；宽度留空（= 移除尺寸模式）或尺寸填错时整步不动
 	 * （见 `image/size.ts` 的 `pastedImageSizeOptions`）。
 	 */
 	autoSetImageSizeOnPaste: boolean;
+	/**
+	 * 在编辑器里粘贴图片文件时**由本插件接管**：自己把图片存进附件夹（一张一张、名字不撞、
+	 * 顺手转成 `vaultConvertFormat`）并写好链接，一次粘多张也不会漏。
+	 *
+	 * Image Converter 的自动粘贴是并发跑的（`handlePaste` 里 `files.map(async …)`）：
+	 * 一次粘多张时每张各算各的输出名，同一秒算出来的名字撞在一起，后写的直接
+	 * `File already exists` 丢图（2026-09 用户报的"粘两张只剩第一张"）。关掉这一项就恢复
+	 * "别人家的粘贴"行为（那时建议把它的「Never process filenames」留空，别两边都不管）。
+	 */
+	takeOverImagePaste: boolean;
 	// ---- 聊天记录排版 ----
 	/** 是否在排版结果中保留用户名 */
 	chatShowUsername: boolean;
@@ -155,13 +165,15 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	customAttachmentFolder: 'Attachments',
 	imageNamePreset: 'Pasted image {YYYY}{MM}{DD}{HH}{mm}{ss}',
 	renameLinkFormat: 'full',
-	// 导入的图片交给 Image Converter 转格式（默认开）：它本来就负责把粘进来的图转成 webp，
-	// 而我们导入的外部路径图片它看不见 —— 不交接就会攒一堆 png。没装它时这一项不起作用。
-	handOffImportedImages: true,
+	// 导入的图片转成目标格式（默认开）：外部路径图片收进仓库时顺手统一格式，
+	// 不转的话仓库里会攒一堆 png/jpg（转码用插件自带的 canvas 编码器，不依赖别的插件）
+	convertImportedImages: true,
 	// 图片格式转换默认转 webp：仓库里绝大多数图片都该是 webp（省空间、Obsidian 原生支持）
 	vaultConvertFormat: 'webp',
+	// 质量 75：与常见的 webp 预设一致（100 省不下多少空间，太低截图上的小字会糊）
+	convertQuality: '75',
 	// 整理时顺手统一图片格式（默认开）：整理图片就是"把仓库里的图片收拾干净"，
-	// 格式统一是其中一环；目标格式沿用 vaultConvertFormat，没装 Image Converter 时自动跳过
+	// 格式统一是其中一环；目标格式沿用 vaultConvertFormat
 	tidyConvertFormat: true,
 	// 合并完顺手让 Clear Unused Images 收一遍"没人引用的附件"：两者互补（我们合并重复、它清理孤儿）
 	autoClearUnusedImages: true,
@@ -173,6 +185,8 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	// 粘贴进来的图片顺手套上默认尺寸（默认开）：粘贴的多半是聊天截图，尺寸统一了笔记才整齐；
 	// 只改刚粘的那一段，宽度留空 / 填错时整步不动，撤销一次即可回退
 	autoSetImageSizeOnPaste: true,
+	// 粘贴图片由本插件接管（默认开）：一次粘多张时别的插件会并发撞名丢图，我们一张一张来
+	takeOverImagePaste: true,
 	// 以下默认值与旧版本排版结果完全一致，升级后已有笔记不会被改动
 	chatShowUsername: true,
 	chatShowDate: true,
@@ -248,4 +262,18 @@ export function getSpacingOptions(settings: ImageTransferSettings): SpacingOptio
 		symbolPad: settings.spacingSymbolPad !== false,
 		chapterTitle: settings.spacingChapterTitle !== false,
 	};
+}
+
+/**
+ * 把插件设置转换成图片转换计划（目标格式 + 质量），四条路共用：
+ * 导入外部图片、粘贴进来的图片、两条转换命令、「整理图片」。
+ *
+ * 收敛逻辑在 `image/convert.ts` 的 `convertPlanFrom` 里（那边是转码器的家，
+ * `image/` 不 import `settings/`，所以公共的那一半放在它那儿）。
+ */
+export function resolveConvertPlan(settings: {
+	vaultConvertFormat: string;
+	convertQuality: string;
+}): ConvertPlan | null {
+	return convertPlanFrom(settings.vaultConvertFormat, settings.convertQuality);
 }

@@ -87,12 +87,13 @@ src/
     links.ts            # 链接解析与同名歧义（同名不猜）
     naming.ts           # 命名预设、唯一路径、仓库文件名表
     external-path.ts    # 弹性路径解析（URL 编码 / Markdown 转义 / 大小写）
-    transfer.ts         # 外部图片导入（可交接 Image Converter 转格式）
+    transfer.ts         # 外部图片导入（`importImageBytes` 与「粘贴图片」共用）
+    convert.ts          # 自带格式转换：canvas 编码器（导入 / 粘贴 / 两条命令 / 整理图片共用）
+    unused.ts           # 清理没人引用的图片（自己实现，不依赖 Clear Unused Images）
     rename.ts           # 乱码改名 / 全量改名 / 链接格式归一
     size.ts             # 图片大小批改 + 「粘贴的图片自动套尺寸」的取参（pastedImageSizeOptions）
     organize.ts         # 图片位置整理
     dedupe.ts           # 「整理图片」的合并部分：同目录逐字节相同的副本只留一张 + 引用改写
-    image-converter-bridge.ts # 借 Image Converter 的转码器与预设：导入交接 / 两条转换命令 / 整理图片那一步
     attachment-folder.ts# 附件夹定位与按需创建
     constants.ts        # 扩展名表与嵌入链接正则
     scan.ts             # 图片嵌入扫描（`![[图.png]]` / `![说明](图.png)` + 位置），状态栏与复制共用
@@ -106,7 +107,8 @@ src/
     menu-hidden.ts      # 隐藏名单（`作用域：标题`）的解析与生成（纯函数）
     menu-manage-modal.ts# 右键菜单管理面板：图片 / 笔记 / 文件夹三节，开关各项
     copy-shortcut.ts    # 可选的"接管编辑器里的 Ctrl+C"：选中图片时改走复制文件那条路
-    paste-watch.ts      # 粘贴时自动动手：文本修复（一笔一次）+ 粘贴图片套尺寸（观望式，见 sizePastedRange）
+    paste-watch.ts      # 粘贴时自动动手：图片接管（见 paste-images.ts）+ 文本修复（一笔一次）+ 粘贴图片套尺寸（观望式）
+    paste-images.ts     # 「粘贴图片」的纯函数：挑出剪贴板里的图、补文件名、拼要写进正文的文字与链接
     image-size-modal.ts # 图片大小弹窗
     confirm-rename-modal.ts # 批量重命名确认
     progress.ts         # 状态栏进度
@@ -216,7 +218,8 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 粘贴自动修复（`autoFixChatLogOnPaste`，**默认开**）挂在官方的 `editor-paste` 上，**只修刚粘进来的那一段**：
 
-- **只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），粘贴事件只用来看**粘在哪儿**。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）。`evt.defaultPrevented` 为真说明别的插件已经接管了这次粘贴：**文本修复不凑热闹**（插进来的不一定是剪贴板里那些内容），**但图片套尺寸那一笔要跟**（Image Converter 处理图片文件时正是 `preventDefault` 自己来 —— 图片是它存进仓库、链接是它插进正文的，那正是要套尺寸的图片）；
+- **图片文件先归我们管**（`takeOverImagePaste`，**默认开**）：剪贴板里带图片文件时，本插件自己把这次粘贴接过来 —— 一张一张存进附件夹（`ImageTasks.pasteImages` → `savePastedImages` → `importImageBytes`，名字与格式都走本插件那套）、把文字与 `![[链接]]` 写进正文，然后当场排版 / 套尺寸。**理由是别的插件做不对这件事**：Image Converter 的自动粘贴是并发跑的（`handlePaste` / `handleDrop` 里 `files.map(async …)`），一批图各算各的输出名，同一秒撞名后写的直接 `File already exists` 丢图（2026-09 用户实测"粘两张只剩第一张"），它既没有开关、也不看 `defaultPrevented`，只能让它别再管（**它的「Never process filenames」填 `*`**，那一项只作用于它的自动粘贴 / 拖放）。两个前提：这次粘贴**没人管**（`evt.defaultPrevented` 为真说明别人已经在存这些图了，我们不重复处理）、开关开着；
+- **文本修复只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），粘贴事件只用来看**粘在哪儿**。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）。`evt.defaultPrevented` 为真说明别的插件已经接管了这次粘贴：**文本修复不凑热闹**（插进来的不一定是剪贴板里那些内容），**但图片套尺寸那一笔要跟**（别人把图片存进仓库、把链接插进正文，那正是要套尺寸的图片）；
 - **粘贴那一刻绝不动手**：`editor-paste` 是 Obsidian 剪贴板管理器的 paste 处理器发的，而真正往文档里插内容的是 CodeMirror 内置的处理器（排在它后面，一返回 true 就 break）—— 此刻读到的正文是粘贴之前的。所以只登记一笔（`PasteFixScheduler`：编辑器 + 笔记 + 粘贴起点）；
 - **`editor-change` 一到就动手**：从那笔登记的起点到当前光标之间，就是这次粘贴进文档的全部内容。把这一段读回来（`editor.getRange`），用 `looksLikeChatLog` 判定（至少**两条**"消息头部"；只认一条会把 `会议 14:30:25` 这种正文误判，而复制单条消息本来也不带时间戳头部），像才交给 `ImageTasks.fixPastedRange`：转换这段里的外部路径图片（`transferImagesInText`）+ 跑一遍排版流水线 + `editor.replaceRange` 写回。**只改这一段、不写盘**（走编辑器自己的保存路径，撤销一次即可回退）；
 - **为什么不修整篇**：整篇排版绕不开"一条消息的正文到哪儿结束"，而作者自己接在消息下面写的行与消息正文之间没有空行时只能算作正文 —— 2026-09 为这件事加过两条"看缩进猜作者"的规则，猜错两次后全部撤掉（见规则登记表 `structure.chat-log` 的取舍说明）。范围由"刚粘的那一段"（或用户选中的那一段：命令 `typeset-selection` / 菜单「排版选中内容」）确定，就不需要猜；
@@ -226,9 +229,21 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 **粘贴图片自动套尺寸**（`autoSetImageSizeOnPaste`，**默认开**）与上面同一条线，范围判定完全一样，但两处不同，都是被"粘贴图片"这件事逼出来的：
 
 - **什么时候动手**：那一段像聊天记录时由 `fixPastedRange` 内部顺带做掉（`typesetEditorRange` 的 `sizeOptions` 参数，与排版**共用一次写回**，撤销一次两步一起回退）；不像时由 `ImageTasks.sizePastedRange` 单独做 —— 粘一张截图本来就没有"像不像聊天记录"这一说。尺寸只改链接里的别名（`![[图.png|100]]` / `![100](图.png)`），排在流水线之后，与排版互不干扰；
-- **别的插件接管了这次粘贴也要跟**：Image Converter 处理图片文件时会 `preventDefault`，图片照样进仓库、链接照样插进正文，那正是要套尺寸的图片（文本修复那边则不凑热闹）；
+- **本插件接管的粘贴不走它**：图片由我们自己一张一张存、存完整批一次写回，尺寸在 `fixPastedRange` / `sizePastedRange` 里当场就做掉了；观望表留给**别人家的粘贴**（别的插件把图片存进仓库、把链接插进正文，那正是要套尺寸的图片，文本修复那边则不凑热闹）；
 - **要盯着看一会儿**（`PasteSizeWatcher`）：一次粘贴可能分几次落进编辑器（粘贴多张图逐张存盘 / 转码，每存好一张才插一条链接），所以粘贴后每变一次就把 `[起点, 光标处)` 再看一眼 —— 幂等（已有尺寸的不再动），安静 5 秒（`PASTE_SIZE_IDLE_MS`）丢掉、总寿命 20 秒（`PASTE_SIZE_MAX_MS`）封顶，免得用户随手打字把它一直续下去；
 - **三档不动手**（都收在 `image/size.ts` 的 `pastedImageSizeOptions` 里）：开关关着、**宽度留空**（那一档在「设置图片大小」里是"移除已有尺寸"，粘贴时自动删尺寸不是这个功能该干的事）、尺寸填错（与「快速设置图片大小」共用 `validateImageSize`）。「排版选中内容」那条路**不套尺寸** —— 手动改尺寸有专门的命令与菜单项。
+
+### 图片转换 / 粘贴图片 / 清理附件：2026-09 起都不依赖别的插件
+
+以前这三件事分别靠 **Image Converter**（转格式）与 **Clear Unused Images**（清孤儿附件）。拆掉的理由与做法，改这几块前先读：
+
+- **转格式**（`image/convert.ts`）：解码 → 画到 canvas → `canvas.toBlob(mime, quality/100)`，浏览器自带的编码器，没有额外依赖、没有许可证问题。四个入口共用 `convertPlanFrom(settings)` 算出来的计划（`vaultConvertFormat` + `convertQuality`，默认 webp / 75）：导入外部图片（`convertImportedImages`）、粘贴图片（`paste-images`）、两条命令、整理图片那一步（`tidyConvertFormat`）。搬过来的三条硬规矩：**`.gif` 一律不转**（canvas 只有一帧，动图会被拍成静图）、**已是目标格式不转**、**转完更大就留原图**；解不开的格式（HEIC / TIFF）走 `decodeImage` 的两条路都失败就按原样留着。**名字按最终扩展名生成**（`plannedExtension`）：落盘的是转换后那个文件，命名就得按它来 —— 按源扩展名生成会让同一秒里的 png 与 jpg 各占一个名字（2026-09 用户报的"粘多张只有第一张转 webp"）。**不再有"读它的预设"这件事**：质量、格式都在本插件设置里，`preset` / `avif` 这类认不出来的值一律当"这一步不做"。
+- **粘贴图片**（`ui/paste-images.ts` + `tasks.pasteImages`）：剪贴板里有图片文件时自己接管（`takeOverImagePaste`，默认开），一张一张存、名字不撞、顺手转格式，再把文字与链接写进正文。原因是 Image Converter 那条路**并发跑**（`files.map(async …)`）会撞名丢图（见上一节）。**要同时把它的「Never process filenames」填 `*`**，否则两边都存一份。
+- **清理没人引用的图片**（`image/unused.ts`）：判定只有一条 —— 文件名没在任何一篇笔记或 canvas 里出现过（复用 `dedupe.ts` 的 `collectImageTargets`）。只清图片、走回收站、**有一个文档读不出来就整步不做**。入口：「整理图片」第 ④ 步（`autoClearUnusedImages`）与命令 `clear-unused-images`（先弹确认框）。
+
+⚠️ 这三处都别再加回"读别的插件"的路径：`main.js` 的体积、社区插件的授权与审查、以及"用户一关那个插件我们就少一半功能"都是坑。
+
+
 
 ### 右键菜单怎么插项、怎么管理（`ui/image-menu.ts` + `menu-injector.ts`）
 
