@@ -67,7 +67,13 @@ function tf(pathStr: string): TFile {
 }
 
 /** 内存版 vault（`modify` 可以设成"写盘必失败"，用来验回滚） */
-function createApp(options: { modifyFails?: boolean; content?: string; withConverter?: boolean } = {}): {
+function createApp(options: {
+	modifyFails?: boolean;
+	content?: string;
+	withConverter?: boolean;
+	/** 换一个转码器替身（例如"转出来的还是原格式"，用来验转码失败时的退路） */
+	converter?: ConverterHandle;
+} = {}): {
 	app: App;
 	files: Map<string, ArrayBuffer>;
 	log: { created: string[]; deleted: string[]; trashed: string[]; modified: string[] };
@@ -103,14 +109,14 @@ function createApp(options: { modifyFails?: boolean; content?: string; withConve
 	// 交接靠 `app.plugins.plugins['image-converter']` 找插件实例 —— 装上插件才有交接这回事
 	if (options.withConverter) {
 		(app as unknown as { plugins: unknown }).plugins = {
-			plugins: { 'image-converter': fakeConverter() },
+			plugins: { 'image-converter': options.converter ?? fakeConverter() },
 		};
 	}
 	return { app, files, log };
 }
 
-/** 转码器替身：一律返回 webp 字节 */
-function fakeConverter(): ConverterHandle {
+/** 转码器替身：默认返回 webp 字节（`produce` 换成别的就能造出"转码失败"） */
+function fakeConverter(produce: () => ArrayBuffer = webpBytes): ConverterHandle {
 	return {
 		settings: {
 			conversionPresets: [{
@@ -122,7 +128,7 @@ function fakeConverter(): ConverterHandle {
 			}],
 			selectedConversionPreset: 'WEBP(Exclude gif)',
 		},
-		imageProcessor: { processImage: async (): Promise<ArrayBuffer> => webpBytes() },
+		imageProcessor: { processImage: async (): Promise<ArrayBuffer> => produce() },
 	};
 }
 
@@ -132,13 +138,45 @@ const BASE_SETTINGS: TransferSettings = {
 	imageNamePreset: 'img_{ss}',
 };
 
-// window.moment 的替身：测试里不需要真实时间，名字固定成 img_M.<ext>
-const fakeMoment = {
-	clone: (): unknown => fakeMoment,
-	add: (): unknown => fakeMoment,
-	format: (): string => 'M',
+// window.moment 的替身。
+//
+// 默认是"定死"模式：不管几点都给出 `img_M.<ext>`，既有用例都按这个名字断言。
+// 「同一秒里撞名要往后推一秒」的用例得让时间真的走，用 `useTickingMoment()` 切到走秒模式
+// （从第 0 秒开始，`format` 就是当前秒数 → 名字是 `img_0`、`img_1`…）。
+let ticking = false;
+let clock = 0;
+
+interface FakeMoment {
+	second: number;
+	clone: () => FakeMoment;
+	add: () => FakeMoment;
+	format: () => string;
+}
+
+function momentAt(second: number): FakeMoment {
+	return {
+		second,
+		clone(): FakeMoment { return momentAt(this.second); },
+		add(): FakeMoment { this.second += 1; return this; },
+		format(): string { return ticking ? String(this.second) : 'M'; },
+	};
+}
+
+/** 切到走秒模式：名字按秒数走（`img_0`、`img_1`…），用来验"撞名往后推一秒" */
+function useTickingMoment(startSecond = 0): void {
+	ticking = true;
+	clock = startSecond;
+}
+
+/** 切回定死模式（别把模式漏给后面的用例） */
+function useFixedMoment(): void {
+	ticking = false;
+	clock = 0;
+}
+
+(globalThis as unknown as { window: unknown }).window = {
+	moment: () => momentAt(clock),
 };
-(globalThis as unknown as { window: unknown }).window = { moment: () => fakeMoment };
 
 // 磁盘上的真实源文件（`resolvePhysicalPath` 会逐段去文件系统里找）
 //
@@ -152,8 +190,17 @@ const SKIP_DISK_NOTE = 'ℹ️ 跳过「真去磁盘找图」的用例：插件�
 const sourceDir = CAN_TOUCH_DISK ? fs.mkdtempSync(path.join(os.tmpdir(), 'note-tidy-transfer-')) : '';
 const sourceFile = CAN_TOUCH_DISK ? path.join(sourceDir, 'source.png') : '';
 if (CAN_TOUCH_DISK) fs.writeFileSync(sourceFile, Buffer.from(pngBytes()));
+/** QQ 那种"一张截图 + 一张表情"的批次：**源格式不同**（png 与 jpg），扩展名只差一点点 */
+const sourceJpg = CAN_TOUCH_DISK ? path.join(sourceDir, 'source.jpg') : '';
+const sourceGif = CAN_TOUCH_DISK ? path.join(sourceDir, 'source.gif') : '';
+if (CAN_TOUCH_DISK) {
+	fs.writeFileSync(sourceJpg, Buffer.from(pngBytes()));
+	fs.writeFileSync(sourceGif, Buffer.from(pngBytes()));
+}
 /** `file:///C:/…` 形态的外部链接 */
 const externalLink = `file:///${sourceFile.replace(/\\/g, '/')}`;
+const externalJpgLink = `file:///${sourceJpg.replace(/\\/g, '/')}`;
+const externalGifLink = `file:///${sourceGif.replace(/\\/g, '/')}`;
 
 // ------------------------------------------------------- 1. 交接：链接写新名字
 async function handOffTests(): Promise<void> {
@@ -282,12 +329,104 @@ async function rollbackTests(): Promise<void> {
 	}
 }
 
+// ---------------------------- 3. 同一批多张图：源格式不同的两张落在同一秒也要转格式
+/**
+ * 2026-09 用户报的「粘贴一段有多张图的聊天记录，只有第一张转了 webp，后面几张还是 png/jpg」：
+ *
+ * 一次粘贴里的图片往往落在同一秒，名字只差源扩展名（`pasted_image_…014850.png` 与
+ * `…014850.jpg`）。按源扩展名起名字的话两张都"没被占"，可第二张转出来的 `…014850.webp`
+ * 正是第一张 —— 转码器撞名即放弃转换，第二张就按原格式进了库。
+ *
+ * 现在与批量重命名同一条规矩：**名字按文件最终会有的扩展名生成**（要转格式就是目标格式），
+ * 撞名交给 `generateUniqueTargetPath` 那套"往后推一秒"。转码万一没成，再换回原扩展名要个空位。
+ */
+async function sameSecondBatchTests(): Promise<void> {
+	if (!CAN_TOUCH_DISK) {
+		console.log(SKIP_DISK_NOTE);
+		return;
+	}
+
+	// ① png + jpg 同一秒：两张都要转成 webp，名字各自错开一秒
+	{
+		const { app, log } = createApp({ withConverter: true });
+		useTickingMoment();
+		const result = await transferImagesInText(
+			app, BASE_SETTINGS, tf('note.md'),
+			`![](${externalLink})\n![](${externalJpgLink})`,
+		);
+		useFixedMoment();
+		check("同秒多图：两张都落了 webp", log.created, ['img_0.webp', 'img_1.webp']);
+		check("同秒多图：链接都指向 webp", [/!\[\[img_0\.webp\]\]/.test(result.content), /!\[\[img_1\.webp\]\]/.test(result.content)], [true, true]);
+		check("同秒多图：没有一张按原格式留下", /\.(png|jpg)\]\]/.test(result.content), false);
+		check("同秒多图：created 与落盘一致", result.created.map(f => f.name), ['img_0.webp', 'img_1.webp']);
+	}
+
+	// ② 目标格式的名字**早就被仓库里的文件占着**（上一批粘贴留下的）：照样推一秒后转格式，
+	//    而不是"撞名就按 png 留着"
+	{
+		const { app, log } = createApp({ withConverter: true });
+		await app.vault.createBinary('img_0.webp', webpBytes());
+		log.created.length = 0;
+		useTickingMoment();
+		const result = await transferImagesInText(app, BASE_SETTINGS, tf('note.md'), `![](${externalLink})`);
+		useFixedMoment();
+		check("目标名被占：往后推一秒", log.created, ['img_1.webp']);
+		check("目标名被占：链接写的是转换后的名字", result.content.includes('![[img_1.webp]]'), true);
+	}
+
+	// ③ 没装 Image Converter：不交接，按原格式各用各的名字（行为与以前完全一样）
+	{
+		const { app, log } = createApp();
+		useTickingMoment();
+		const result = await transferImagesInText(
+			app, BASE_SETTINGS, tf('note.md'),
+			`![](${externalLink})\n![](${externalJpgLink})`,
+		);
+		useFixedMoment();
+		check("不交接：各按原格式落盘", log.created, ['img_0.png', 'img_0.jpg']);
+		check("不交接：链接是原格式", [result.content.includes('![[img_0.png]]'), result.content.includes('![[img_0.jpg]]')], [true, true]);
+	}
+
+	// ④ 动图（gif）不转：它按 `.gif` 起名字，后面那张 png 照旧转格式
+	{
+		const { app, log } = createApp({ withConverter: true });
+		useTickingMoment();
+		const result = await transferImagesInText(
+			app, BASE_SETTINGS, tf('note.md'),
+			`![](${externalGifLink})\n![](${externalLink})`,
+		);
+		useFixedMoment();
+		check("同秒多图：gif 保持原样、png 转 webp", log.created, ['img_0.gif', 'img_0.webp']);
+		check("同秒多图：gif 的链接没被换成 webp", result.content.includes('![[img_0.gif]]'), true);
+	}
+
+	// ⑤ 名字是按目标格式生成的，可转码**没成**（它把输入原样退了回来）：必须换回原扩展名落盘，
+	//    不能把 png 字节写成 `.webp` 文件。此时两张图可以与"没装转码器"那一档一样同词干不同扩展名
+	//    （链接带着扩展名，谁也不会指错）
+	{
+		const { app, log } = createApp({ withConverter: true, converter: fakeConverter(pngBytes) });
+		useTickingMoment();
+		const result = await transferImagesInText(
+			app, BASE_SETTINGS, tf('note.md'),
+			`![](${externalLink})\n![](${externalJpgLink})`,
+		);
+		useFixedMoment();
+		check("转码没成：按原扩展名落盘", log.created, ['img_0.png', 'img_0.jpg']);
+		check("转码没成：链接跟着原扩展名", [result.content.includes('![[img_0.png]]'), result.content.includes('![[img_0.jpg]]')], [true, true]);
+		check("转码没成：一个 .webp 都没建（不拿 png 字节冒充）",
+			log.created.some(name => name.endsWith('.webp')), false);
+	}
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 1. 交接：链接写转换后的名字 ===");
 await handOffTests();
 
 console.log("=== 2. 回滚：不留孤儿附件 ===");
 await rollbackTests();
+
+console.log("=== 3. 同一批多张图：同一秒里源格式不同也都要转 ===");
+await sameSecondBatchTests();
 
 fs.rmSync(sourceDir, { recursive: true, force: true });
 

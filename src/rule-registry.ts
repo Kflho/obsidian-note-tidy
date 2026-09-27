@@ -117,7 +117,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 					symbols: ['transferExternalImages', 'transferImagesInText', 'discardImportedFiles'],
 				},
 				tests: [],
-				note: '依赖 Obsidian 的 vault / fileManager API，没有单测；附件夹定位另有 image.attachment-folder 一条。导入是"先复制文件、再写回链接"两步，中间隔着异步（收图 / 转码 / 排版）——**写回失败时要把刚导入的文件回滚掉**（`discardImportedFiles`）：链接没写上、文件留在库里就是谁也指不到的孤儿附件（2026-09 用户库里 40 张就是这么攒出来的，见 `cross.range-indent` 那条路）',
+				note: '依赖 Obsidian 的 vault / fileManager API，没有单测；附件夹定位另有 image.attachment-folder 一条。导入是"先复制文件、再写回链接"两步，中间隔着异步（收图 / 转码 / 排版）——**写回失败时要把刚导入的文件回滚掉**（`discardImportedFiles`）：链接没写上、文件留在库里就是谁也指不到的孤儿附件（2026-09 用户库里 40 张就是这么攒出来的，见 `cross.range-indent` 那条路）。一次导入里每张图各自命名：会转格式的先问一句目标扩展名（`handOffExtension`），名字就按那个格式要空位；转码没成再换回原扩展名 —— 见 `image.unique-name` 与 `image.hand-off-converter`',
 			},
 			{
 				id: 'image.hand-off-converter',
@@ -128,7 +128,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 				impl: {
 					file: 'src/image/image-converter-bridge.ts',
 					symbols: [
-						'convertImageBytes', 'convertVaultImage', 'findImageConverter',
+						'convertImageBytes', 'convertVaultImage', 'findImageConverter', 'handOffExtension',
 						'readConverterPreset', 'matchesAnyPattern', 'targetExtension',
 						'convertedFileName', 'looksLikeFormat', 'shouldUseConverted',
 						'shouldConvertFile', 'selectConvertibleImages', 'vaultConvertOverride',
@@ -136,7 +136,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 					],
 				},
 				tests: ['test/image-converter-bridge.test.ts', 'test/image-transfer.test.ts', 'test/image-tidy.test.ts', 'test/commands.test.ts'],
-				note: 'Image Converter（xRyul）只在**剪贴板里带图片文件**的粘贴上自动转换：它的 `editor-paste` 钩子看到 `kind === "file"` 的图片项才动手（而且它一旦接手就 `preventDefault`，正文文字它是不管的）。我们处理的是正文里的 `file:///D:\\…` **文本路径**与仓库里已有的图片，它的钩子看不到，于是图片进了库却一直是 png/jpg（2026-09 用户报的"图片进了库但没转 webp"，全库 108 张非 webp 都是这么来的）。三条入口，同一个目标格式（`vaultConvertFormat`，默认 webp）：① **导入外部图片时顺手交接**（`handOffImportedImages`，默认开）；② 命令 `convert-images-current-note` / `convert-images-entire-vault`（「Image converter：把当前笔记 / 整个仓库的图片转换为指定格式」，当前笔记那条用来先在一篇上试）；③ **「整理图片」里的转换那一步**（`tidyConvertFormat`，默认开，2026-09 按用户要求并入）—— 它在"合并重复副本"之后跑：马上要被合并掉的副本不必白转一趟，转的是留下来的那些。做法：只借它的**转码器与当前预设**（`imageProcessor.processImage` + `settings.conversionPresets[selectedConversionPreset]`），改名与写链接由我们自己做 —— 因此不必先保存笔记、不会触发它"全库正则替换链接"（`updateLinksInAllNotes` 是 `vault.read` + `vault.modify`，对还没落盘的编辑器改动只会帮倒忙），也不碰系统剪贴板、不往撤销历史里塞东西；全库那条路走 Obsidian 自己的 `fileManager.renameFile`，链接（wikilink / Markdown / canvas）自动跟着更新。导入那条**先转换、再落盘**：转好了才按目标格式写一个文件（不产生谁也指不到的中间 png，也不需要删除步骤）。三条硬规矩：① 预设里的 `skipConversionPatterns`（例如 `WEBP(Exclude gif)` 的 `*.gif`）；② **`.gif` 一律不转** —— canvas 转出来只有一帧，动图会被拍成静图，那是不可逆的损坏；③ 已经是目标格式的不再压一遍（避免代际失真）。另有它的 `revertToOriginalIfLarger` + `minimumCompressionSavingsInKB`（没省够就用原图，默认 30 KB）照抄。**没装 Image Converter 时功能不坏**：图片照旧导入、整理照旧合并与清理，只是跳过转换那一步 —— 导入时每次会话提示一次去装它（`ConversionHint`），「整理图片」把原因写进结果提示里（`readConversion` 不弹独立通知，批量期间的通知会被屏蔽挡掉），那两条命令则只提示安装、一个文件都不动。**任何一步失败都退回原格式**，图片一定丢不了',
+				note: 'Image Converter（xRyul）只在**剪贴板里带图片文件**的粘贴上自动转换：它的 `editor-paste` 钩子看到 `kind === "file"` 的图片项才动手（而且它一旦接手就 `preventDefault`，正文文字它是不管的）。我们处理的是正文里的 `file:///D:\\…` **文本路径**与仓库里已有的图片，它的钩子看不到，于是图片进了库却一直是 png/jpg（2026-09 用户报的"图片进了库但没转 webp"，全库 108 张非 webp 都是这么来的）。三条入口，同一个目标格式（`vaultConvertFormat`，默认 webp）：① **导入外部图片时顺手交接**（`handOffImportedImages`，默认开）；② 命令 `convert-images-current-note` / `convert-images-entire-vault`（「Image converter：把当前笔记 / 整个仓库的图片转换为指定格式」，当前笔记那条用来先在一篇上试）；③ **「整理图片」里的转换那一步**（`tidyConvertFormat`，默认开，2026-09 按用户要求并入）—— 它在"合并重复副本"之后跑：马上要被合并掉的副本不必白转一趟，转的是留下来的那些。做法：只借它的**转码器与当前预设**（`imageProcessor.processImage` + `settings.conversionPresets[selectedConversionPreset]`），改名与写链接由我们自己做 —— 因此不必先保存笔记、不会触发它"全库正则替换链接"（`updateLinksInAllNotes` 是 `vault.read` + `vault.modify`，对还没落盘的编辑器改动只会帮倒忙），也不碰系统剪贴板、不往撤销历史里塞东西；全库那条路走 Obsidian 自己的 `fileManager.renameFile`，链接（wikilink / Markdown / canvas）自动跟着更新。导入那条**先转换、再落盘**：转好了才按目标格式写一个文件（不产生谁也指不到的中间 png，也不需要删除步骤）。**名字按最终格式算**：导入那边在起名字**之前**先用 `handOffExtension` 问一句"这张图最终是什么扩展名"（判定与 `convertImageBytes` 共用 `planConversion`），直接按目标格式的名字去要空位 —— 命名那套"撞名往后推一秒"照旧生效；万一转码没成（不划算 / 转出来的不是那个格式 / 转码器出错），再换回原扩展名重新要一个空位。按源扩展名生成会出 2026-09 用户报的"粘贴多张图只有第一张转了 webp"：同一秒里的 png 与 jpg 只差扩展名，两个源名字都"没被占"，可第二张转出来的 `.webp` 正是第一张，转码器撞名即放弃（见 `image.unique-name`）。三条硬规矩：① 预设里的 `skipConversionPatterns`（例如 `WEBP(Exclude gif)` 的 `*.gif`）；② **`.gif` 一律不转** —— canvas 转出来只有一帧，动图会被拍成静图，那是不可逆的损坏；③ 已经是目标格式的不再压一遍（避免代际失真）。另有它的 `revertToOriginalIfLarger` + `minimumCompressionSavingsInKB`（没省够就用原图，默认 30 KB）照抄。**没装 Image Converter 时功能不坏**：图片照旧导入、整理照旧合并与清理，只是跳过转换那一步 —— 导入时每次会话提示一次去装它（`ConversionHint`），「整理图片」把原因写进结果提示里（`readConversion` 不弹独立通知，批量期间的通知会被屏蔽挡掉），那两条命令则只提示安装、一个文件都不动。**任何一步失败都退回原格式**，图片一定丢不了',
 			},
 			{
 				id: 'image.attachment-folder',
@@ -184,8 +184,8 @@ export const RULE_SECTIONS: RuleSection[] = [
 					file: 'src/image/naming.ts',
 					symbols: ['generateUniqueTargetPath', 'buildVaultBasenameMap'],
 				},
-				tests: [],
-				note: '裸文件名链接一旦撞名，笔记可能显示成另一张图，所以这条是图片功能的硬约束',
+				tests: ['test/image-transfer.test.ts'],
+				note: '裸文件名链接一旦撞名，笔记可能显示成另一张图，所以这条是图片功能的硬约束。四层检查全在 `generateUniqueTargetPath` 里（目标路径 → 批次预留路径 → 批次预留 basename → 调用方传入的全库 basename 表），撞名把时间戳往后推一秒重试 —— 批量重命名里"同一秒处理一批图也各得一个名字"靠的就是它。**调用方传的扩展名必须是文件最终会有的那个**：批量重命名传它自己的扩展名；导入交接转格式时传目标格式（先用 `handOffExtension` 问一句，转码没成再换回原扩展名要个空位）。按源扩展名传会让同一秒里的 png 与 jpg 各占一个名字，而两张最终都叫 `xxx.webp` —— 第二张撞名即放弃转换（2026-09 用户报的"粘贴多张图只有第一张转了 webp"，回归测试在 test/image-transfer.test.ts 第 3 节）',
 			},
 			{
 				id: 'image.same-name',

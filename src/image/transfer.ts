@@ -5,9 +5,9 @@ import { getTargetAttachmentFolder } from './attachment-folder';
 import type { AttachmentLocationSettings } from './attachment-folder';
 import { externalImageRe } from './constants';
 import { resolvePhysicalPath } from './external-path';
-import { convertImageBytes, findImageConverter } from './image-converter-bridge';
+import { convertImageBytes, findImageConverter, handOffExtension } from './image-converter-bridge';
 import type { ConverterHandle } from './image-converter-bridge';
-import { generateUniqueTargetPath, vaultPathFor } from './naming';
+import { formatImageName, generateUniqueTargetPath, vaultPathFor } from './naming';
 import type { ImageNamingSettings } from './naming';
 
 /**
@@ -72,8 +72,17 @@ export async function transferImagesInText(
 
 		try {
 			const ext = path.extname(finalPhysicalPath);
+			const now = window.moment();
+			// 这张图交给转码器最终会是什么格式（不交接 / 不转格式时是 null）。
+			// **名字按最终扩展名生成** —— 与批量重命名同一条规矩（`generateUniqueTargetPath`
+			// 只认"文件最终会有的名字"，撞了它自己会往后推一秒）。按源扩展名生成就会出这种事：
+			// 同一秒里的 png 与 jpg 只差扩展名，两个名字各自"没被占"，
+			// 可第二张转出来的 `.webp` 正是第一张 —— 转码器撞名即放弃，它只能按原格式进库
+			// （2026-09 用户报的"粘贴多张图只有第一张转了 webp"）。
+			const handOffExt = handOffExtension(converter, formatImageName(settings.imageNamePreset, ext, now));
+			const namingExt = handOffExt ? `.${handOffExt}` : ext;
 			const { newFileName, targetVaultPath } = await generateUniqueTargetPath(
-				app, settings.imageNamePreset, currentAttachFolder, ext, window.moment(), rp, rbn
+				app, settings.imageNamePreset, currentAttachFolder, namingExt, now, rp, rbn
 			);
 
 			const fileBuffer = await fs.readFile(finalPhysicalPath);
@@ -83,18 +92,38 @@ export async function transferImagesInText(
 			);
 
 			// 交给 Image Converter 转格式（例如 png → webp）：**先在内存里转、再落盘**，
-			// 免得仓库里先多出一个谁也指不到的 png（同步插件可能已经把它传走了）
+			// 免得仓库里先多出一个谁也指不到的 png（同步插件可能已经把它传走了）。
+			// 传进去的名字要换成**源扩展名**那份：转码器按它判"是不是已经是目标格式"、
+			// 跳过模式命中与否。`formatImageName` 只在末尾加扩展名，所以拿最终名字换个尾巴就是它
+			// （词干一致 —— 连命名推过的那几秒也在）
+			const sourceName = namingExt === ext
+				? newFileName
+				: `${newFileName.slice(0, newFileName.length - namingExt.length)}${ext}`;
 			const converted = await convertImageBytes(
 				app,
-				{ name: newFileName, bytes: arrayBuffer, folder: currentAttachFolder },
+				{ name: sourceName, bytes: arrayBuffer, folder: currentAttachFolder },
 				converter
 			);
-			const finalName = converted?.name ?? newFileName;
-			const finalPath = converted ? vaultPathFor(currentAttachFolder, finalName) : targetVaultPath;
+			// 名字是按最终格式生成的那个；只有"没转成"时才要换回原扩展名
+			let finalName = newFileName;
+			let finalPath = targetVaultPath;
+			if (converted) {
+				finalName = converted.name;
+				finalPath = vaultPathFor(currentAttachFolder, finalName);
+			} else if (handOffExt) {
+				// 名字按目标格式生成了，可它没转成（不划算 / 转码器出错 / 转出来的不是那个格式）：
+				// 换回原扩展名重新要一个空位 —— 命名那套推一秒的规矩照旧
+				const fallback = await generateUniqueTargetPath(
+					app, settings.imageNamePreset, currentAttachFolder, ext, now, rp, rbn
+				);
+				finalName = fallback.newFileName;
+				finalPath = fallback.targetVaultPath;
+			}
 			const imported = await app.vault.createBinary(finalPath, converted?.bytes ?? arrayBuffer);
 			created.push(imported);
 			if (converted) {
-				// 转换后的名字也要占位：同一批里的后续图片不能再撞上它
+				// 上面命名时已经占过这个名字；这里再占一次只是兜底
+				// （万一两次判定之间预设被改），同一批里的后续图片不会撞上它
 				rp.set(finalPath, '');
 				rbn.set(finalName, '');
 			}

@@ -107,6 +107,10 @@ export function vaultPathFor(folder: string, fileName: string): string {
  * ③批次内是否已预留 basename  ④pre-scan 得到的仓库 basename 映射（由调用方传入）
  *
  * 撞名时把时间戳往后推一秒重试，直到找到空位。
+ *
+ * ⚠️ 调用方传的 `ext` 必须是文件**最终**的扩展名（批量重命名就是它自己的扩展名；
+ * 导入时交接转格式的那条路见 `transfer.ts`：名字按目标格式生成，转码万一失败再换回原扩展名），
+ * 否则两个"只差源扩展名"的名字会各自通过检查，最后落盘时撞在一起。
  */
 export async function generateUniqueTargetPath(
 	app: App,

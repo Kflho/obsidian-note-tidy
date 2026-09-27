@@ -10,6 +10,9 @@
  *   4. 划算判定：`revertToOriginalIfLarger` + `minimumCompressionSavingsInKB`
  *   5. 真转换：转换成功就交出目标格式的字节与新名字（先转换、再落盘，不碰仓库）；
  *      任何一步不对都返回 null（调用方按原格式导入）
+ *
+ * 另有 `handOffExtension`（"这张图最终是什么格式"）：导入那边在**起名字之前**问它，
+ * 好把转换后那一路的名字也占上 —— 判定与 `convertImageBytes` 共用一份（`planConversion`）。
  */
 import { TFile } from "obsidian";
 import type { App } from "obsidian";
@@ -20,6 +23,7 @@ import {
 	convertVaultImage,
 	findImageConverter,
 	formatLabel,
+	handOffExtension,
 	looksLikeFormat,
 	matchesAnyPattern,
 	readConverterPreset,
@@ -197,6 +201,19 @@ function namingTests(): void {
 	check("文件名：多点号只换最后一个", convertedFileName('a.b.c.jpeg', 'WEBP'), 'a.b.c.webp');
 	check("文件名：没有扩展名", convertedFileName('图片', 'WEBP'), '图片.webp');
 	check("文件名：格式不支持", convertedFileName('a.png', 'NONE'), null);
+
+	// 命名前先问的一句：这张图最终是什么扩展名（导入那边据此给"转换后那一路"占位，
+	// 否则同一秒里 png 与 jpg 会算出只差扩展名的两个名字，见 test/image-transfer.test.ts 第 3 节）
+	const webpHandle = fakeConverter(() => webpBytes()).handle;
+	check("交接扩展名：png 会转成 webp", handOffExtension(webpHandle, 'pasted_image_1.png'), 'webp');
+	check("交接扩展名：jpg 也会转", handOffExtension(webpHandle, 'pasted_image_1.jpg'), 'webp');
+	check("交接扩展名：已经是 webp 就不转", handOffExtension(webpHandle, 'pasted_image_1.webp'), null);
+	check("交接扩展名：动图 gif 不转", handOffExtension(webpHandle, 'pasted_image_1.gif'), null);
+	check("交接扩展名：没装 Image Converter", handOffExtension(null, 'pasted_image_1.png'), null);
+	check("交接扩展名：预设是「不转换」",
+		handOffExtension(fakeConverter(() => webpBytes(), settingsWith({ name: 'None', outputFormat: 'NONE' })).handle, 'a.png'),
+		null);
+	check("交接扩展名：设置里读不出预设", handOffExtension(fakeConverter(() => webpBytes(), {}).handle, 'a.png'), null);
 }
 
 // ------------------------------------------------------------ 2. 跳过模式
