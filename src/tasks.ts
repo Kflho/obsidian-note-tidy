@@ -685,7 +685,7 @@ export class ImageTasks implements TaskActions {
 		const images = all.filter(file => isImageFileName(file.name));
 		if (images.length === 0) return 0;
 
-		// 引用只可能出现在笔记与 canvas 里（与 Clear Unused Images 同一口径）
+		// 引用只可能出现在笔记与 canvas 里（其它附件、pdf 里的引用一律不看：误判的代价比少清几个大）
 		const documents = all.filter(file => file.extension === 'md' || file.extension === 'canvas');
 		const texts: string[] = [];
 		for (const doc of documents) {

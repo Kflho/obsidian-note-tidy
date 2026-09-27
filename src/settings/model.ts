@@ -71,10 +71,11 @@ export interface ImageTransferSettings {
 	 * 在编辑器里粘贴图片文件时**由本插件接管**：自己把图片存进附件夹（一张一张、名字不撞、
 	 * 顺手转成 `vaultConvertFormat`）并写好链接，一次粘多张也不会漏。
 	 *
-	 * Image Converter 的自动粘贴是并发跑的（`handlePaste` 里 `files.map(async …)`）：
-	 * 一次粘多张时每张各算各的输出名，同一秒算出来的名字撞在一起，后写的直接
-	 * `File already exists` 丢图（2026-09 用户报的"粘两张只剩第一张"）。关掉这一项就恢复
-	 * "别人家的粘贴"行为（那时建议把它的「Never process filenames」留空，别两边都不管）。
+	 * 为什么必须自己管：别的图片插件那条自动粘贴是**并发**跑的（Image Converter 的
+	 * `handlePaste` 里 `files.map(async …)`）：一次粘多张时每张各算各的输出名，同一秒算出来的
+	 * 名字撞在一起，后写的直接 `File already exists` 丢图（2026-09 用户报的"粘两张只剩第一张"）。
+	 * 关掉这一项就恢复"别人家的粘贴"行为（观察者 + 文本修复 + 尺寸观望表；别的插件没接管时
+	 * 图片就按 Obsidian 自己的方式落盘）。
 	 */
 	takeOverImagePaste: boolean;
 	// ---- 聊天记录排版 ----
@@ -183,9 +184,10 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	// 整理时顺手统一图片格式（默认开）：整理图片就是"把仓库里的图片收拾干净"，
 	// 格式统一是其中一环；目标格式沿用 vaultConvertFormat
 	tidyConvertFormat: true,
-	// 合并完顺手让 Clear Unused Images 收一遍"没人引用的附件"：两者互补（我们合并重复、它清理孤儿）
+	// 合并完顺手清一遍"没人引用的图片"（默认开，自己实现，见 image/unused.ts）：
+	// 与合并互补 —— 合并收的是"同一张图存了两份"，它收的是"一张都没人引用"
 	autoClearUnusedImages: true,
-	// 左侧栏图标：一键整理（想替代 Clear Unused Images 那个按钮的就靠它）
+	// 左侧栏图标：一键整理（图标沿用 Clear Unused Images 那个 `image-file`，方便直接换掉它那个按钮）
 	tidyImagesRibbonIcon: true,
 	imageSizeWidth: '100',
 	imageSizeHeight: '',
