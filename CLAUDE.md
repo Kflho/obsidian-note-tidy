@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Images**: transfers external-path images (e.g. `file:///D:\...`) into the vault as internal `![[...]]` links, renames garbled image files, sets image sizes, and re-links images copied across folders.
 - **Text**: typesets notes — plain-text math → `$…$`, LaTeX code layout, CJK/English/formula spacing, punctuation width by language, leading indentation, block markers, list numbering, heading levels, tag placement and sorting, content block sorting, and QQ/WeChat chat log reformatting.
-- **Quick chat-log fix**: one command / menu entry doing "transfer this note's external images" **and** "fix this note's layout" inside one batch task (`quick-fix-chat-log-current-note` → `tasks.quickFixChatLog`). With `autoFixChatLogOnPaste` (on by default) pasting a chat log fixes **just the pasted range** by itself (`ui/paste-watch.ts` → `tasks.fixPastedRange`) — the rest of the note is never touched. The same range-limited path is available by hand: command `typeset-selection` / menu 「排版选中内容」 (`tasks.typesetSelection`).
+- **Quick chat-log fix**: one command / menu entry doing "transfer this note's external images" **and** "fix this note's layout" inside one batch task (`quick-fix-chat-log-current-note` → `tasks.quickFixChatLog`). Pasting is handled automatically in **three independently switched steps** (settings → 图片 → 粘贴): **收图** `autoTransferImagesOnPaste`, **排版** `autoFixChatLogOnPaste`, **套尺寸** `autoSetImageSizeOnPaste` — all applied to **just the pasted range** (`ui/paste-watch.ts` → `tasks.fixPastedRange`, one write-back) and never to the rest of the note. The same range-limited path is available by hand: command `typeset-selection` / menu 「排版选中内容」 (`tasks.typesetSelection`).
 - **Status bar** (optional, off by default): shows how many images the current editor selection contains (`showSelectionImageCount`).
 - **Clipboard**: copies image *files* to the system clipboard (right-click an image, or the command) so they can be pasted into a folder — not just into QQ/Word. Multiple images at once by selecting them, and when the selection also contains text the text rides along as HTML so QQ/WeChat/Word paste "sentence + pictures"; an optional Ctrl+C takeover in the editor does the same without going through the menu (`takeOverCopyShortcut`, off by default).
 - **Context menus**: three menus (image / note / file explorer) can be inspected and have their entries switched on and off; this plugin only ever *inserts* its own items (复制图片 / 快速设置图片大小 / 快速修复聊天记录 / 排版选中内容 / 管理右键菜单) and never takes a menu over.
@@ -73,7 +73,7 @@ src/
     heading-levels.ts   # 标题级别整理（子标题与父标题恰好差一级，多标题并行算）
     chapter-title.ts    # 章节 / 课次 / 附录这类标题标记的判定（空格排版与智能公式共用一份）
     chat-log.ts         # QQ/微信聊天记录排版 + looksLikeChatLog（这段文本像不像聊天记录）
-    context-indent.ts   # 一段内容的上下文缩进与接缝：按光标处的缩进对齐整块、首尾换行数还原
+    context-indent.ts   # 一段内容的上下文缩进与接缝：按光标处的缩进对齐整块（placeBlockAt / shiftBlockTo）、首尾换行数还原
     math-wrap.ts        # 智能公式：正文里的 `矩阵 A`、`n维`、`V(F)`、`x = 0`、`λ` 自动包 `$…$`
     latex.ts            # 代码格式：$$…$$ 与行内 $…$ 的 LaTeX 代码
     spacing/            # 空格排版：index.ts（接口 + fixSpacing）/ tokenize.ts（分词）/ gap.ts（词间判定）
@@ -107,7 +107,7 @@ src/
     menu-hidden.ts      # 隐藏名单（`作用域：标题`）的解析与生成（纯函数）
     menu-manage-modal.ts# 右键菜单管理面板：图片 / 笔记 / 文件夹三节，开关各项
     copy-shortcut.ts    # 可选的"接管编辑器里的 Ctrl+C"：选中图片时改走复制文件那条路
-    paste-watch.ts      # 粘贴时自动动手：图片接管（见 paste-images.ts）+ 文本修复（一笔一次）+ 粘贴图片套尺寸（观望式）
+    paste-watch.ts      # 粘贴时自动动手：图片接管（见 paste-images.ts）+ 粘进来那一段的三件事（收图 / 排版 / 套尺寸，各认开关、一笔一次）+ 别人家粘贴的套尺寸（观望式）
     paste-images.ts     # 「粘贴图片」的纯函数：挑出剪贴板里的图、补文件名、拼要写进正文的文字与链接
     image-size-modal.ts # 图片大小弹窗
     confirm-rename-modal.ts # 批量重命名确认
@@ -218,20 +218,28 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 - **两步必须在同一个批量壳里**：`BatchRunner` 有互斥锁，分两次调用第二次会被"已有任务在执行"挡掉。顺序是先收图片再排版（排版会把聊天记录里的图片挪到消息尾部，收进来的 `![[…]]` 也一并排好）；
 - **结果按实际发生了什么汇报**：只有真的改了东西才说"修复完成"，什么都没改时提示"没有需要修复的内容"。
 
-粘贴自动修复（`autoFixChatLogOnPaste`，**默认开**）挂在官方的 `editor-paste` 上，**只修刚粘进来的那一段**：
+粘贴后自动收拾刚粘进来的那一段（设置面板「图片 → 粘贴」那一组，**三件事各认各的开关、默认都开**）：
 
-- **图片文件先归我们管**（`takeOverImagePaste`，**默认开**）：剪贴板里带图片文件时，本插件自己把这次粘贴接过来 —— 一张一张存进附件夹（`ImageTasks.pasteImages` → `savePastedImages` → `importImageBytes`，名字与格式都走本插件那套）、把文字与 `![[链接]]` 写进正文，然后当场排版 / 套尺寸。**理由是别的插件做不对这件事**：Image Converter 的自动粘贴是并发跑的（`handlePaste` / `handleDrop` 里 `files.map(async …)`），一批图各算各的输出名，同一秒撞名后写的直接 `File already exists` 丢图（2026-09 用户实测"粘两张只剩第一张"），它既没有开关、也不看 `defaultPrevented`，只能让它别再管（**它的「Never process filenames」填 `*`**，那一项只作用于它的自动粘贴 / 拖放）。两个前提：这次粘贴**没人管**（`evt.defaultPrevented` 为真说明别人已经在存这些图了，我们不重复处理）、开关开着；
-- **文本修复只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），粘贴事件只用来看**粘在哪儿**。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）。`evt.defaultPrevented` 为真说明别的插件已经接管了这次粘贴：**文本修复不凑热闹**（插进来的不一定是剪贴板里那些内容），**但图片套尺寸那一笔要跟**（别人把图片存进仓库、把链接插进正文，那正是要套尺寸的图片）；
-- **粘贴那一刻绝不动手**：`editor-paste` 是 Obsidian 剪贴板管理器的 paste 处理器发的，而真正往文档里插内容的是 CodeMirror 内置的处理器（排在它后面，一返回 true 就 break）—— 此刻读到的正文是粘贴之前的。所以只登记一笔（`PasteFixScheduler`：编辑器 + 笔记 + 粘贴起点）；
-- **`editor-change` 一到就动手**：从那笔登记的起点到当前光标之间，就是这次粘贴进文档的全部内容。把这一段读回来（`editor.getRange`），用 `looksLikeChatLog` 判定（至少**两条**"消息头部"；只认一条会把 `会议 14:30:25` 这种正文误判，而复制单条消息本来也不带时间戳头部），像才交给 `ImageTasks.fixPastedRange`：转换这段里的外部路径图片（`transferImagesInText`）+ 跑一遍排版流水线 + `editor.replaceRange` 写回。**只改这一段、不写盘**（走编辑器自己的保存路径，撤销一次即可回退）；
+- **三件事**（`settings/model.ts` 的 `pasteFixPlanFrom` 一处算出来，`ImageTasks.fixPastedRange` → 私有的 `typesetEditorRange` 依次做，**合并在同一次写回**里 —— 不写盘、撤销一次一起回退）：
+  ① **收图**（`autoTransferImagesOnPaste`）：这一段里的 `![说明](file:///D:\图.png)` 这类**外部路径图片**复制进附件夹、换成 `![[新名字]]`（按「格式转换」的目标格式转码），**与像不像聊天记录无关**；
+  ② **排版**（`autoFixChatLogOnPaste`）：`looksLikeChatLog` 认得出就整段排（流水线 + 缩进跟随光标），认不出就**一个字的正文都不改**、只把整块缩进对齐到光标那一层；
+  ③ **套尺寸**（`autoSetImageSizeOnPaste` → `pastedImageSizeOptions`，见下）；
+- **为什么把「排版」与「收图」拆成两个开关**（2026-09 用户要的）：它们本来是两件事 —— 这段文字怎么排、图片要不要进库。单条 QQ 消息（"两张图 + 一段话"）没有时间戳头部，排版那条路认不出它，可图片照样指着别人机器的绝对路径、换台机器就是裂图（"本来就应该放进仓库，转换图片本来就是智能排版的功能"）。三件事全关时 `pasteFixPlanFrom` 返回 `null`，整趟立刻返回一笔都不动；
+- **图片文件先归我们管**（`takeOverImagePaste`，**默认开**）：剪贴板里带图片文件时，本插件自己把这次粘贴接过来 —— 一张一张存进附件夹（`ImageTasks.pasteImages` → `savePastedImages` → `importImageBytes`，名字与格式都走本插件那套）、把文字与 `![[链接]]` 写进正文，然后走上面同一趟（`fixPastedRange`）。**理由是别的插件做不对这件事**：Image Converter 的自动粘贴是并发跑的（`handlePaste` / `handleDrop` 里 `files.map(async …)`），一批图各算各的输出名，同一秒撞名后写的直接 `File already exists` 丢图（2026-09 用户实测"粘两张只剩第一张"），它既没有开关、也不看 `defaultPrevented`，只能让它别再管（**它的「Never process filenames」填 `*`**，那一项只作用于它的自动粘贴 / 拖放）。两个前提：这次粘贴**没人管**（`evt.defaultPrevented` 为真说明别人已经在存这些图了，我们不重复处理）、开关开着；
+- **只观察，不接管**：不 `preventDefault`（那会把这次粘贴整个吞掉），粘贴事件只用来看**粘在哪儿**。因为这个原因，处理函数写成**具名函数**再传给 `workspace.on`（lint 规则 `obsidianmd/editor-drop-paste` 要求"处理了就要 preventDefault"，而观察者不该 preventDefault，禁用该规则又被 `eslint-comments/no-restricted-disable` 挡着 —— 具名函数 + 注释说明是当前唯一干净的写法）。`evt.defaultPrevented` 为真说明别的插件已经接管了这次粘贴：**我们不动这一段正文**（插进来的不一定是剪贴板里那些内容），**但图片套尺寸那一笔要跟**（别人把图片存进仓库、把链接插进正文，那正是要套尺寸的图片）；
+- **粘贴那一刻绝不动手**：`editor-paste` 是 Obsidian 剪贴板管理器的 paste 处理器发的，而真正往文档里插内容的是 CodeMirror 内置的处理器的（排在它后面，一返回 true 就 break）—— 此刻读到的正文是粘贴之前的。所以只登记一笔（`PasteFixScheduler`：编辑器 + 笔记 + 粘贴起点）；
+- **`editor-change` 一到就动手**：从那笔登记的起点到当前光标之间，就是这次粘贴进文档的全部内容。把这一段整个交给 `fixPastedRange`（`paste-watch` 不替它判该做哪几件）—— **只改这一段、不写盘**（走编辑器自己的保存路径，撤销一次即可回退）；
+- **不像聊天记录也不白等：整块缩进照样对齐**（`text/context-indent.ts` 的 `shiftBlockTo`）。编辑器粘贴只把**第一行**放在光标那一列、其余行从第 0 列开始，所以光标停在缩进里时（列表项里回车、引用块里、自己先打了个 tab）粘出来就是"第一行缩进、其余顶格"。聊天记录那段由 `placeBlockAt` 对齐；不是聊天记录时（**复制单条 QQ 消息就只有一条头部**）用 `shiftBlockTo` 补上：**内容一个字不改、也不排版**，只动行首空白，光标顶格或前面已经有正文时整段不动。两者只差一处：`shiftBlockTo` 剥的是**首行**那一层（粘贴出来的这一段首行在光标那一列、其余行顶格，共有缩进是空串，用 `placeBlockAt` 一个字符都不会剥、首行反而加出两层）；
+- **判定分两档**（`looksLikeChatLog`，2026-09 用户要的"单条消息也算聊天记录"）：**带日期**的"用户名 + 时间戳"头部**一条就够**（QQ / 微信 复制单条消息给出的就是它），只有时分秒的头部要"时间戳独占行尾 + 后面确实还有正文"才算一条（`会议 14:30:25 开始` 这种正文里提一句时间的仍然不算），其余形状还是老规矩两条才动手；
 - **为什么不修整篇**：整篇排版绕不开"一条消息的正文到哪儿结束"，而作者自己接在消息下面写的行与消息正文之间没有空行时只能算作正文 —— 2026-09 为这件事加过两条"看缩进猜作者"的规则，猜错两次后全部撤掉（见规则登记表 `structure.chat-log` 的取舍说明）。范围由"刚粘的那一段"（或用户选中的那一段：命令 `typeset-selection` / 菜单「排版选中内容」）确定，就不需要猜；
-- **缩进跟随光标、接缝不许多出空行**（`text/context-indent.ts`，2026-09 用户报的"会产生空行、缩进也不一致"）：流水线只看这一段的文字，不知道它落在笔记的哪一层。所以写回前做两件事 —— 取起点那一行的**续行前缀**（行首空白与 `>` 链）当整块前缀逐行加上（在列表项里按回车后粘贴，整块对齐到列表项，不再"第一行缩进、其余顶格"），以及用 `keepEdgeNewlines` 把这一段首尾的换行数还原成粘贴前的样子（聊天记录排版总会补一个收尾换行，不还原就会在粘贴块与下文之间多出一个空行）。**缩进只认光标**：光标缩进多少排完就是多少，不去看上下相邻行（"上下都顶格所以你不许缩进"这层判断加过又按用户要求撤掉）；前缀前面已经有正文时给不出参照，保持顶格。**顺序是先剥后加**：排版前 `dedentBy` 剥掉这一段原本那一层，排完版再 `applyIndentPrefix` 加前缀 —— 反过来会连正文自己那格一起剥掉（光标缩进与「消息正文缩进」都用 tab 时，"1 层粘贴还是 1 层"）。这两条对「排版选中内容」同样生效；
+- **缩进跟随光标、接缝不许多出空行**（`text/context-indent.ts`，2026-09 用户报的"会产生空行、缩进也不一致"）：流水线只看这一段的文字，不知道它落在笔记的哪一层。所以写回前做两件事 —— 取起点那一行的**续行前缀**（行首空白与 `>` 链）当整块前缀逐行加上（在列表项里按回车后粘贴，整块对齐到列表项，不再"第一行缩进、其余顶格"），以及用 `keepEdgeNewlines` 把这一段首尾的换行数还原成粘贴前的样子（聊天记录排版总会补一个收尾换行，不还原就会在粘贴块与下文之间多出一个空行）。**缩进只认光标**：光标缩进多少排完就是多少，不去看上下相邻行（"上下都顶格所以你不许缩进"这层判断加过又按用户要求撤掉）；前缀前面已经有正文时给不出参照，保持顶格。**顺序是先剥后加**：排版前 `dedentBy` 剥掉这一段原本那一层，排完版再 `applyIndentPrefix` 加前缀 —— 反过来会连正文自己那格一起剥掉（光标缩进与「消息正文缩进」都用 tab 时，"1 层粘贴还是 1 层"）。这三条对「排版选中内容」同样生效（那条路恒为"收图 + 排版、不套尺寸"，见 `SELECTION_FIX_PLAN`）；
+- **写不进就回滚**：这一段在异步期间被改过（或编辑器拒绝写入）时，把**这一趟刚导入的文件**删掉（`discardImportedFiles`）—— 链接没写上、文件留在库里就是孤儿附件；
 - **等待表的三条规矩**：同一篇连着粘只留最后一笔、取出之后才回调（我们自己的 `replaceRange` 也会触发 `editor-change`，不摘就会自己触发自己）、插件卸载时 `dispose()` 清空。编辑器迟迟没有变化（这次粘贴被别的插件吞了、视图不是 Markdown 视图）时用 `PASTE_FALLBACK_MS` 把那笔等待丢掉 —— 宁可什么都不做，也绝不去动整篇。
 
 **粘贴图片自动套尺寸**（`autoSetImageSizeOnPaste`，**默认开**）与上面同一条线，范围判定完全一样，但两处不同，都是被"粘贴图片"这件事逼出来的：
 
-- **什么时候动手**：那一段像聊天记录时由 `fixPastedRange` 内部顺带做掉（`typesetEditorRange` 的 `sizeOptions` 参数，与排版**共用一次写回**，撤销一次两步一起回退）；不像时由 `ImageTasks.sizePastedRange` 单独做 —— 粘一张截图本来就没有"像不像聊天记录"这一说。尺寸只改链接里的别名（`![[图.png|100]]` / `![100](图.png)`），排在流水线之后，与排版互不干扰；
-- **本插件接管的粘贴不走它**：图片由我们自己一张一张存、存完整批一次写回，尺寸在 `fixPastedRange` / `sizePastedRange` 里当场就做掉了；观望表留给**别人家的粘贴**（别的插件把图片存进仓库、把链接插进正文，那正是要套尺寸的图片，文本修复那边则不凑热闹）；
+- **什么时候动手**：**我们自己的粘贴**由 `fixPastedRange` 里顺手做掉（③ 那一步，与收图 / 排版**共用一次写回**）；**别人家的粘贴**（Obsidian 自己存下的截图、别的插件插进来的图）由 `ImageTasks.sizePastedRange` 单独做 —— 那一段不归我们处理，就只补尺寸。尺寸只改链接里的别名（`![[图.png|100]]` / `![100](图.png)`），排在流水线之后，与排版互不干扰；
+- **本插件接管的粘贴也走它**：图片由我们自己一张一张存、存完整批一次写回，随后同一趟里把这一段的三件事（收图 / 排版 / 套尺寸）做掉；观望表留给**别人家的粘贴**（别的插件把图片存进仓库、把链接插进正文，那正是要套尺寸的图片，我们不动它的正文）；
 - **要盯着看一会儿**（`PasteSizeWatcher`）：一次粘贴可能分几次落进编辑器（粘贴多张图逐张存盘 / 转码，每存好一张才插一条链接），所以粘贴后每变一次就把 `[起点, 光标处)` 再看一眼 —— 幂等（已有尺寸的不再动），安静 5 秒（`PASTE_SIZE_IDLE_MS`）丢掉、总寿命 20 秒（`PASTE_SIZE_MAX_MS`）封顶，免得用户随手打字把它一直续下去；
 - **三档不动手**（都收在 `image/size.ts` 的 `pastedImageSizeOptions` 里）：开关关着、**宽度留空**（那一档在「设置图片大小」里是"移除已有尺寸"，粘贴时自动删尺寸不是这个功能该干的事）、尺寸填错（与「快速设置图片大小」共用 `validateImageSize`）。「排版选中内容」那条路**不套尺寸** —— 手动改尺寸有专门的命令与菜单项。
 

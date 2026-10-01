@@ -7,6 +7,7 @@
  *   1. 各种写法（宽 / 宽x高 / 移除 / 片段 / Markdown 图片 / 大小写扩展名）改写正确
  *   2. 幂等 —— 尺寸已经正确时 changed 为 0，内容一字不变
  *   3. 安全 —— 非图片链接、含说明文字的别名、未开启覆盖时一律不碰
+ *   4. 表格里的图（`![[图.png\|100]]`）照改，转义竖线不许丢 —— 丢了会把单元格切断
  */
 import { applyImageSize, pastedImageSizeOptions, toSizeString, validateImageSize } from "../src/image/size";
 import type { ImageSizeOptions } from "../src/image/size";
@@ -168,6 +169,8 @@ function idempotencyTests(): void {
 		"![300](url.png)",
 		"![文字](url.png)",
 		"![[a.png]]\n\n![[b.jpg|50]]\n\n![](c.gif)",
+		"| 1排 | ![[a.webp\\|97]] |",
+		"| 排 | 1列 |\n| --- | --- |\n| 1排 | ![[a.webp]] |",
 		"没有图片的普通笔记",
 	];
 
@@ -245,6 +248,35 @@ function pastedOptionsTests(): void {
 		"![[图.png|100]]");
 }
 
+// -------------------------------------------------------------- 7. 表格
+function tableTests(): void {
+	// GFM 表格里别名前的竖线要写成 `\|`：判断名字时要还原，写回去时不能漏
+	expectRewrite("表格里覆盖已有尺寸（转义照旧）",
+		"| 1排 | ![[a.webp\\|97]] |", size("100"), "| 1排 | ![[a.webp\\|100]] |");
+	// 别名带前导空格时按"说明文字"处理（与正文里 `![[图.png| 100]]` 同一套判定，原样保留；
+	// 只有纯数字才算尺寸，见 SIZE_ALIAS_RE）
+	expectRewrite("表格里别名带空格不改",
+		"| 1排 | ![[a.webp\\| 97]] |", size("100"), "| 1排 | ![[a.webp\\| 97]] |", 0);
+	expectRewrite("表格里移除尺寸（没有竖线了，转义也去掉）",
+		"| 1排 | ![[a.webp\\|97]] |", size(""), "| 1排 | ![[a.webp]] |");
+
+	// 表格行里补尺寸：必须自己加上转义，否则新写的竖线会把单元格切断
+	const table = ["| 排 | 1列 | 2列 |", "| --- | --- | --- |", "| 1排 | ![[a.webp]] | ![[b.webp\\|97]] |"].join("\n");
+	expectRewrite("表格里补尺寸要转义竖线", table, size("100"),
+		["| 排 | 1列 | 2列 |", "| --- | --- | --- |", "| 1排 | ![[a.webp\\|100]] | ![[b.webp\\|100]] |"].join("\n"),
+		2);
+
+	// 表格里没有分隔行时不算表格（与 line-scan 的口径一致），但那一条链接本来就带转义 → 照旧保留
+	expectRewrite("没有分隔行时按原样保留转义",
+		"| ![[a.webp\\|97]] |", size("100"), "| ![[a.webp\\|100]] |");
+
+	// 正文里（不在表格里）不必也不该加反斜杠
+	expectRewrite("正文里补尺寸不加转义", "文字 ![[a.webp]] 结束", size("100"), "文字 ![[a.webp|100]] 结束");
+
+	// 表格里的 Markdown 图片（尺寸在 alt 槽位，与竖线无关）
+	expectRewrite("表格里的 Markdown 图片", "| 图 | ![](att/a.png) |", size("100"), "| 图 | ![100](att/a.png) |");
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 1. 双链嵌入 ===");
 wikiTests();
@@ -263,6 +295,9 @@ validationTests();
 
 console.log("=== 6. 粘贴时自动套尺寸的取参 ===");
 pastedOptionsTests();
+
+console.log("=== 7. 表格 ===");
+tableTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

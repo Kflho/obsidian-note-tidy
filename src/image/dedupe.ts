@@ -1,4 +1,4 @@
-import { MANAGED_IMAGE_EXTENSIONS } from './constants';
+import { MANAGED_IMAGE_EXTENSIONS, unescapeTableTarget } from './constants';
 
 /**
  * 「合并重复图片」：**内容完全相同**的图片只留一张。
@@ -148,13 +148,17 @@ export function countImageReferences(text: string, name: string): number {
  *
  * 覆盖 `![[…]]`、`[[…]]`、`![](…)` 与 canvas 的 `"file"` 四种写法；
  * 非图片后缀（笔记双链等）一律不返回。
+ *
+ * **表格里的写法也算**：GFM 表格里 `|` 要写成 `\|`，所以 `![[图.png\|100]]`
+ * 捕获到的目标末尾会多一个转义反斜杠 —— 交给 `unescapeTableTarget` 还原，
+ * 否则表格里的图会被判成"没人引用"（2026-09 就是这么被清掉的）。
  */
 export function collectImageTargets(text: string): string[] {
 	const targets: string[] = [];
 	const imageExt = /\.(png|jpe?g|gif|bmp|webp|heic|avif|svg)$/i;
 
 	const take = (raw: string): void => {
-		const cleaned = raw.split('#')[0]?.trim() ?? '';
+		const cleaned = unescapeTableTarget(raw).split('#')[0]?.trim() ?? '';
 		if (!imageExt.test(cleaned)) return;
 		const base = cleaned.split('/').pop();
 		if (base) targets.push(base.toLowerCase());

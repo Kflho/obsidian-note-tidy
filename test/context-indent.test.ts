@@ -31,6 +31,7 @@ import {
 	keepEdgeNewlines,
 	placeBlockAt,
 	resolveRangeIndent,
+	shiftBlockTo,
 } from "../src/text/context-indent";
 
 const T = "\t";
@@ -145,6 +146,22 @@ function applyTests(): void {
 		placeBlockAt("张三: 2024/01/05 14:30:25\n\t你好", "  "),
 		`  张三: 2024/01/05 14:30:25\n  ${T}你好`);
 	check("落块：块内部更深的缩进保留", placeBlockAt("  甲\n    乙", "  "), "  甲\n    乙");
+
+	// 整块平移到某一层（粘进来的那一段**不像聊天记录**时用它，见 ImageTasks.alignPastedRange）：
+	// 剥的是**首行**那一层，不是"各行共有的那一层" —— 粘贴出来的这一段首行在光标那一列
+	// （它前面那截缩进在段外）、其余行顶格，共有缩进是空串，用 placeBlockAt 一个字符都不会剥，
+	// 首行反而会被加出两层（用户 2026-09 报的"最后一句话没有正确缩进"就是这一段没对齐）
+	const USER_PASTE = "![100](file:///D:/pic/a.png)![100](file:///D:/pic/b.png)  \n天天打怪导致作业都写不来才是正确的";
+	check("平移：首行在光标那一列、其余顶格 → 一起对齐",
+		shiftBlockTo(`${T}${USER_PASTE}`, T), `${T}![100](file:///D:/pic/a.png)![100](file:///D:/pic/b.png)  \n${T}天天打怪导致作业都写不来才是正确的`);
+	check("平移：整段已齐整 → 原样", shiftBlockTo(`${T}甲\n${T}乙`, T), `${T}甲\n${T}乙`);
+	check("平移：块内部更深的缩进保留", shiftBlockTo("甲\n  乙", T), `${T}甲\n${T}  乙`);
+	check("平移：到 2 层", shiftBlockTo(`${T}甲\n乙`, T + T), `${T}${T}甲\n${T}${T}乙`);
+	check("平移：空前缀原样", shiftBlockTo("甲\n乙", ""), "甲\n乙");
+	check("平移：单行（首行就是全部）原样", shiftBlockTo(`${T}甲`, T), `${T}甲`);
+	// 幂等：尺寸那一笔是观望式的，同一段会被反复看
+	check("平移：幂等", shiftBlockTo(shiftBlockTo(`${T}甲\n乙`, T), T), `${T}甲\n${T}乙`);
+	check("平移：再平移一次还是它", shiftBlockTo(`${T}甲\n${T}乙`, T), `${T}甲\n${T}乙`);
 
 	// 排版结果总会带一个收尾换行；粘贴进来的那一段本来没有，就不该凭空多出来
 	check("接缝：原文没有收尾换行", keepEdgeNewlines("a\nb", "甲\n乙\n"), "甲\n乙");
@@ -379,9 +396,14 @@ async function wiringTests(): Promise<void> {
 	imageEditor.setCursor(chatWithImage.length);
 	check("真接线_带图的聊天记录报为已修复", await tasks.fixPastedRange(file, imageEditor.editor, 0), true);
 	check("真接线_聊天记录里的图片带上默认尺寸", imageEditor.value().includes("![[图.png|100]]"), true);
-	// 排版与套尺寸合在同一次写回里：图片按「消息正文缩进」落在 tab 那一层，正文在它下面
+	// 排版与套尺寸合在同一次写回里。头部信息全关 ⇒ 整块都是消息正文（图片行 + 正文行都带
+	// 「消息正文缩进」），于是整块并入光标那一层 —— 光标在这儿是顶格，排完就是顶格
+	// （2026-09 的规矩："光标缩进是多少，粘完就是多少"）。
+	// ⚠️ 这里以前是 `\t![[图.png|100]]\n你好\n`：末条消息的正文只取到第一个换行，
+	// 正文那行以顶格原文留在消息外面，块的首行缩进因此没被 `placeBlockAt` 收掉 ——
+	// 看着就是"图片缩进、最后一句话顶格"（用户 2026-09 报的那个 bug）。
 	check("真接线_排版照样做完了（图片在正文前，且带着尺寸）",
-		imageEditor.value(), "\t![[图.png|100]]\n你好\n");
+		imageEditor.value(), "![[图.png|100]]\n你好\n");
 
 	// ④ 只有图片、没有聊天记录：走 sizePastedRange 那条路（文本修复那一步不该动它）
 	const imageOnly = "![[图.png]]";
@@ -400,6 +422,51 @@ async function wiringTests(): Promise<void> {
 	check("真接线_开关关掉就不动手", await tasks.sizePastedRange(offEditor.editor, 0), false);
 	check("真接线_开关关掉内容不变", offEditor.value(), "![[图.png]]");
 	settings.autoSetImageSizeOnPaste = true;
+
+	// ⑥ 粘进来的那一段**不像聊天记录**（用户 2026-09 用例：两张图一行 + 一段话，
+	//    没有"昵称 + 时间戳"头部）：内容一个字不改，只把整块缩进对齐到光标那一层 ——
+	//    编辑器粘贴只把第一行放在光标那一列，其余行从第 0 列开始。
+	//    这一档把「粘贴时自动收图」关掉（收图那条路要真仓库，在 test/paste-fix.test.ts 里测）
+	{
+		settings.autoTransferImagesOnPaste = false;
+		const pasted = "![100](file:///D:/pic/a.png)![100](file:///D:/pic/b.png)  \n天天打怪导致作业都写不来才是正确的";
+		const start = "137集\n".length + T.length;
+		const withPaste = createEditor(`137集\n${T}${pasted}\n`);
+		withPaste.setCursor(start + pasted.length);
+		check("真接线_不像聊天记录时只对齐缩进", await tasks.fixPastedRange(file, withPaste.editor, start), true);
+		check("真接线_两行都落在 tab 那一层", withPaste.value(),
+			`137集\n${T}![100](file:///D:/pic/a.png)![100](file:///D:/pic/b.png)  \n${T}天天打怪导致作业都写不来才是正确的\n`);
+		// 再跑一次（尺寸那一笔是观望式的）：已经在那一层，什么都不改
+		withPaste.setCursor(start + pasted.length + T.length);
+		check("真接线_对齐幂等", await tasks.fixPastedRange(file, withPaste.editor, start), false);
+		check("真接线_重复跑内容不变", withPaste.value(),
+			`137集\n${T}![100](file:///D:/pic/a.png)![100](file:///D:/pic/b.png)  \n${T}天天打怪导致作业都写不来才是正确的\n`);
+
+		// 光标顶格：没有可对齐的层，一个字都不动
+		const flush = createEditor(`${pasted}\n`);
+		flush.setCursor(pasted.length);
+		check("真接线_顶格粘贴不动手", await tasks.fixPastedRange(file, flush.editor, 0), false);
+		check("真接线_顶格粘贴内容不变", flush.value(), `${pasted}\n`);
+
+		// 「粘贴时自动排版」关掉：连缩进对齐都不做（内容原样）
+		settings.autoFixChatLogOnPaste = false;
+		settings.autoSetImageSizeOnPaste = false;
+		const noTypeset = createEditor(`137集\n${T}${pasted}\n`);
+		noTypeset.setCursor(start + pasted.length);
+		check("真接线_关掉排版后不动手", await tasks.fixPastedRange(file, noTypeset.editor, start), false);
+		check("真接线_关掉排版后内容原样", noTypeset.value(), `137集\n${T}${pasted}\n`);
+
+		// 三件事全关：整趟立刻返回（连读都不读）
+		settings.autoTransferImagesOnPaste = false;
+		const nothing = createEditor(`137集\n${T}${pasted}\n`);
+		nothing.setCursor(start + pasted.length);
+		check("真接线_三件事全关就不动手", await tasks.fixPastedRange(file, nothing.editor, start), false);
+		check("真接线_三件事全关内容原样", nothing.value(), `137集\n${T}${pasted}\n`);
+
+		settings.autoFixChatLogOnPaste = true;
+		settings.autoSetImageSizeOnPaste = true;
+		settings.autoTransferImagesOnPaste = true;
+	}
 }
 
 // -------------------------------------------------------------------- 运行

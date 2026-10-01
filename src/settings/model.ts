@@ -5,6 +5,8 @@ import { DEFAULT_SPACING_OPTIONS, resolveCjkDigitMode, resolveSpacingMode } from
 import type { SpacingOptions } from '../text/spacing';
 import { convertPlanFrom } from '../image/convert';
 import type { ConvertPlan } from '../image/convert';
+import { pastedImageSizeOptions } from '../image/size';
+import type { ImageSizeOptions } from '../image/size';
 
 /**
  * 插件设置的**数据模型**：字段定义、默认值、以及"设置 → 各功能选项"的转换。
@@ -95,8 +97,19 @@ export interface ImageTransferSettings {
 	chatSortByTime: boolean;
 	/** 是否去掉消息正文里的 `@昵称` 提及 */
 	chatStripMentions: boolean;
-	/** 粘贴的内容被识别为聊天记录时，自动执行「快速修复聊天记录」（转换外部图片 + 修复排版） */
+	/**
+	 * 粘贴后**自动排版**刚粘进来的那一段：像聊天记录（有"用户名 + 时间戳"头部）就整段修一遍
+	 * （收图 + 排版），不像就只把整块的缩进对齐到光标那一层（内容一个字不改）。
+	 */
 	autoFixChatLogOnPaste: boolean;
+	/**
+	 * 粘贴后把这一段里的**外部路径图片**收进仓库：`![说明](file:///D:\图.png)` → `![[新名字]]`
+	 * （按「格式转换」那一组的目标格式转码）。
+	 *
+	 * 与"像不像聊天记录"**无关**：单条 QQ 消息本来就没有时间戳头部（"两张图 + 一段话"），
+	 * 但图片照样得进仓库，否则链接指着别人机器的绝对路径，换台机器就是裂图。
+	 */
+	autoTransferImagesOnPaste: boolean;
 	// ---- 通用排版修复 ----
 	/** 行首缩进修复力度：把"用空格写的缩进"改回 Tab，顺带规范引用/列表/标题标记的空白 */
 	textLeadingIndentFix: LeadingIndentMode;
@@ -209,9 +222,13 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	chatSortByTime: true,
 	// 去掉 @ 提及会删正文，默认关：要用的自己打开（设置 → 聊天记录排版）
 	chatStripMentions: false,
-	// 粘贴聊天记录就顺手修好：默认开启（判定很窄 —— 要有两条"用户名 + 时间戳"的消息头部才算），
-	// 不想让它自动改笔记的在设置里关掉即可，手动那条命令 / 菜单项不受影响
+	// 粘贴聊天记录就顺手修好：默认开启（判定从宽到窄分两档 —— 带日期的"用户名 + 时间戳"头部
+	// 一条就算，只有时分秒的那种要两条），不想让它自动改笔记的在设置里关掉即可，
+	// 手动那条命令 / 菜单项不受影响
 	autoFixChatLogOnPaste: true,
+	// 粘贴进来的外链图片收进仓库（默认开）：与"像不像聊天记录"无关 ——
+	// 单条 QQ 消息（"两张图 + 一段话"）本来就没有时间戳头部，图片照样得进库
+	autoTransferImagesOnPaste: true,
 	// 默认「保守」：能修掉聊天记录里典型的空格混排，又不会动 Markdown 列表的嵌套缩进
 	textLeadingIndentFix: DEFAULT_LEADING_INDENT_MODE,
 	// 序号与标题级别是「保证式」整理：只修不齐的地方（首项编号不是 1、父子标题差不止一级），
@@ -293,4 +310,33 @@ export function resolveConvertPlan(settings: {
 		settings.pngquantPath,
 		settings.pngquantQuality
 	);
+}
+
+/**
+ * 粘贴后**自动做哪几件事** —— 三件事各自认自己的开关，互不牵连
+ * （见设置面板「图片 → 粘贴」那一组）。
+ *
+ * 为什么要分开：它们本来是两个功能 —— **智能排版**（这段文字怎么排、缩进归谁管）与
+ * **智能转换图片**（把 `file:///D:\…` 这种指着别人机器绝对路径的图片收进仓库）。
+ * 粘一条 QQ 消息（"两张图 + 一段话"，没有时间戳头部）时，排版那条路认不出它是聊天记录，
+ * 可图片照样得进库；反过来只想要图片、不想让插件动文字的人也可以只留收图那一项。
+ */
+export interface PasteFixPlan {
+	/** 收图：这一段里的外部路径图片复制进仓库、换成内部链接（`autoTransferImagesOnPaste`） */
+	transfer: boolean;
+	/** 排版：像聊天记录就整段排，不像就只把整块缩进对齐到光标那一层（`autoFixChatLogOnPaste`） */
+	typeset: boolean;
+	/** 套尺寸（`autoSetImageSizeOnPaste` → `pastedImageSizeOptions`）；`null` = 这一步不做 */
+	size: ImageSizeOptions | null;
+}
+
+/** 三件事全关时返回 null：这一趟粘贴一笔都不动（调用方据此连读都不用读） */
+export function pasteFixPlanFrom(settings: ImageTransferSettings): PasteFixPlan | null {
+	const plan: PasteFixPlan = {
+		transfer: settings.autoTransferImagesOnPaste !== false,
+		typeset: settings.autoFixChatLogOnPaste === true,
+		size: pastedImageSizeOptions(settings),
+	};
+	if (!plan.transfer && !plan.typeset && plan.size === null) return null;
+	return plan;
 }

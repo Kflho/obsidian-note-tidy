@@ -38,6 +38,13 @@ function referenceTests(): void {
 	check("canvas 的 file 字段算引用",
 		unusedIn(['{ "file": "att/a.png" }'], 'a.png', 'b.png'), ['b.png']);
 	check("带尺寸别名的双链算引用", unusedIn(['![[a.png|100]]'], 'a.png'), []);
+	// 表格里竖线必须写成 `\|`（GFM 规则）：漏认这一种，表格里的图就会被当成没人引用删掉
+	check("表格里的尺寸写法算引用（`\\|` 是转义，不是名字的一部分）",
+		unusedIn(['| 1排 | ![[a.png\\|100]] |'], 'a.png', 'b.png'), ['b.png']);
+	check("表格一行里好几张都算引用",
+		unusedIn(['| 1排 | ![[a.png\\|97]]![[c.png\\|140]] |'], 'a.png', 'b.png', 'c.png'), ['b.png']);
+	check("表格里的普通双链也算", unusedIn(['[[a.png\\|说明]]'], 'a.png'), []);
+	check("表格里竖线后带空格也算", unusedIn(['![[a.png\\| 100]]'], 'a.png'), []);
 	check("带 #片段 的双链算引用（片段不算名字）", unusedIn(['![[a.png#outline]]'], 'a.png'), []);
 	check("大小写不敏感", unusedIn(['![[A.PNG]]'], 'a.png'), []);
 	check("引用写全路径也认（只比文件名）", unusedIn(['![[x/y/a.png]]'], 'a.png'), []);

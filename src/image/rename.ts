@@ -1,7 +1,7 @@
 import { App, TFile, normalizePath } from 'obsidian';
 import { getTargetAttachmentFolder } from './attachment-folder';
 import type { AttachmentLocationSettings } from './attachment-folder';
-import { MANAGED_IMAGE_EXT_RE, wikiEmbedRe } from './constants';
+import { MANAGED_IMAGE_EXT_RE, unescapeTableTarget, wikiEmbedRe } from './constants';
 import { buildBasenameIndex, chooseLinkTarget, isImagePath, resolveImageLink } from './links';
 import { generateUniqueTargetPath, matchesNamePreset } from './naming';
 import type { ImageNamingSettings } from './naming';
@@ -64,7 +64,8 @@ export async function countImages(
 
 	for (const match of matches) {
 		if (!match[1]) continue;
-		const rawLink = match[1].trim();
+		// 表格里的 `![[图.png\|100]]`：目标末尾的转义反斜杠要先还原，否则扩展名判断不过
+		const rawLink = unescapeTableTarget(match[1]).trim();
 
 		if (!MANAGED_IMAGE_EXT_RE.test(rawLink)) continue;
 
@@ -100,8 +101,8 @@ export async function renameGarbledImages(
 
 	if (matches.length === 0) return 0;
 
-	// 预统计图片链接总数用于进度
-	const imageMatches = matches.filter(m => m[1] && MANAGED_IMAGE_EXT_RE.test(m[1].trim()));
+	// 预统计图片链接总数用于进度（表格里的转义写法同样算数，见 unescapeTableTarget）
+	const imageMatches = matches.filter(m => m[1] && MANAGED_IMAGE_EXT_RE.test(unescapeTableTarget(m[1]).trim()));
 	const totalImages = imageMatches.length;
 
 	let renamedCount = 0;
@@ -112,7 +113,7 @@ export async function renameGarbledImages(
 	const rbn = reservedBasenames ?? new Map<string, string>();
 
 	for (const match of imageMatches) {
-		const rawLink = match[1]!.trim();
+		const rawLink = unescapeTableTarget(match[1]!).trim();
 
 		if (!isGarbledImageName(rawLink)) {
 			processedCount++;
@@ -180,7 +181,7 @@ export async function renameImagesToPreset(
 	const imageMatches: RegExpExecArray[] = [];
 	for (const m of matches) {
 		if (!m[1]) continue;
-		const link = m[1].trim();
+		const link = unescapeTableTarget(m[1]).trim();
 		if (MANAGED_IMAGE_EXT_RE.test(link)) {
 			totalImages++;
 			imageMatches.push(m);
@@ -197,7 +198,7 @@ export async function renameImagesToPreset(
 	const rbn = reservedBasenames ?? new Map<string, string>();
 
 	for (const match of imageMatches) {
-		const rawLink = match[1]!.trim();
+		const rawLink = unescapeTableTarget(match[1]!).trim();
 
 		const linkedFile = resolveImageLink(app, file.path, rawLink, index).file;
 		if (!linkedFile) { processedCount++; if (onProgress) onProgress(processedCount, totalImages); continue; }
@@ -277,8 +278,12 @@ export async function fixImageLinkFormats(
 		let match: RegExpExecArray | null;
 		while ((match = regex.exec(content)) !== null) {
 			if (!match[1]) continue;
-			const linkPath = match[1].trim();
+			const rawLink = match[1].trim();
+			// 表格里写的是 `![[图.png\|100]]`：判断用还原后的名字，
+			// 改写时把那个转义反斜杠原样带回去 —— 漏了它，竖线会把表格单元格切断
+			const linkPath = unescapeTableTarget(rawLink);
 			const alias = match[2] || '';
+			const tableEscape = alias !== '' && rawLink.endsWith('\\') ? '\\' : '';
 
 			// 仅处理图片链接
 			if (!isImagePath(linkPath)) continue;
@@ -294,7 +299,7 @@ export async function fixImageLinkFormats(
 			// 格式已经正确则跳过，保证幂等
 			if (linkPath === desiredPath) continue;
 
-			const replacement = `![[${desiredPath}${alias}]]`;
+			const replacement = `![[${desiredPath}${tableEscape}${alias}]]`;
 			const start = match.index + offset;
 			const end = start + match[0].length;
 			newContent = newContent.substring(0, start) + replacement + newContent.substring(end);

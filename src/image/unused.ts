@@ -10,6 +10,10 @@ import { collectImageTargets } from './dedupe';
  * `collectImageTargets`，与合并重复副本用的是同一份扫描）。**按文件名比、不区分大小写** ——
  * 链接里写的是 `图.png` 还是 `attachments/图.png` 都指向同一张图。
  *
+ * **表格里的写法也算**：GFM 表格里 `|` 必须先转义成 `\|`（`![[图.png\|100]]`），
+ * 扫描时由 `unescapeTableTarget` 还原 —— 2026-09 的误删事故就是漏了这一种：
+ * 表格里的图被判成"没人引用"，整个笔记的图被清空（修法与回归测试见 `image.table-escape`）。
+ *
  * 三条刻意的保守：
  *
  * - **只清图片**（png/jpg/gif/bmp/webp/heic/avif/svg）—— 别的附件（pdf、docx、音频…）一个都不碰，

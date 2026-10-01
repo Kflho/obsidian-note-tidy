@@ -37,6 +37,7 @@ const entryPoints = [
 	"test/selection-count.test.ts",
 	"test/copy-shortcut.test.ts",
 	"test/paste-watch.test.ts",
+	"test/paste-fix.test.ts",
 	"test/paste-images.test.ts",
 	"test/notice-suppressor.test.ts",
 	"test/commands.test.ts",

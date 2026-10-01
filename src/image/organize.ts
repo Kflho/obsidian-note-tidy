@@ -1,5 +1,6 @@
 import { App, TFile, TFolder } from 'obsidian';
 import { ensureFolder, parentPathOf, resolveAttachmentFolder, AttachmentLocationSettings } from './attachment-folder';
+import { unescapeTableTarget } from './constants';
 import {
 	addToBasenameIndex,
 	buildCopyName,
@@ -118,10 +119,12 @@ export async function organizeNoteImages(
 
 	while ((match = WIKI_IMAGE_RE.exec(content)) !== null) {
 		const rawTarget = (match[1] ?? '').trim();
+		// 表格里 `![[图.png\|100]]` 的目标末尾多一个转义反斜杠：判断用还原后的名字
+		const linkName = unescapeTableTarget(rawTarget);
 		const alias = match[2];
-		if (!isImagePath(rawTarget)) continue; // 不是图片链接，原样保留
+		if (!isImagePath(linkName)) continue; // 不是图片链接，原样保留
 
-		const { file: source, ambiguous } = resolveImageLink(app, note.path, rawTarget, index);
+		const { file: source, ambiguous } = resolveImageLink(app, note.path, linkName, index);
 		if (!source) {
 			skipped++;
 			pushReason(reasons, ambiguous ? '存在同名图片，无法确定指向哪一张' : '找不到对应的图片文件');
@@ -157,10 +160,12 @@ export async function organizeNoteImages(
 			}
 		}
 
-		const fragmentIndex = rawTarget.indexOf('#');
-		const fragment = fragmentIndex >= 0 ? rawTarget.substring(fragmentIndex) : '';
+		const fragmentIndex = linkName.indexOf('#');
+		const fragment = fragmentIndex >= 0 ? linkName.substring(fragmentIndex) : '';
 		const target = chooseLinkTarget(destination, index, settings.renameLinkFormat) + fragment;
-		const link = `![[${target}${alias === undefined ? '' : '|' + alias}]]`;
+		// 别名前面的竖线在表格里是转义的：原来怎么写就怎么写回去，否则单元格会被切断
+		const aliasSeparator = alias === undefined ? '' : rawTarget.endsWith('\\') ? '\\|' : '|';
+		const link = `![[${target}${aliasSeparator}${alias ?? ''}]]`;
 
 		result += content.substring(lastIndex, match.index) + link;
 		lastIndex = match.index + match[0].length;

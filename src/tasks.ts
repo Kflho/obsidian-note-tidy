@@ -34,8 +34,8 @@ import {
 } from './image/transfer';
 import { looksLikeChatLog, resolveIndent } from './text/chat-log';
 import type { ChatLogOptions } from './text/chat-log';
-import { dedentBy, keepEdgeNewlines, placeBlockAt, resolveRangeIndent } from './text/context-indent';
-import { getSpacingOptions, resolveConvertPlan } from './settings';
+import { dedentBy, keepEdgeNewlines, placeBlockAt, resolveRangeIndent, shiftBlockTo } from './text/context-indent';
+import { getSpacingOptions, pasteFixPlanFrom, resolveConvertPlan } from './settings';
 import type { ImageTransferSettings } from './settings';
 import { resolveLeadingIndentMode } from './text/indent';
 import { formatNoteText } from './text/pipeline';
@@ -62,9 +62,27 @@ export interface PasteImage {
 	bytes: ArrayBuffer;
 }
 
+/** 一段内容要做的几件事（收图 / 排版 / 套尺寸各自认开关）：`PasteFixPlan` 就是这个形状 */
+interface RangeFixPlan {
+	transfer: boolean;
+	typeset: boolean;
+	size: ImageSizeOptions | null;
+}
+
+/** 一段内容修完之后的状态 */
+interface RangeFixResult {
+	status: 'fixed' | 'unchanged' | 'skipped';
+	/** 这一段被当成聊天记录排版了吗（决定提示语） */
+	chatLog: boolean;
+	/** 这一趟收进仓库的图片数 */
+	imported: number;
+}
+
+/** 「排版选中内容」那一趟：收图 + 排版，**不套尺寸**（手动改尺寸有专门的命令与菜单项） */
+const SELECTION_FIX_PLAN: RangeFixPlan = { transfer: true, typeset: true, size: null };
+
 /** 菜单只需要这个接口，不关心任务怎么实现（也让菜单能单独测） */
-export interface TaskActions {
-	/** 转换外部绝对路径图片（逐篇，单篇失败不拖垮整批） */
+export interface TaskActions {	/** 转换外部绝对路径图片（逐篇，单篇失败不拖垮整批） */
 	transferExternal(files: TFile[], where: string): Promise<void>;
 	/** 重命名笔记里的乱码图片 */
 	renameGarbled(files: TFile[], where: string): Promise<void>;
@@ -80,7 +98,7 @@ export interface TaskActions {
 	quickFixChatLog(file: TFile | null): Promise<void>;
 	/** 只排版**选中的那段内容**（转换选区里的外部图片 + 修复排版），笔记其余部分不动 */
 	typesetSelection(file: TFile, editor: Editor): Promise<void>;
-	/** 粘贴自动修复：只把刚粘进来的那一段 `[start, 光标处)` 排版 */
+	/** 粘贴自动修复：收拾刚粘进来的那一段 `[start, 光标处)`（收图 / 排版 / 套尺寸各认开关） */
 	fixPastedRange(file: TFile, editor: Editor, start: number): Promise<boolean>;
 	/** 粘贴进来的那一段里的图片按默认尺寸加上 `|宽x高`（只改这一段，不写盘） */
 	sizePastedRange(editor: Editor, start: number): Promise<boolean>;
@@ -1084,12 +1102,12 @@ export class ImageTasks implements TaskActions {
 				failureMessage: '❌ 排版选中内容时发生意外错误，请检查控制台。',
 			},
 			async (ctx) => {
-				const fixed = await this.typesetEditorRange(file, editor, from, to);
-				if (fixed === 'unchanged') {
+				const result = await this.typesetEditorRange(file, editor, from, to, SELECTION_FIX_PLAN);
+				if (result.status === 'unchanged') {
 					ctx.progress.clear();
 					return 'ℹ️ 选中的内容没有需要修复的地方。';
 				}
-				if (fixed === 'skipped') {
+				if (result.status === 'skipped') {
 					ctx.progress.clear();
 					return 'ℹ️ 这段内容已经变了，没有改动它。';
 				}
@@ -1100,32 +1118,31 @@ export class ImageTasks implements TaskActions {
 	}
 
 	/**
-	 * 粘贴自动修复：只把**刚粘进来的那一段** `[start, 光标处)` 排版。
+	 * 粘贴自动修复：只收拾**刚粘进来的那一段** `[start, 光标处)`。
 	 *
 	 * 那一段的范围是确定的（粘贴前的光标位置 → 粘贴后的光标位置），所以不需要猜
 	 * "哪几行是作者自己写的"，也不会碰到笔记的其它部分。
 	 *
-	 * 排版时缩进跟随上下文（在列表项里粘贴就与列表项对齐）、首尾换行数保持粘贴前的样子，
-	 * 见 `typesetEditorRange` 与 `text/context-indent.ts`。
-	 *
-	 * 这一段里的图片顺手按默认尺寸加上 `|宽x高`（同一趟、同一次写回，见
-	 * `pastedImageSizeOptions`）—— 粘进来的多半是聊天截图，尺寸该与笔记里其它图一致。
+	 * 这一趟做哪几件事**各认各的开关**（`pasteFixPlanFrom`，设置面板「图片 → 粘贴」那一组）：
+	 * **收图**（这一段里的 `file:///D:\…` 外部图片复制进仓库、换成内部链接 —— 与像不像聊天记录
+	 * 无关）、**排版**（像聊天记录就整段排，不像就只把整块缩进对齐到光标那一层）、
+	 * **套尺寸**（`|宽x高`）。三步合并在**同一次写回**里 —— 撤销一次三步一起回退。
 	 *
 	 * @returns 是否真的改了（调用方据此决定要不要提示）
 	 */
 	async fixPastedRange(file: TFile, editor: Editor, start: number): Promise<boolean> {
+		const plan = pasteFixPlanFrom(this.getSettings());
+		if (!plan) return false;
+
 		const end = editor.posToOffset(editor.getCursor('to'));
-		const fixed = await this.typesetEditorRange(
-			file,
-			editor,
-			start,
-			end,
-			pastedImageSizeOptions(this.getSettings())
-		);
-		if (fixed === 'fixed') {
-			new Notice('⚡ 已修好刚粘贴的聊天记录。');
+		const result = await this.typesetEditorRange(file, editor, start, end, plan);
+		if (result.status === 'fixed') {
+			// 只提示"看得出发生了什么"的那两种：整段当聊天记录排了版、图片进了仓库。
+			// 只对齐了缩进、只套了尺寸就不打扰（那是每次粘贴都可能发生的顺手事）
+			if (result.chatLog) new Notice('⚡ 已修好刚粘贴的聊天记录。');
+			else if (result.imported > 0) new Notice(`⚡ 已把刚粘贴的 ${result.imported} 张图片收进仓库。`);
 		}
-		return fixed === 'fixed';
+		return result.status === 'fixed';
 	}
 
 	/**
@@ -1176,8 +1193,8 @@ export class ImageTasks implements TaskActions {
 	 * 我们只能让它别再管（它的「Never process filenames」填 `*`），由我们把这件事做对。
 	 *
 	 * 写回用编辑器自己的接口（`replaceRange`），**不写盘**：撤销一次即可回退。
-	 * 排版与套尺寸与"别人家的粘贴"同一套判据：文字像聊天记录就走 `fixPastedRange`
-	 * （顺带套尺寸，一次写回），不像就只套尺寸。
+	 * 收图 / 排版 / 套尺寸三件事与"别人家的粘贴"同一套开关（`pasteFixPlanFrom`），
+	 * 各认各的，合并在同一次写回里。
 	 *
 	 * @param from / @param to 粘贴前选区（或光标）的字符偏移：写回时替换掉这一段
 	 * @returns 是否真的写了东西（一张图都没存下、也没有文字时为 `false`）
@@ -1200,8 +1217,9 @@ export class ImageTasks implements TaskActions {
 		// 光标落在写进去的内容末尾 —— 后面的修复 / 套尺寸都按"这一段"取范围
 		editor.setCursor(editor.offsetToPos(from + insertion.length));
 
-		if (looksLikeChatLog(insertion)) await this.fixPastedRange(file, editor, from);
-		else await this.sizePastedRange(editor, from);
+		// 收图 / 排版 / 套尺寸与"别人家的粘贴"同一条路、同一套开关（`pasteFixPlanFrom`）：
+		// 我们自己的插入同样是"第一行在光标那一列、其余行顶格"，也照样可能带着外链图片
+		await this.fixPastedRange(file, editor, from);
 		return true;
 	}
 
@@ -1251,67 +1269,86 @@ export class ImageTasks implements TaskActions {
 	 * 期间用户又改了这一段（或这段已被替换 / 删除）时**不动它**：拿旧的偏移去写回，
 	 * 只会把他刚打的字覆盖掉。
 	 *
-	 * @param sizeOptions 顺带给这一段里的图片套的尺寸（只有粘贴那条路会给，见
-	 *   `pastedImageSizeOptions`；给 `null` = 这一趟不管尺寸，「排版选中内容」就是这一档）。
-	 *   尺寸写在链接里，与排版各改各的，合并在**同一次写回**里 —— 撤销一次两步一起回退。
+	 * @param plan 这一趟做哪几件事（粘贴那条路按开关给，见 `pasteFixPlanFrom`；
+	 *   「排版选中内容」恒为"收图 + 排版、不套尺寸"）。
+	 *   三步合并在**同一次写回**里 —— 撤销一次一起回退。
 	 */
 	private async typesetEditorRange(
 		file: TFile,
 		editor: Editor,
 		from: number,
 		to: number,
-		sizeOptions: ImageSizeOptions | null = null
-	): Promise<'fixed' | 'unchanged' | 'skipped'> {
-		if (to <= from) return 'skipped';
+		plan: RangeFixPlan
+	): Promise<RangeFixResult> {
+		if (to <= from) return { status: 'skipped', chatLog: false, imported: 0 };
 
 		// 缩进前缀按整篇算：这一段落在笔记的哪一层，只有全文知道
 		const indent = resolveRangeIndent(editor.getValue(), from, to);
 
-		const fromPos = editor.offsetToPos(indent.from);
+		// 排版要从**起点那一行的行首**替换起（起点前那截缩进是这一段的层，排完由 `indent.prefix`
+		// 重新写上）；只收图 / 只套尺寸时不碰行首那截缩进，就老老实实从粘贴起点开始
+		const replaceFrom = plan.typeset ? indent.from : from;
+		const fromPos = editor.offsetToPos(replaceFrom);
 		const toPos = editor.offsetToPos(to);
 		// 记住替换范围内的原文：异步期间它变了就不写回（免得覆盖用户刚输入的内容）
 		const text = editor.getRange(fromPos, toPos);
 
 		// 排版只作用在"这一段自己的文字"上：起点之前那截已有缩进另算
 		const pasted = editor.getRange(editor.offsetToPos(from), toPos);
-		if (!pasted.trim()) return 'skipped';
+		if (!pasted.trim()) return { status: 'skipped', chatLog: false, imported: 0 };
 
-		// 先把这一段原本那一层缩进剥掉，让流水线看到"顶格的这一段"；
-		// 那一层由 applyIndentPrefix 在排完版后按光标处补回去（顺序反了会吃掉正文自己的缩进）
-		const content = dedentBy(pasted, indent.baseIndent);
+		// ① 收图（与像不像聊天记录无关）：这段里的外部路径图片 → 收进仓库并换成内部链接
+		let core = pasted;
+		let created: TFile[] = [];
+		if (plan.transfer) {
+			const transferred = await transferImagesInText(this.app, this.getSettings(), file, core);
+			core = transferred.content;
+			created = transferred.created;
+		}
 
-		// ① 这段里的外部路径图片 → 收进仓库并换成内部链接
-		const transferred = await transferImagesInText(this.app, this.getSettings(), file, content);
-		// ② 文本排版（只作用在这段文字上）
-		const typeset = formatNoteText(transferred.content, this.getTextPipelineOptions());
-		// ③ 整块落到光标那一层（块的缩进就是光标处那一层，不再往上加；见 placeBlockAt）
-		const placed = placeBlockAt(typeset, indent.prefix);
-		// ④ 粘贴那条路顺带给图片套上默认尺寸：只动链接里的尺寸别名，与 ② 的排版互不干扰，
-		//    合并在一次写回里（撤销一次两步一起回退）
-		const typed = sizeOptions ? applyImageSize(placed, sizeOptions).content : placed;
+		// ② 排版（开了才做）：
+		//    像聊天记录 —— 先把这一段原本那一层缩进剥掉，让流水线看到"顶格的这一段"，
+		//    排完版再由 `placeBlockAt` 整块落到光标那一层（顺序反了会吃掉正文自己的缩进）；
+		//    不像 —— 一个字的正文都不改（也不跑流水线），只把整块的行首缩进对齐到光标那一层：
+		//    编辑器粘贴只把第一行放在光标那一列、其余行从第 0 列开始。
+		const chatLog = plan.typeset && looksLikeChatLog(core);
+		let typed = plan.typeset && chatLog ? dedentBy(core, indent.baseIndent) : core;
+		if (chatLog) {
+			typed = placeBlockAt(formatNoteText(typed, this.getTextPipelineOptions()), indent.prefix);
+		} else if (plan.typeset) {
+			// 缩进对齐要连**起点那一行的行首缩进**一起看（`shiftBlockTo` 剥的正是那一截，
+			// 剥掉再按光标那一层加上，重复跑才不会越缩越深）；正文用收图之后的那一份
+			const lead = text.substring(0, Math.max(0, from - replaceFrom));
+			typed = shiftBlockTo(lead + core, indent.prefix);
+		}
+
+		// ③ 套尺寸：只动链接里的尺寸别名，与 ② 的排版互不干扰（同一次写回，撤销一次一起回退）
+		if (plan.size) typed = applyImageSize(typed, plan.size).content;
+
 		const result = keepEdgeNewlines(pasted, typed);
+		const unchanged: RangeFixResult = { status: 'unchanged', chatLog, imported: 0 };
 
-		if (!transferred.changed && result === text) {
+		if (result === text) {
 			// 什么都没写成：刚导入的文件一个都不能留（见 discardImportedFiles）
-			await discardImportedFiles(this.app, transferred.created);
-			return 'unchanged';
+			await discardImportedFiles(this.app, created);
+			return unchanged;
 		}
 
 		// 异步期间这一段被改过（用户又打字 / 别的插件插了东西）：宁可不动，
 		// 也不能拿旧偏移去覆盖他刚打的字 —— 但刚导入的图片必须回收：
 		// 链接写不进去，它们就永远没人引用（2026-09 那 40 个孤儿附件就是这么攒出来的）。
 		if (editor.getRange(fromPos, toPos) !== text) {
-			await discardImportedFiles(this.app, transferred.created);
-			return 'skipped';
+			await discardImportedFiles(this.app, created);
+			return { status: 'skipped', chatLog, imported: 0 };
 		}
 
 		try {
 			editor.replaceRange(result, fromPos, toPos);
 		} catch (err) {
-			await discardImportedFiles(this.app, transferred.created);
+			await discardImportedFiles(this.app, created);
 			throw err;
 		}
-		return 'fixed';
+		return { status: 'fixed', chatLog, imported: created.length };
 	}
 
 	/**

@@ -8,6 +8,7 @@
  *   2. 逐字节比对：大小一样但内容不同要拆开；读不动的文件单独一组（宁可少合并）
  *   3. 留哪张：引用最多的优先，一样多取名字最小的（结果可复现）
  *   4. 引用改写：`![[名]]` / `[[名]]` / `![](.../名)` / canvas 都改到，且不误伤长名字
+ *   5. 表格里的写法（`![[名\|100]]`）算引用 —— 漏了它，清理未引用图片会把表格里的图删掉
  */
 import {
 	chooseKeeper,
@@ -162,6 +163,23 @@ function targetTests(): void {
 	check("抽取：空文本", collectImageTargets(""), []);
 }
 
+// ------------------------------------------------- 6. 表格里的写法（GFM 转义）
+function tableTests(): void {
+	// GFM 表格里 `|` 必须写成 `\|`，链接正则又在 `|` 前面停下 —— 捕获到的目标末尾
+	// 会多一个转义反斜杠。2026-09 的 bug：就是它让表格里的图被判成"没人引用"清掉的。
+	check("抽取：表格里的嵌入（转义尺寸）", collectImageTargets("![[a.webp\\|100]]"), ["a.webp"]);
+	check("抽取：竖线后带空格", collectImageTargets("![[a.webp\\| 100x200]]"), ["a.webp"]);
+	check("抽取：表格里的普通双链", collectImageTargets("[[a.webp\\|说明]]"), ["a.webp"]);
+	check("抽取：一整行表格里的好几张",
+		collectImageTargets("| 1排 | ![[a.webp\\|97]]![[b.webp\\|140]] | ![[c.webp\\| 100]] |"),
+		["a.webp", "b.webp", "c.webp"]);
+	check("抽取：表格里的非图片照样不认", collectImageTargets("![[note.md\\|100]]"), []);
+	check("抽取：表格里的 canvas 写法", collectImageTargets('"file": "att/a.webp"'), ["a.webp"]);
+
+	check("改写：转义竖线原样留着", rewriteImageReferences("![[a.webp\\|100]]", "a.webp", "b.webp"), "![[b.webp\\|100]]");
+	check("计数：转义写法也算一次引用", countImageReferences("![[a.webp\\|100]]", "a.webp"), 1);
+}
+
 // -------------------------------------------------------------------- 运行
 console.log("=== 1. 扩展名与粗分组 ===");
 groupTests();
@@ -177,6 +195,9 @@ referenceTests();
 
 console.log("=== 5. 目标抽取 ===");
 targetTests();
+
+console.log("=== 6. 表格里的写法 ===");
+tableTests();
 
 console.log(`\n共 ${checks} 次检查，失败 ${failures.length} 项`);
 for (const message of failures.slice(0, 10)) {

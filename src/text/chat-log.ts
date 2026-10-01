@@ -249,18 +249,46 @@ function isMessageHeader(text: string, anchor: TimeAnchor): boolean {
 }
 
 /**
- * 这段文本像不像"粘贴进来的聊天记录"（决定要不要自动执行快速修复）。
+ * 这一条头部**单独就够确定**是聊天记录吗（见 `looksLikeChatLog` 的两条判据）。
  *
- * 判据用的是排版引擎自己的那把尺子：**至少两条消息头部**才算 —— 头部 = 时间戳前面
- * 同一行有用户名（`张三 2024/1/5 14:30:25`），或者整行就是本插件写出的无用户名时间戳。
+ * 两条都要求**头部后面确实还有正文**（这一行剩下的、或下面还有行）：孤零零一行
+ * `会议 14:30:25` 不算 —— 那更像作者自己写的一行记录，被当成消息排掉就是丢字
+ * （头部信息全关时那行会整个消失）。
+ */
+function isDecisiveHeader(text: string, anchor: TimeAnchor): boolean {
+	const after = text.substring(anchor.end);
+	if (after.trim() === '') return false;
+
+	// ① 带日期的头部：`2024/1/5 14:30:25`、`09-27 19:41:38`（日期分隔符必是 `/` 或 `-`），
+	//    以及本插件写出的 `2024/01/05 14:30:25`。这种形状在正文里几乎不会出现，
+	//    而 QQ / 微信 复制单条消息给出的正是它。
+	if (/[-/]/.test(anchor.text)) return true;
+
+	// ② 只有时分秒的头部：时间戳必须**独占行尾**（正文在下一行）。
+	//    `会议 14:30:25 开始` 这种后面还跟着字的就不算 —— 那是正文里提了一句时间。
+	const lineEnd = text.indexOf('\n', anchor.end);
+	const restOfLine = lineEnd === -1 ? after : text.substring(anchor.end, lineEnd);
+	return restOfLine.trim() === '';
+}
+
+/**
+ * 这段文本像不像"粘贴进来的聊天记录"（决定要不要自动执行「快速修复聊天记录」）。
  *
- * 为什么是两条而不是一条：只认一条太容易误伤（正文里写一句 `会议 14:30:25` 就命中了），
- * 而复制单条消息本来也不带头部 —— QQ / 微信 只在你一次复制多条时才写出"用户名 + 时间戳"。
+ * 判据用的是排版引擎自己的那把尺子，**分两档**：
+ *
+ * - **一条就够**（`isDecisiveHeader`）：带日期的头部（`张三 2024/1/5 14:30:25`、
+ *   本插件写出的 `2024/01/05 14:30:25`），或者时间戳独占行尾、下面还有正文的时分秒头部。
+ *   2026-09 用户要的"单条消息也算聊天记录"—— 复制一条 QQ 消息（"两张图 + 一段话"）
+ *   就只有一条头部，只认两条等于永远不认；
+ * - **两条才算**（其余形状）：`张三: 14:30:25 你好 李四: 14:30:30 在的` 这种同一行的
+ *   多条消息，头部后面紧跟着正文，单独一条与正文里提一句时间（`会议 14:30:25 开始`）
+ *   分不开 —— 那就还是老规矩，两条才动手。
  */
 export function looksLikeChatLog(text: string): boolean {
 	let headers = 0;
 	for (const anchor of findTimeAnchors(text)) {
 		if (!isMessageHeader(text, anchor)) continue;
+		if (isDecisiveHeader(text, anchor)) return true;
 		headers++;
 		if (headers >= 2) return true;
 	}
@@ -388,11 +416,12 @@ function sortAdjacentMessages(blocks: OutputBlock[]): OutputBlock[] {
 			end++;
 		}
 
-		// 段尾紧贴着正文（中间没有空行）时整段不动：末条消息的正文只取到第一个换行，
-		// 余下的续行作为普通文本留在后面 —— 排序会把那段续行跟消息拆开，
-		// 而且"谁在最后"一变，下一次排版对这条消息的取法也跟着变，宁可保持原样。
-		// 判据是"正文的第一个非空白字符前面有没有换行"：有换行就是另起一行（笔记正文），
-		// 没有换行（比如 `第二行` 直接接在正文后面）才是被截断的续行。
+		// 段尾紧贴着正文（中间既没有空行、那段文字也不是从新行开始的）时整段不动：
+		// 那段文字多半是这条消息正文的延续（正文边界没能把它收进去，例如紧跟在后面的时间戳残片），
+		// 排序会把别人的消息插到它前面，把它跟自己的消息拆开；而且"谁在最后"一变，
+		// 下一次排版对这条消息的取法也跟着变，宁可保持原样。
+		// 判据是"这段正文的第一个非空白字符前面有没有换行"：有换行就是另起一行（笔记正文），
+		// 没有换行才是紧贴在前一条消息尾部的东西。
 		let gluedToText = false;
 		for (let k = end; k < blocks.length; k++) {
 			const block = blocks[k]!;
@@ -654,21 +683,19 @@ export function formatChatLog(
 				boundary = searchStart + maxOffset;
 			}
 		} else {
+			// 末条消息：正文一直取到文末（遇到空行就停在空行前）—— 与其它消息**同一条规矩**：
+			// 正文只在空行处结束。
+			//
+			// 这里原先是"只取到第一个换行"，续行以顶格的原文留在消息外面。可末条消息的正文本来就
+			// 常常不止一行（"两张图一行 + 一段话"、"多行正文"都是这个形状），于是第二行起
+			// **不带缩进**地留在消息外面 —— 2026-09 用户报的"最后一句话没有正确缩进"。
+			// 当时那么写是为了"防止跳过同行的文字"（时间戳后面直接跟正文时不要整条丢掉），
+			// 现在取到文末同样满足这一点，而且与 `bodyClean` 的 `trim()` 配合得当。
 			const potentialContent = rawContent.substring(searchStart);
 			const doubleNewline = potentialContent.match(/\n\s*\n/);
 
-			// 核心修复2：严格定位末条消息内容的实际结束点，防止跳过同行的文字
-			let contentStartOffset = 0;
-			const leadingSpaceMatch = potentialContent.match(/^[\s\n]+/);
-			if (leadingSpaceMatch) {
-				contentStartOffset = leadingSpaceMatch[0].length;
-			}
-			const firstNewline = potentialContent.indexOf('\n', contentStartOffset);
-
 			if (doubleNewline && doubleNewline.index !== undefined) {
 				boundary = searchStart + doubleNewline.index;
-			} else if (firstNewline !== -1) {
-				boundary = searchStart + firstNewline;
 			} else {
 				boundary = rawContent.length;
 			}
