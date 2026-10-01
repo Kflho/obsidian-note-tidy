@@ -176,7 +176,19 @@ function planTests(): void {
 }
 
 // ------------------------------------------------- 2. 端到端：粘贴时收图
+//
+// ⚠️ 只有 Windows 能跑这一节：收图要把 `file:///…` 解析成磁盘上的文件，而插件的路径解析认的是
+// `file:///D:/…` 与 `D:\…` 这两种**盘符**写法（见 `image/external-path.ts` 文件头），POSIX 绝对
+// 路径走不通 `resolvePhysicalPath` —— CI 跑在 ubuntu 上，这一节直接跳过（与 image-transfer.test.ts
+// 同一套写法：纯逻辑那一节在所有平台照跑）。
+const CAN_TOUCH_DISK = process.platform === 'win32' && !process.env.NOTE_TIDY_SKIP_DISK_TESTS;
+const SKIP_DISK_NOTE = 'ℹ️ 跳过「真去磁盘找图」的用例：插件的路径解析只支持 Windows 盘符路径（CI 在 Linux 上跑，属正常）。';
+
 async function endToEndTests(): Promise<void> {
+	if (!CAN_TOUCH_DISK) {
+		console.log(SKIP_DISK_NOTE);
+		return;
+	}
 	installMoment();
 
 	// 磁盘上真放一张图：外链解析是真找文件的（`file:///…` → fs.readFile）
