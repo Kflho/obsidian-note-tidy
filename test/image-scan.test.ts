@@ -57,6 +57,9 @@ function wikiTests(): void {
 	// 带尺寸 / 别名的目标要取成文件名本身，别名不能混进来
 	checkEqual("目标去掉别名", targets("![[图.png|100]]"), ["图.png"]);
 	checkEqual("目标去掉片段外的别名", targets("![[图.png#center|200]]"), ["图.png#center"]);
+	// 表格里竖线必须转义：`![[图.png\|100]]` 的目标是 `图.png`，不是 `图.png\`
+	expectCount("表格里的尺寸写法", "| 1排 | ![[图.png\\|100]] |", 1);
+	checkEqual("表格里的目标去掉转义竖线", targets("![[图.png\\|100]]![[图2.png\\| 100]]"), ["图.png", "图2.png"]);
 }
 
 // -------------------------------------------------------- 2. Markdown 嵌入
@@ -73,6 +76,7 @@ function markdownTests(): void {
 	// 目标要把 `<>` 与 `"标题"` 都剥掉，交给解析的那一步
 	checkEqual("目标剥掉尖括号", targets("![说明](<我的 图.png>)"), ["我的 图.png"]);
 	checkEqual("目标剥掉标题", targets('![说明](图.png "标题")'), ["图.png"]);
+	expectCount("表格里的 Markdown 图片", "| 图 | ![说明](att/图.png) |", 1);
 }
 
 // ------------------------------------------------------------- 3. 保护区

@@ -1,5 +1,5 @@
 import { App, TFile } from 'obsidian';
-import { MANAGED_IMAGE_EXT_RE, wikiEmbedRe } from './constants';
+import { MANAGED_IMAGE_EXT_RE, unescapeTableTarget, wikiEmbedRe } from './constants';
 
 /**
  * 图片链接共用的解析工具。
@@ -120,7 +120,8 @@ export async function collectLinkedImageFiles(
 	const seen = new Set<string>();
 
 	for (const match of content.matchAll(wikiEmbedRe())) {
-		const rawLink = match[1]?.trim();
+		// 表格里的 `![[图.png\|100]]` 目标末尾会多一个转义反斜杠，先还原再判断
+		const rawLink = unescapeTableTarget(match[1] ?? '').trim();
 		if (!rawLink || !MANAGED_IMAGE_EXT_RE.test(rawLink)) continue;
 		const linked = resolveImageLink(app, file.path, rawLink, index).file;
 		if (!linked || seen.has(linked.path)) continue;

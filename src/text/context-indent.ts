@@ -12,6 +12,7 @@
  *
  * 这个模块只做几件纯函数的事：**算出这一段该用哪个缩进前缀**（`resolveRangeIndent`）、
  * **排版前把原本那一层缩进剥掉**（`dedentBy`）、**排完版把整块放到光标那一层**（`placeBlockAt`）、
+ * **把整块平移到某一层**（`shiftBlockTo`：粘进来的那一段不像聊天记录时只做这一件）、
  * **把首尾换行数还原成粘贴前的样子**（`keepEdgeNewlines`）。顺序不能换：先剥后放，
  * 否则"排完版再剥"会连流水线自己写的缩进一起剥掉（光标缩进与正文缩进都是 tab 时就是这条踩的坑）。
  *
@@ -159,6 +160,27 @@ export function applyIndentPrefix(text: string, prefix: string): string {
  */
 export function placeBlockAt(text: string, prefix: string): string {
 	return applyIndentPrefix(dedentBy(text, commonIndent(text)), prefix);
+}
+
+/**
+ * 整块**平移到** `prefix` 这一层：先剥掉**首行**那一层缩进，再给每一行加前缀。
+ *
+ * 与 `placeBlockAt` 只差一处：剥的是**首行**的缩进，不是"各行共有的那一层"。
+ * 粘贴进来的那一段正好是"首行在光标那一列、其余行顶格"：它前面那截缩进在段外，
+ * 段内各行共有的缩进是空串 —— 用 `placeBlockAt` 的话一个字符都不会剥，首行会被加出两层。
+ * 而首行那一截就是"这一段现在落在哪一层"，按它剥再按光标那一层加，正好落到该在的地方。
+ *
+ * 整段本来就齐整（聊天记录排版的结果就是这样）时两者一致：`commonIndent` 的结果就是首行那一截，
+ * 于是"剥一层再加一层"= 原样。
+ *
+ * **幂等**：重复执行结果一样（第二次的首行缩进就是 `prefix`，剥掉再加回来还是它）。
+ *
+ * @param prefix 目标那一层的前缀；空串 = 这一段不动
+ */
+export function shiftBlockTo(text: string, prefix: string): string {
+	if (prefix === '' || text === '') return text;
+	const firstIndent = /^[ \t]*/.exec(text)?.[0] ?? '';
+	return applyIndentPrefix(dedentBy(text, firstIndent), prefix);
 }
 
 /**

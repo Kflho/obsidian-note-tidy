@@ -6,6 +6,9 @@
  * 重点覆盖本次修复的两个隐患：
  *   1. 同名图片歧义 —— 无法确定指向哪一张时必须跳过，绝不能猜
  *   2. 链接形式 —— 文件名不唯一时不能写裸文件名，否则会显示成另一张同名图
+ *
+ * 另有一条与清理误删同源的规矩：表格里的链接写的是 `![[图.png\|200]]`
+ * （GFM 要求转义竖线），认链接时要还原，改写时那根反斜杠要原样带回去。
  */
 import { TFile, TFolder } from "obsidian";
 import { buildCopyName, chooseLinkTarget, isImagePath, linkBasename, resolveImageLink } from "../src/image/links";
@@ -275,6 +278,21 @@ async function organizeTests(): Promise<void> {
 		checkTrue("F 保留片段", result.content.includes("#outline"), result.content);
 		checkTrue("F 保留别名", result.content.includes("|200]]"), result.content);
 		checkTrue("F 指向本地副本", result.content.includes("folderB/attachments/图.png#outline|200"), result.content);
+	}
+	// 场景 G：表格里的链接（竖线要写成 `\|`）→ 一样认得出、一样搬运，转义不能丢
+	{
+		const vault = new FakeVault();
+		vault.addFile("folderA/attachments/图.png", "A");
+		const table = "| 图 |\n| --- |\n| ![[folderA/attachments/图.png\\|200]] |\n";
+		const note = vault.addFile("folderB/note.md", table);
+		const tree: Record<string, string> = { "folderB/note.md": table };
+		const app = makeApp(vault, tree);
+
+		const result = await organizeNoteImages(app as never, SETTINGS, note, indexOf(app));
+		checkEqual("G 复制了 1 张", result.copied, 1);
+		checkTrue("G 指向本地副本", result.content.includes("folderB/attachments/图.png"), result.content);
+		checkTrue("G 别名前的转义竖线原样保留", result.content.includes("\\|200]]"), result.content);
+		checkTrue("G 表格结构没被破坏", result.content.split("\n").slice(0, 3).every(line => line.startsWith("|")), result.content);
 	}
 }
 

@@ -2,7 +2,6 @@ import type { Editor, MarkdownFileInfo, MarkdownView, Plugin, TFile } from 'obsi
 import { Notice } from 'obsidian';
 import type { ImageTransferSettings } from '../settings';
 import type { PasteImage, TaskActions } from '../tasks';
-import { looksLikeChatLog } from '../text/chat-log';
 import { PasteTakeoverHint, imageFilesFromClipboard, pastedImageName } from './paste-images';
 
 /**
@@ -22,20 +21,24 @@ import { PasteTakeoverHint, imageFilesFromClipboard, pastedImageName } from './p
  *
  * 1. `editor-paste`：只登记（那时内容还没进文档 —— Obsidian 的剪贴板管理器发这个事件，
  *    真正插入内容的是 CodeMirror 的处理器，排在我们后面）。不阻止这次粘贴。
- * 2. `editor-change`：粘贴落进编辑器了。读回那一段文字，用排版引擎自己的尺子
- *    （`looksLikeChatLog`）判定"像不像聊天记录"，像才动手：转换这段里的外部路径图片 → 排版
- *    → `editor.replaceRange` 写回。**不写盘**（走编辑器自己的保存路径），
- *    撤销一次即可回退，笔记其余部分一个字符都不动。
+ * 2. `editor-change`：粘贴落进编辑器了。把这一段（`[粘贴起点, 光标处)`）整个交给
+ *    `ImageTasks.fixPastedRange`，由它按**各自的开关**做三件事（见 `pasteFixPlanFrom`）：
+ *    **收图**（这段里的 `file:///D:\…` 外部图片复制进仓库、换成内部链接）、
+ *    **排版**（像聊天记录就整段排；不像就一个字的正文都不改，只把整块缩进对齐到光标那一层 ——
+ *    编辑器粘贴只把第一行放在光标那一列、其余行从第 0 列开始）、
+ *    **套尺寸**（`|宽x高`）。三件事合并在**同一次写回**里，**不写盘**
+ *    （走编辑器自己的保存路径），撤销一次一起回退，笔记其余部分一个字符都不动。
  * 3. 兜底定时器（`PASTE_FALLBACK_MS`）：编辑器迟迟没有变化（这次粘贴被别的插件吞了、
  *    视图不是 Markdown 视图……）就把这笔等待丢掉 —— 宁可什么都不做，也绝不去动整篇。
  *
  * ## 还有一笔：粘贴进来的图片套尺寸（`autoSetImageSizeOnPaste`）
  *
- * 同一段范围再干一件事：把里面的图片按「图片大小」那套预设加上 `|宽x高`。它与文本修复
- * **共用一次写回**（`fixPastedRange` 内部顺手做掉），文本不像聊天记录时则由
- * `sizePastedRange` 单独做 —— 粘一张截图本来就没有"像不像聊天记录"这一说。
+ * 同一段范围里的第三件事：把里面的图片按「图片大小」那套预设加上 `|宽x高`。
+ * **我们自己的粘贴**由 `fixPastedRange` 顺手做掉（同一次写回）；**别人家的粘贴**
+ * （Obsidian 自己存下的截图、别的插件插进来的图）由 `sizePastedRange` 单独做 ——
+ * 那一段不归我们处理，就只补尺寸。
  *
- * 它与文本修复有两处不同，都是被"粘贴图片"这件事本身逼出来的：
+ * 它与前两件事有两处不同，都是被"粘贴图片"这件事本身逼出来的：
  *
  * - **别的插件接管了也要跟着**：Image Converter 会 `preventDefault` 自己处理图片文件，
  *   但它同样把图片存进仓库、把链接插进正文 —— 那正是要套尺寸的图片；
@@ -52,12 +55,6 @@ export const PASTE_SIZE_IDLE_MS = 5000;
 /** 那一笔的总寿命上限：一直有人在改也总有个头，免得用户随手打字把它一直续下去 */
 export const PASTE_SIZE_MAX_MS = 20000;
 
-/** 该不该因为这次粘贴自动修复：开关开着、有笔记、粘贴进来的这段像聊天记录 */
-export function shouldAutoFixPaste(options: { enabled: boolean; text: string; hasFile: boolean }): boolean {
-	if (!options.enabled || !options.hasFile) return false;
-	return looksLikeChatLog(options.text);
-}
-
 /** 这次粘贴落在哪儿：哪个编辑器、从哪个字符偏移开始 */
 export interface PasteTarget {
 	editor: Editor;
@@ -67,7 +64,7 @@ export interface PasteTarget {
 }
 
 export interface PasteFixSchedulerOptions {
-	/** 时间到了 / 编辑器变了：把这一笔交给调用方（由它读回那段文字并决定修不修） */
+	/** 时间到了 / 编辑器变了：把这一笔交给调用方（由它读回那段文字并收拾） */
 	take: (target: PasteTarget) => void;
 	/** 兜底时长，默认 `PASTE_FALLBACK_MS` */
 	fallbackMs?: number;
@@ -275,8 +272,10 @@ export class PasteSizeWatcher {
  *
  * 1. **粘贴图片由我们接管**（`takeOverImagePaste`，默认开）：剪贴板里带图片文件时自己存
  *    （见 `ui/paste-images.ts` 的文件头 —— 别的插件那条并发粘贴会丢图）；
- * 2. **文本修复**（`autoFixChatLogOnPaste`）：刚粘进来的那段像聊天记录就修一遍；
- * 3. **粘贴图片套尺寸**（`autoSetImageSizeOnPaste`）：别人家的粘贴也盯着补尺寸。
+ * 2. **粘贴后自动收拾这一段**（`ImageTasks.fixPastedRange`）：**收图**（`autoTransferImagesOnPaste`）、
+ *    **排版**（`autoFixChatLogOnPaste`：像聊天记录就整段排，不像就只对齐整块缩进）、
+ *    **套尺寸**（`autoSetImageSizeOnPaste`）三件事各认各的开关，一次写回；
+ * 3. **别人家的粘贴只补尺寸**（`sizePastedRange`）：那一段不归我们处理。
  *
  * 后两笔共用同一套范围判定（`[粘贴起点, 光标处)`）。
  *
@@ -287,24 +286,10 @@ export function registerPasteAutoFix(
 	actions: TaskActions,
 	getSettings: () => ImageTransferSettings
 ): void {
-	// 文本修复那一笔：命中时先把"这段像不像聊天记录"判掉，再由 handleEditorChange 串起来跑。
-	// 判定结果先放进这个槽里（`take` 是同步回调，返回后就能取到）
+	// 文本那一笔：粘贴落进编辑器后把"刚粘的那一段"整个交给任务层
+	// （收图 / 排版 / 套尺寸三件事各自认开关，见 `pasteFixPlanFrom`；三件事全关时任务自己立刻返回）
 	const pendingTextFix: { target: PasteTarget | null } = { target: null };
-	const textFixFor = (target: PasteTarget): PasteTarget | null => {
-		const end = offsetOf(target.editor, 'to');
-		if (end <= target.start) return null;
-
-		const text = target.editor.getRange(
-			target.editor.offsetToPos(target.start),
-			target.editor.offsetToPos(end)
-		);
-
-		// 判定用的是**真正插进文档的那段文字**（不是剪贴板里的），与排版引擎看到的是同一份
-		const enabled = getSettings().autoFixChatLogOnPaste === true;
-		return shouldAutoFixPaste({ enabled, text, hasFile: true }) ? target : null;
-	};
-
-	const scheduler = new PasteFixScheduler({ take: (target) => { pendingTextFix.target = textFixFor(target); } });
+	const scheduler = new PasteFixScheduler({ take: (target) => { pendingTextFix.target = target; } });
 	plugin.register(() => { scheduler.dispose(); });
 
 	// 尺寸那一笔：观望式（见 PasteSizeWatcher），与文本修复互不影响
@@ -367,13 +352,13 @@ export function registerPasteAutoFix(
 		const textHit = scheduler.onEditorChange(editor, file);
 		// `take` 是同步回调：上面这一句返回时槽里已经放好了结果。
 		// （断言是因为 TS 的控制流分析看不到回调里的赋值，直接读会窄化成 null）
-		const textFix = pendingTextFix.target as PasteTarget | null;
+		const fixTarget = pendingTextFix.target as PasteTarget | null;
 		const sizeTarget = sizeWatcher.onEditorChange(editor, file);
 
-		if (textHit && textFix) {
-			// 文本修复内部顺带把尺寸也套上（两步共用一次写回），这里不再单独跑一遍；
-			// 尺寸那笔观望刚才已经续过时了 —— 后面几张图落进来时还要靠它
-			void actions.fixPastedRange(textFix.file, textFix.editor, textFix.start);
+		// 我们自己的粘贴：整段交给任务层（收图 / 排版 / 套尺寸各认开关，一次写回）。
+		// 尺寸那一笔也归它 —— 它已经看过这一段的图片，不必再单独跑一遍
+		if (textHit && fixTarget) {
+			void actions.fixPastedRange(fixTarget.file, fixTarget.editor, fixTarget.start);
 			return;
 		}
 		if (sizeTarget) void actions.sizePastedRange(sizeTarget.editor, sizeTarget.start);

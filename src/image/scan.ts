@@ -1,4 +1,4 @@
-import { wikiEmbedRe } from './constants';
+import { unescapeTableTarget, wikiEmbedRe } from './constants';
 import { isImagePath } from './links';
 import { inlineCodeRanges, markFenceLines } from '../text/line-scan';
 
@@ -21,6 +21,10 @@ import { inlineCodeRanges, markFenceLines } from '../text/line-scan';
  * 围栏代码块与行内代码里的链接**不算**：那里写的是代码，不是笔记里的图片。
  * 保护区判定走 `text/line-scan.ts`（只取围栏那一半 —— 拿到的是选区或整篇文本，
  * 开头的 `---` 多半是分隔线，按 frontmatter 判会把"以 --- 包起来"的内容整段吃掉）。
+ *
+ * **表格里的图片也算**：`![[图.png\|100]]` 里那个反斜杠是转义（GFM 表格里 `|` 必须转义），
+ * 取到目标后走 `unescapeTableTarget` 还原成 `图.png` —— 不还原就认不出是图片，
+ * 状态栏数不到、右键复制也拿不到它。
  */
 
 /** 一条图片嵌入：目标、语法种类，以及它在文本里的位置 */
@@ -66,7 +70,7 @@ function collectFromLine(line: string, lineStart: number, out: ImageRef[]): void
 		// 空匹配兜底：不让 lastIndex 停在同一处，否则死循环（同 inlineCodeRanges 的写法）
 		if (wiki.lastIndex === match.index) wiki.lastIndex++;
 		if (isInRanges(match.index, codeRanges)) continue;
-		const target = (match[1] ?? '').trim();
+		const target = unescapeTableTarget((match[1] ?? '').trim());
 		if (isImagePath(target)) {
 			out.push({ target, kind: 'wiki', from: lineStart + match.index, to: lineStart + match.index + match[0].length });
 		}
@@ -77,7 +81,7 @@ function collectFromLine(line: string, lineStart: number, out: ImageRef[]): void
 	while ((match = markdown.exec(line)) !== null) {
 		if (markdown.lastIndex === match.index) markdown.lastIndex++;
 		if (isInRanges(match.index, codeRanges)) continue;
-		const target = markdownTarget(match[1] ?? '');
+		const target = unescapeTableTarget(markdownTarget(match[1] ?? ''));
 		if (isImagePath(target)) {
 			out.push({ target, kind: 'markdown', from: lineStart + match.index, to: lineStart + match.index + match[0].length });
 		}

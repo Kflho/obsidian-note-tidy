@@ -10,11 +10,17 @@
  *   ![[图片.png#outline]]    → ![[图片.png#outline|100]] 保留 #片段
  *   ![300](url.png)          → ![100](url.png)          Markdown 图片（尺寸占 alt 槽位）
  *
+ * 表格里的图片（`| ![[图.png\|100]] |`）与别处一视同仁：那个 `\|` 是 GFM 表格的转义
+ * （不转义的话竖线会把单元格切断），判断名字时要还原，补尺寸时还要照旧写回去 ——
+ * 表格行由 `text/line-scan.ts` 的 `markTableLines` 认，见下面 `rewrite` 的说明。
+ *
  * 刻意不碰的情况：
  *   ![[图片.png|一段说明文字]]  别名不是纯尺寸时视为 alt 文字，原样保留
  *   ![风景照](url.png)         Markdown 图片的 alt 槽位已有文字，无法与尺寸共存，跳过
  *   ![[笔记.md]] / ![[文档.pdf]]  非图片扩展名，完全不处理
  */
+import { unescapeTableTarget } from './constants';
+import { markTableLines } from '../text/line-scan';
 
 /** 参与改写的图片扩展名（大小写不敏感） */
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|bmp|webp|heic|avif|svg)$/i;
@@ -131,17 +137,39 @@ export function applyImageSize(rawContent: string, options: ImageSizeOptions): I
 	let changed = 0;
 	let skipped = 0;
 
-	/** 在原文上按正则逐段改写，只拼接真正发生变化的片段 */
-	function rewrite(content: string, re: RegExp, build: (match: RegExpExecArray) => string | null): string {
+	/**
+	 * 在原文上按正则逐段改写，只拼接真正发生变化的片段。
+	 *
+	 * `build` 的第二个参数回答"这条链接在不在 GFM 表格行里"：表格里补尺寸要写成
+	 * `\|100`，否则新加的竖线会把单元格切断。表格行判定走 `line-scan` 的那一份
+	 * （要一张表有分隔行才算表）；这里跟着匹配从左往右走，不回头数换行。
+	 */
+	function rewrite(
+		content: string,
+		re: RegExp,
+		build: (match: RegExpExecArray, inTableRow: boolean) => string | null
+	): string {
 		let result = '';
 		let lastIndex = 0;
 		let match: RegExpExecArray | null;
 		re.lastIndex = 0;
 
+		const tableFlags = markTableLines(content.split('\n'));
+		let lineIndex = 0;
+		let lineStart = 0;
+		const inTableRow = (offset: number): boolean => {
+			for (;;) {
+				const lineEnd = content.indexOf('\n', lineStart);
+				if (lineEnd === -1 || offset <= lineEnd) return tableFlags[lineIndex] === true;
+				lineIndex++;
+				lineStart = lineEnd + 1;
+			}
+		};
+
 		while ((match = re.exec(content)) !== null) {
 			if (match.index === re.lastIndex) re.lastIndex++;
 
-			const replacement = build(match);
+			const replacement = build(match, inTableRow(match.index));
 			result += content.substring(lastIndex, match.index);
 
 			if (replacement !== null && replacement !== match[0]) {
@@ -161,12 +189,16 @@ export function applyImageSize(rawContent: string, options: ImageSizeOptions): I
 	}
 
 	// ---- Obsidian 双链嵌入 ----
-	const afterWiki = rewrite(rawContent, WIKI_EMBED_RE, match => {
-		const target = match[1] ?? '';
+	const afterWiki = rewrite(rawContent, WIKI_EMBED_RE, (match, inTableRow) => {
+		const rawTarget = match[1] ?? '';
+		// 表格里的目标末尾会多一个转义反斜杠（`![[图.png\|100]]`）—— 判断名字前先还原
+		const target = unescapeTableTarget(rawTarget);
 		if (!isImageTarget(target)) return null;
 
 		const alias = match[2];
-		const link = (size: string) => (size === '' ? `![[${target}]]` : `![[${target}|${size}]]`);
+		// 别名前的竖线在表格里必须转义：原来转义的照旧，表格行里新加的也补上
+		const escape = inTableRow || rawTarget.endsWith('\\') ? '\\' : '';
+		const link = (size: string) => (size === '' ? `![[${target}]]` : `![[${target}${escape}|${size}]]`);
 
 		if (alias === undefined || alias === '') {
 			// 没有尺寸：补上；移除模式下顺手清掉多余的空别名
