@@ -144,6 +144,46 @@ interface ConversionReady {
 	label: string;
 }
 
+/** 全库文档对图片文件名的引用统计（见 `countDocumentUsages`） */
+interface DocumentUsage {
+	/** 这个文件名被几篇文档引用（大小写不敏感） */
+	count: (name: string) => number;
+	/** 是不是每一篇都读到了；有读不出来的就是 false，调用方据此退回"只复制" */
+	complete: boolean;
+}
+
+/**
+ * 统计"每个图片文件名被几篇文档（笔记 + canvas）引用"。
+ *
+ * 「整理图片位置」用它判断一张图**除了本笔记还有没有别人在用**：有别人用就复制一份给本笔记
+ * （源文件留在原地），只有本笔记用就直接搬过来（不留孤儿副本）。
+ *
+ * 与「整理图片」那一步的引用计数**故意不同**：那边数的是"被引用了几次"（同目录查重时决定留哪张），
+ * 这里数的是"有几篇文档在引用"，所以按**文档**去重 —— 一篇笔记里引同一张图三次仍然只算一篇。
+ * 读不出来的文档当作"它引用了一切"（`complete: false`）：读不到就不能断言没人用。
+ */
+async function countDocumentUsages(app: App): Promise<DocumentUsage> {
+	const usage = new Map<string, number>();
+	let complete = true;
+
+	for (const doc of app.vault.getFiles()) {
+		if (doc.extension !== 'md' && doc.extension !== 'canvas') continue;
+		let text: string;
+		try {
+			text = await app.vault.read(doc);
+		} catch (err) {
+			complete = false;
+			console.error(`⚠️ 读不出 ${doc.path}，无法确认图片还有没有别人在用`, err);
+			continue;
+		}
+		for (const name of new Set(collectImageTargets(text))) {
+			usage.set(name, (usage.get(name) ?? 0) + 1);
+		}
+	}
+
+	return { count: (name: string) => usage.get(name.toLowerCase()) ?? 0, complete };
+}
+
 export class ImageTasks implements TaskActions {
 	constructor(
 		private readonly app: App,
@@ -795,10 +835,14 @@ export class ImageTasks implements TaskActions {
 	// ------------------------------------------------------------------ 图片位置与大小
 
 	/**
-	 * 整理图片位置：把引用了别处图片的链接，改为指向笔记自己附件夹里的副本。
+	 * 整理图片位置：把引用了别处图片的链接，改为指向笔记自己附件夹里的图片。
 	 *
 	 * 解决复制粘贴笔记后的典型问题 —— 本地附件夹里没有这张图，链接仍然指向原文件夹，
 	 * 一旦原图被移动、改名或删除，笔记里的图片就没了。
+	 *
+	 * 别处还有笔记在用的图**复制**一份过来（源文件留下，那篇笔记不受影响）；只有本笔记在用的图
+	 * 直接**搬**过来 —— 只复制的话，旧附件夹会剩下一整份没人管的重复图，而「清理没人引用的附件」
+	 * 按文件名判定引用（同名副本永远清不掉）。判定见 `countDocumentUsages`。
 	 */
 	async organizeImages(files: TFile[], where: string): Promise<void> {
 		const settings = this.getSettings();
@@ -812,15 +856,32 @@ export class ImageTasks implements TaskActions {
 			async (ctx) => {
 				let touched = 0;
 				let copied = 0;
+				let moved = 0;
 				let relinked = 0;
 				let skipped = 0;
 				const reasons: string[] = [];
 
+				// 「这张图还有别人在用吗」的判定表：全库文档扫一遍、按文档去重。
+				// **第一次真要搬图时才扫**（没有需要搬运的图就一页笔记都不多读）；读不全就一律按
+				// "别人还在用"处理（返回一个大数 → 只复制），并把话说明白在结果里。
+				let usageTable: Promise<DocumentUsage> | null = null;
+				let scanFailed = false;
+				const countUsages = async (name: string): Promise<number> => {
+					usageTable ??= countDocumentUsages(this.app);
+					const table = await usageTable;
+					if (!table.complete) {
+						scanFailed = true;
+						return Number.MAX_SAFE_INTEGER;
+					}
+					return table.count(name);
+				};
+
 				for (let i = 0; i < files.length; i++) {
 					const file = files[i];
 					if (file) {
-						const result = await organizeNoteImages(this.app, settings, file, ctx.index);
+						const result = await organizeNoteImages(this.app, settings, file, ctx.index, { countUsages });
 						copied += result.copied;
+						moved += result.moved;
 						relinked += result.relinked;
 						skipped += result.skipped;
 						for (const reason of result.reasons) {
@@ -837,9 +898,15 @@ export class ImageTasks implements TaskActions {
 				let finalMsg: string;
 				if (touched > 0) {
 					ctx.progress.finish('✅ 整理完成');
-					const parts = [`🎉 ${where}共整理 ${touched} 篇笔记`, `复制 ${copied} 张`, `改写 ${relinked} 处链接`];
+					const parts = [`🎉 ${where}共整理 ${touched} 篇笔记`];
+					if (moved > 0) parts.push(`搬过来 ${moved} 张`);
+					if (copied > 0) parts.push(`复制 ${copied} 张`);
+					if (relinked > 0) parts.push(`改写 ${relinked} 处链接`);
 					if (skipped > 0) parts.push(`跳过 ${skipped} 处`);
 					finalMsg = parts.join('，') + '。';
+					if (scanFailed) {
+						finalMsg += '（有笔记读不出来，这次只复制、不搬走 —— 读不到就不能断言那张图没别人在用。）';
+					}
 				} else {
 					ctx.progress.clear();
 					finalMsg = 'ℹ️ 没有需要整理的图片位置。';

@@ -11,7 +11,7 @@
  * （GFM 要求转义竖线），认链接时要还原，改写时那根反斜杠要原样带回去。
  */
 import { TFile, TFolder } from "obsidian";
-import { buildCopyName, chooseLinkTarget, isImagePath, linkBasename, resolveImageLink } from "../src/image/links";
+import { buildCopyName, chooseLinkTarget, isImagePath, linkBasename, reseatInBasenameIndex, resolveImageLink } from "../src/image/links";
 import { organizeNoteImages } from "../src/image/organize";
 
 // -------------------------------------------------------------------- 断言
@@ -115,6 +115,28 @@ function makeApp(vault: FakeVault, tree: Record<string, string>) {
 			},
 		},
 		metadataCache: { getFirstLinkpathDest: () => null },
+		// 模拟 Obsidian 的 renameFile：文件真的换位置，并且 **原地** 更新那个 TFile
+		// （path / name / parent 都会变）—— 索引里存的就是这个对象，搬家后仍然有效
+		fileManager: {
+			renameFile: async (file: TFile, newPath: string) => {
+				const entry = vault.files.get(file.path);
+				if (!entry) throw new Error(`找不到 ${file.path}`);
+				const oldPath = file.path;
+				vault.files.delete(oldPath);
+				const slash = newPath.lastIndexOf("/");
+				file.path = newPath;
+				file.name = slash >= 0 ? newPath.substring(slash + 1) : newPath;
+				file.extension = file.name.split(".").pop() ?? "";
+				file.parent = mkFolder(slash >= 0 ? newPath.substring(0, slash) : "/", []);
+				vault.files.set(newPath, { file, data: entry.data });
+				const previous = tree[oldPath];
+				if (previous !== undefined) {
+					tree[newPath] = previous;
+					delete tree[oldPath];
+				}
+				vault.refreshFolders();
+			},
+		},
 	};
 }
 
@@ -152,6 +174,17 @@ function pureTests(): void {
 	checkEqual("不冲突时用原名", buildCopyName(new Set(), "图.png"), "图.png");
 	checkEqual("冲突时加序号", buildCopyName(taken, "图.png"), "图 3.png");
 	checkEqual("无扩展名也安全", buildCopyName(new Set(["a"]), "a"), "a 2");
+
+	// 搬家（可能还改了名）后在索引里重新登记：旧名字下不能留下名字已经不对的登记
+	const movedIndex = new Map([["图.png", [mkFile("a/图.png")]]]);
+	reseatInBasenameIndex(movedIndex, "a/图.png", mkFile("b/图.png"));
+	checkEqual("搬家后旧名字下只剩一张", movedIndex.get("图.png")?.length, 1);
+	checkEqual("搬家后索引指向新路径", movedIndex.get("图.png")?.[0]?.path, "b/图.png");
+
+	const renamedIndex = new Map([["图.png", [mkFile("a/图.png")]]]);
+	reseatInBasenameIndex(renamedIndex, "a/图.png", mkFile("b/图 2.png"));
+	checkEqual("改名后旧名字下没有登记", renamedIndex.get("图.png"), undefined);
+	checkEqual("改名后登记在新名字下", renamedIndex.get("图 2.png")?.length, 1);
 }
 
 // ------------------------------------------------------- 2. 歧义解析
@@ -192,8 +225,10 @@ async function organizeTests(): Promise<void> {
 
 		const result = await organizeNoteImages(app as never, SETTINGS, note, indexOf(app));
 		checkEqual("A 复制了 1 张", result.copied, 1);
+		checkEqual("A 没搬（不传统计函数 = 老行为，只复制）", result.moved, 0);
 		checkEqual("A 内容有变化", result.changed, true);
 		checkTrue("A 本地出现了副本", vault.files.has("folderB/attachments/图.png"));
+		checkTrue("A 源文件仍留在原处", vault.files.has("folderA/attachments/图.png"));
 		checkTrue("A 链接改为完整路径", result.content.includes("![[folderB/attachments/图.png]]"), result.content);
 		checkTrue("A 副本内容一致", new TextDecoder().decode(vault.files.get("folderB/attachments/图.png")?.data) === "IMAGE-A", "内容不一致");
 
@@ -293,6 +328,65 @@ async function organizeTests(): Promise<void> {
 		checkTrue("G 指向本地副本", result.content.includes("folderB/attachments/图.png"), result.content);
 		checkTrue("G 别名前的转义竖线原样保留", result.content.includes("\\|200]]"), result.content);
 		checkTrue("G 表格结构没被破坏", result.content.split("\n").slice(0, 3).every(line => line.startsWith("|")), result.content);
+	}
+
+	// 场景 H：没有别的笔记在用 → 直接搬（旧文件夹不留副本）
+	{
+		const vault = new FakeVault();
+		vault.addFile("folderA/attachments/图.png", "IMAGE-A");
+		const note = vault.addFile("folderB/note.md", "![[folderA/attachments/图.png]]\n");
+		const tree: Record<string, string> = { "folderB/note.md": "![[folderA/attachments/图.png]]\n" };
+		const app = makeApp(vault, tree);
+		// 全库只有这一篇笔记引用它
+		const countUsages = async (): Promise<number> => 1;
+
+		const result = await organizeNoteImages(app as never, SETTINGS, note, indexOf(app), { countUsages });
+		checkEqual("H 搬了 1 张", result.moved, 1);
+		checkEqual("H 没有复制", result.copied, 0);
+		checkTrue("H 源文件已经不在原处", !vault.files.has("folderA/attachments/图.png"), [...vault.files.keys()].join(","));
+		checkTrue("H 出现在本地附件夹", vault.files.has("folderB/attachments/图.png"));
+		checkTrue("H 内容没变", new TextDecoder().decode(vault.files.get("folderB/attachments/图.png")?.data) === "IMAGE-A", "内容不一致");
+		checkTrue("H 链接指向搬过来的那张", result.content.includes("![[图.png]]"), result.content);
+
+		// 幂等：再跑一次不应再有改动（图片已经在本地附件夹里了）
+		tree["folderB/note.md"] = result.content;
+		const again = await organizeNoteImages(app as never, SETTINGS, note, indexOf(app), { countUsages });
+		checkEqual("H 复跑无改动", again.changed, false);
+		checkEqual("H 复跑不再搬", again.moved, 0);
+	}
+
+	// 场景 I：别的笔记还在用 → 只能复制（源文件留下来给那篇笔记）
+	{
+		const vault = new FakeVault();
+		vault.addFile("folderA/attachments/图.png", "IMAGE-A");
+		const note = vault.addFile("folderB/note.md", "![[folderA/attachments/图.png]]\n");
+		const tree: Record<string, string> = { "folderB/note.md": "![[folderA/attachments/图.png]]\n" };
+		const app = makeApp(vault, tree);
+		// 全库有两篇文档引用它：本笔记 + 另一篇
+		const countUsages = async (): Promise<number> => 2;
+
+		const result = await organizeNoteImages(app as never, SETTINGS, note, indexOf(app), { countUsages });
+		checkEqual("I 复制了 1 张", result.copied, 1);
+		checkEqual("I 没搬", result.moved, 0);
+		checkTrue("I 源文件还在（另一篇笔记要用）", vault.files.has("folderA/attachments/图.png"));
+		checkTrue("I 本地也有一份", vault.files.has("folderB/attachments/图.png"));
+	}
+
+	// 场景 J：同一张图被这篇笔记引用两次 → 只搬一次，两处链接都要改写对
+	{
+		const vault = new FakeVault();
+		vault.addFile("folderA/attachments/图.png", "A");
+		const body = "![[folderA/attachments/图.png]]\n![[folderA/attachments/图.png|200]]\n";
+		const note = vault.addFile("folderB/note.md", body);
+		const tree: Record<string, string> = { "folderB/note.md": body };
+		const app = makeApp(vault, tree);
+
+		const result = await organizeNoteImages(app as never, SETTINGS, note, indexOf(app), { countUsages: async () => 1 });
+		checkEqual("J 只搬一次", result.moved, 1);
+		checkEqual("J 一处都没跳过", result.skipped, 0);
+		checkEqual("J 两处链接都指向搬过来的那张", (result.content.match(/!\[\[图\.png/g) ?? []).length, 2);
+		checkTrue("J 没留下老路径", !result.content.includes("folderA/attachments"), result.content);
+		checkTrue("J 别名保留", result.content.includes("![[图.png|200]]"), result.content);
 	}
 }
 

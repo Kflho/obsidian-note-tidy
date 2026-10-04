@@ -56,6 +56,27 @@ export function addToBasenameIndex(index: Map<string, TFile[]>, file: TFile): vo
 	}
 }
 
+/**
+ * 把一个已经搬家（可能还改了名）的文件在索引里挪到新名字下。
+ *
+ * 与 `addToBasenameIndex` 的区别：搬走的文件在**旧名字**下往往还留着一份登记，
+ * 而 `chooseLinkTarget` / `resolveImageLink` 都靠这张索引判断"同名有几张" ——
+ * 留着一份名字已经不对的旧登记，裸文件名链接就可能指到它头上。所以先按
+ * **对象本身或旧路径**把旧登记摘掉，再登记到新名字下。
+ *
+ * @param oldPath 搬家前的仓库内路径
+ */
+export function reseatInBasenameIndex(index: Map<string, TFile[]>, oldPath: string, file: TFile): void {
+	const oldKey = (oldPath.split('/').pop() ?? oldPath).toLowerCase();
+	const list = index.get(oldKey);
+	if (list) {
+		const at = list.findIndex(item => item === file || item.path.toLowerCase() === oldPath.toLowerCase());
+		if (at >= 0) list.splice(at, 1);
+		if (list.length === 0) index.delete(oldKey);
+	}
+	addToBasenameIndex(index, file);
+}
+
 export interface LinkResolution {
 	/** 解析到的文件；null 表示无法确定 */
 	file: TFile | null;
