@@ -67,15 +67,17 @@ export interface RuleSection {
  *
  * 源码仓库（projects/js_02）与 vault 不在同一棵树里 —— 从前那个相对路径
  * `../../../data/data note/data note.md` 是"仓库就在插件目录里"时代的写法，
- * 迁移后指到了 projects 下，核对会被静默跳过。第一条候选是本机 vault 的绝对路径。
+ * 迁移后指到了 projects 下，核对会被静默跳过。第一条候选是本机 vault 的绝对路径
+ * （2026-10 规范笔记跟着 vault 重组挪到了 `study/personal/data/`，旧路径留作兜底）。
  */
 export const SPEC_NOTE_PATH =
 	process.env.NOTE_TIDY_SPEC ??
 	[
+		'D:/data/online/software/common/obsidian/study/personal/data/data note.md',
 		'D:/data/online/software/common/obsidian/data/data note/data note.md',
 		'../../../data/data note/data note.md',
 	].find(candidate => existsSync(resolve(candidate))) ??
-	'D:/data/online/software/common/obsidian/data/data note/data note.md';
+	'D:/data/online/software/common/obsidian/study/personal/data/data note.md';
 
 /**
  * 规范里的章节路径。
@@ -249,12 +251,13 @@ export const RULE_SECTIONS: RuleSection[] = [
 			},
 			{
 				id: 'image.organize',
-				name: '整理图片位置：把别处的图片复制进本笔记的附件夹',
+				name: '整理图片位置：把图片收进本笔记的附件夹（没别人用就搬、还有别人用才复制）',
 				spec: null,
 				status: 'done',
 				switchKeys: ['attachmentLocation', 'customAttachmentFolder', 'renameLinkFormat'],
 				impl: { file: 'src/image/organize.ts', symbols: ['organizeNoteImages'] },
 				tests: ['test/image-organizer.test.ts'],
+				note: '三个入口，同一个任务 `ImageTasks.organizeImages`：两条命令（`organize-images-current-note`「整理当前笔记的图片位置」/ `organize-images-entire-vault`「整理整个仓库的图片位置」）与文件 / 笔记右键「图片功能」里的「整理图片位置」。逐条 `![[…]]` 链接四档处理：① 图片已经在笔记自己的附件夹里、链接写的就是它 → 一个字都不动；② 附件夹里已有**逐字节相同**的副本 → 只把链接指过去（`relinked`，不重复复制）；③ 这张图**别的笔记还在用** → 复制一份进附件夹（`copied`，源文件留在原处）；④ **只有本笔记在用它** → 直接搬进附件夹（`moved`，源文件不在原地留副本）。目标夹由 `resolveAttachmentFolder` 算（系统设置 `attachmentFolderPath` 为 `./attachments` 时 = 笔记所在文件夹 + `attachments`，跟着笔记走）；链接写成文件名还是完整路径由 `chooseLinkTarget` 决定（同名时强制完整路径，见 `image.link-format`）。**③ / ④ 怎么分**：`tasks.ts` 的 `countDocumentUsages` 把全库 md / canvas 读一遍、按**文档**去重统计"每个文件名被几篇文档引用"（注意与 `image.tidy` 那份"引用次数"口径不同：那边数次数、决定同目录查重留哪张），减去本笔记自己这一篇，还有别人引用才算"共享"。**保守的三处**：不传统计函数（老调用方）一律按"别人还在用"只复制；统计表**第一次真要搬图时才扫**（没有可搬的图就一页笔记都不多读）；有文档读不出来时整趟退回"只复制"，并在结果提示里说明 —— 把别人还在用的图搬走会让那篇笔记断图，而多留一份副本只是浪费空间，两边代价不对等。**2026-10 补第 ④ 档的由来**：此前一律复制，用户跑完「整理图片位置」发现旧附件夹还留着整套 160 张重复图（"图片怎么还在老文件夹里"），而「清理没人引用的附件」（`image.unused`）是按**文件名**判定引用的 —— 同名副本被判成"有人用"，永远清不掉，于是旧文件夹成了没人管的孤儿（那次还叠加了"整理时笔记在老附件夹里、整理完又把笔记挪去别处"，副本落在兄弟目录）。搬走走 Obsidian 原生 `fileManager.renameFile`（时间戳保留；万一还有我们没扫到的引用，Obsidian 会自己更新链接），索引里用 `reseatInBasenameIndex` 把旧名字下的登记摘掉再登记到新名字（否则裸文件名链接可能指到一个名字已经不对的文件）。同一张图被这篇笔记引用两次时，第二处链接读到的还是老路径（笔记文本是一开头读进来的快照），靠 `movedAliases` 别名表（旧链接写法 / 旧路径 → 搬到的那个文件）改写对。表格里 `![[图.png\\|100]]` 那种转义竖线照样认、照样原样写回去（见 `image.table-escape`）',
 			},
 			{
 				id: 'image.tidy',
