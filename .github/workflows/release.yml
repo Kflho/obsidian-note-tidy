@@ -1,7 +1,7 @@
 name: Release
 
-# 打 tag 即发版：构建 → 生成来源证明（artifact attestation）→ 建 release。
-# tag 必须与 manifest.json 的 version 一致，且不带前缀 v。
+# 发布库只收运行文件：打 tag 即校验版本 → 生成来源证明 → 建 release。
+# 构建不在这里跑；main.js / styles.css 由开发仓的 npm run build 产出后发布。
 on:
     push:
         tags: ["*"]
@@ -27,16 +27,6 @@ jobs:
               with:
                   ref: ${{ inputs.tag || github.ref_name }}
 
-            - name: Use Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: 20.x
-                  cache: "npm"
-
-            - run: npm ci
-            - run: npm test
-            - run: npm run build
-
             - name: Check tag matches manifest version
               run: |
                   version="$(node -p "require('./manifest.json').version")"
@@ -49,9 +39,9 @@ jobs:
               uses: actions/attest-build-provenance@v2
               with:
                   subject-path: |
-                      main.js
+                      bin/exports/main.js
                       manifest.json
-                      styles.css
+                      bin/exports/styles.css
 
             - name: Create release
               env:
@@ -60,4 +50,4 @@ jobs:
                   gh release create "$TAG" \
                     --title "$TAG" \
                     --generate-notes \
-                    main.js manifest.json styles.css
+                    bin/exports/main.js manifest.json bin/exports/styles.css
