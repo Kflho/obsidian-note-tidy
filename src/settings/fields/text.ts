@@ -294,7 +294,7 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'spacingBracketInner',
 					name: '括号前后都没有空格',
-					desc: '括号内侧不留空格。',
+					desc: '',
 					control: { type: 'toggle' },
 				},
 				{

@@ -213,7 +213,7 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '外部图片转换',
 				files: file ? [file] : [],
-				failureMessage: '处理失败，请查看控制台。',
+				failureMessage: '处理失败，请打开开发者控制台查看原因。',
 			},
 			async (ctx) => {
 				if (!file) return '请先打开一篇笔记。';
@@ -238,7 +238,7 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '外部图片转换',
 				files,
-				failureMessage: '处理失败，请查看控制台。',
+				failureMessage: '处理失败，请打开开发者控制台查看原因。',
 			},
 			async (ctx) => {
 				const settings = this.getSettings();
@@ -324,7 +324,7 @@ export class ImageTasks implements TaskActions {
 		} catch (e) {
 			this.progress.clear();
 			console.error(e);
-			new Notice('处理失败，请查看控制台。');
+			new Notice('处理失败，请打开开发者控制台查看原因。');
 		}
 	}
 
@@ -481,7 +481,7 @@ export class ImageTasks implements TaskActions {
 			{
 				label: ` 转换为 ${label}`,
 				files: targets,
-				failureMessage: '处理失败，请查看控制台。',
+				failureMessage: '处理失败，请打开开发者控制台查看原因。',
 			},
 			async (ctx) => {
 				let converted = 0;
@@ -613,7 +613,7 @@ export class ImageTasks implements TaskActions {
 					label: '整理图片',
 					// 进度总量 = 要合并的 + 要转换的（两件事都是实打实要跑的动作）
 					files: [...dropFiles, ...convertTargets],
-					failureMessage: '处理失败，请查看控制台。',
+					failureMessage: '处理失败，请打开开发者控制台查看原因。',
 				},
 				async (ctx) => {
 					// ① 先把引用改写到留下的那张 —— 顺序反了就会留下断链
@@ -802,7 +802,7 @@ export class ImageTasks implements TaskActions {
 				{
 					label: '清理没人引用的图片',
 					files: unused,
-					failureMessage: '处理失败，请查看控制台。',
+					failureMessage: '处理失败，请打开开发者控制台查看原因。',
 				},
 				async (ctx) => {
 					let removed = 0;
@@ -852,7 +852,7 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '整理图片位置',
 				files,
-				failureMessage: '处理失败，请查看控制台。',
+				failureMessage: '处理失败，请打开开发者控制台查看原因。',
 				needsIndex: true,
 			},
 			async (ctx) => {
@@ -930,7 +930,7 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '设置图片大小',
 				files,
-				failureMessage: '处理失败，请查看控制台。',
+				failureMessage: '处理失败，请打开开发者控制台查看原因。',
 			},
 			async (ctx) => {
 				let changedFiles = 0;
@@ -1045,7 +1045,7 @@ export class ImageTasks implements TaskActions {
 			);
 		} catch (e) {
 			console.error(' [Note Tidy] 复制图片失败：', e);
-			new Notice('复制图片失败，请查看控制台。');
+			new Notice('复制图片失败，请打开开发者控制台查看原因。');
 		}
 	}
 
@@ -1119,7 +1119,7 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '快速修复聊天记录',
 				files: file ? [file] : [],
-				failureMessage: '处理失败，请查看控制台。',
+				failureMessage: '处理失败，请打开开发者控制台查看原因。',
 			},
 			async (ctx) => {
 				if (!file) return '请先打开一篇笔记。';
@@ -1295,7 +1295,7 @@ export class ImageTasks implements TaskActions {
 			await this.app.fileManager.renameFile(file, target);
 		} catch (error) {
 			console.error(`[ImageTransfer] 重命名笔记失败：${file.path} → ${target}`, error);
-			new Notice('重命名失败，请查看控制台。');
+			new Notice('重命名失败，请打开开发者控制台查看原因。');
 		}
 	}
 
@@ -1323,7 +1323,7 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '排版选中内容',
 				files: [file],
-				failureMessage: '处理失败，请查看控制台。',
+				failureMessage: '处理失败，请打开开发者控制台查看原因。',
 			},
 			async (ctx) => {
 				const result = await this.typesetEditorRange(file, editor, from, to, SELECTION_FIX_PLAN);
@@ -1664,7 +1664,7 @@ export class ImageTasks implements TaskActions {
 		after?: () => Promise<void>
 	): Promise<void> {
 		await this.runner.run(
-			{ label, files, failureMessage: '处理失败，请查看控制台。', needsIndex: true },
+			{ label, files, failureMessage: '处理失败，请打开开发者控制台查看原因。', needsIndex: true },
 			async (ctx) => {
 				let total = 0;
 				let processed = 0;
