@@ -64,7 +64,7 @@ export const IMAGE_SECTION: FieldSection = {
 				{
 					key: 'vaultConvertFormat',
 					name: '「转换图片格式」的目标格式',
-					desc: '图片转换的目标格式。',
+					desc: '',
 					control: {
 						type: 'dropdown',
 						options: {
@@ -78,7 +78,7 @@ export const IMAGE_SECTION: FieldSection = {
 				{
 					key: 'convertQuality',
 					name: '转换质量',
-					desc: '1–100，默认 75；越低文件越小、画质越差。',
+					desc: '填 1–100，默认 75；数值越低文件越小、画质越差。',
 					control: { type: 'text', placeholder: '75' },
 					coerce: (value) => {
 						const num = Number(typeof value === 'string' ? value.trim() : NaN);
@@ -96,20 +96,20 @@ export const IMAGE_SECTION: FieldSection = {
 				{
 					key: 'pngquantQuality',
 					name: 'pngquant 质量档',
-					desc: '范围越窄压缩越轻；默认 65-80。',
+					desc: '填质量范围，默认 65-80；范围越窄压缩越轻。',
 					control: { type: 'text', placeholder: '65-80' },
 					visible: (settings) => (settings.vaultConvertFormat ?? '').toLowerCase() === 'pngquant',
 				},
 				{
 					key: 'convertImportedImages',
 					name: '导入的图片转成目标格式',
-					desc: '默认开；收进仓库时按「目标格式」转码，原图不留。',
+					desc: '默认开；收进仓库的图片会按「目标格式」转码。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'tidyConvertFormat',
 					name: '整理时转换图片格式',
-					desc: '默认开；只改格式，文件名与链接不动。',
+					desc: '默认开；整理时只改图片格式，文件名和链接保持原样。',
 					control: { type: 'toggle' },
 				},
 			],
@@ -132,7 +132,7 @@ export const IMAGE_SECTION: FieldSection = {
 				{
 					key: 'autoFixChatLogOnPaste',
 					name: '自动排版聊天记录',
-					desc: '默认开；只排版刚粘贴的那一段。',
+					desc: '默认开；只排版这一次粘贴的内容。',
 					control: { type: 'toggle' },
 				},
 				{
@@ -149,19 +149,19 @@ export const IMAGE_SECTION: FieldSection = {
 				{
 					key: 'imageSizeWidth',
 					name: '默认宽度',
-					desc: '按像素写，默认 100；留空则不加尺寸。',
+					desc: '填图片宽度（像素），默认 100；留空则不加尺寸限制。',
 					control: { type: 'text', placeholder: '100' },
 				},
 				{
 					key: 'imageSizeHeight',
 					name: '默认高度',
-					desc: '按像素写；留空时按宽度等比缩放。',
+					desc: '填图片高度（像素）；留空时高度由宽度按比例算出。',
 					control: { type: 'text', placeholder: '留空' },
 				},
 				{
 					key: 'imageSizeOverwrite',
 					name: '覆盖已有尺寸',
-					desc: '默认开；已有的 |宽度 也会被改成上面的默认值。',
+					desc: '默认开；已有的 |宽度 也会被改成「默认宽度」「默认高度」的值。',
 					control: { type: 'toggle' },
 				},
 			],
@@ -178,7 +178,7 @@ export const IMAGE_SECTION: FieldSection = {
 				{
 					key: 'autoClearUnusedImages',
 					name: '整理时清理没人引用的附件',
-					desc: '整理图片时清理未引用附件。',
+					desc: '默认开；只清理没有任何笔记引用的附件。',
 					control: { type: 'toggle' },
 				},
 			],

@@ -49,13 +49,13 @@ export const INTERFACE_SECTION: FieldSection = {
 				{
 					key: 'fileMenuImageSubmenu',
 					name: '「图片功能」二级栏',
-					desc: '文件菜单显示「图片功能」。',
+					desc: '',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'fileMenuTextSubmenu',
 					name: '「文本排版」二级栏',
-					desc: '文件菜单显示「文本排版」。',
+					desc: '',
 					control: { type: 'toggle' },
 				},
 				{

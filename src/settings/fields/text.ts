@@ -55,7 +55,7 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'chatShowUsername',
 					name: '显示用户名',
-					desc: '默认开；关闭后只留正文。',
+					desc: '默认开；关闭后聊天记录只留正文。',
 					control: { type: 'toggle' },
 				},
 				{
@@ -112,7 +112,7 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'chatBlankLineBetweenMessages',
 					name: '消息之间插入空行',
-					desc: '默认关；只影响纯文字消息，带图的消息不拆。',
+					desc: '默认关；只加在纯文字消息之间，带图的消息不加。',
 					control: { type: 'toggle' },
 				},
 			],
@@ -141,7 +141,7 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'bangumiStripReactions',
 					name: '去掉贴贴与页面控件',
-					desc: '默认开；只删计数与控件，正文不动。',
+					desc: '默认开；正文保持不变，只去掉计数与页面控件。',
 					control: { type: 'toggle' },
 				},
 				{
