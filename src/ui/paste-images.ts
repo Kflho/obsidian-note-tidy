@@ -79,7 +79,11 @@ export function imageFilesFromClipboard(clipboard: DataTransfer | null): File[] 
  * 实在认不出来就给 `pasted-image.png`（存图那一步还会按魔数再认一遍，认不出就保持原样）。
  */
 export function pastedImageName(file: File): string {
-	const name = file.name ?? '';
+	const raw = file.name ?? '';
+	// 剪贴板里偶尔给的是 data URL / 超长路径（几千字），不能原样当文件名
+	const name = raw.length > 80 || raw.startsWith('data:')
+		? ''
+		: raw.replace(/[\\/:*?"<>|]/g, '').trim();
 	const dot = name.lastIndexOf('.');
 	if (dot > 0 && dot < name.length - 1) return name;
 

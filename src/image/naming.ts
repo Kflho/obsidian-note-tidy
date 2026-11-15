@@ -36,6 +36,9 @@ export function formatImageName(preset: string, ext: string, momentObj?: moment.
 	for (const [placeholder, value] of Object.entries(replacements)) {
 		name = name.split(placeholder).join(value);
 	}
+	// 预设被写坏、或扩展名异常长时兜住：文件名只留前 100 个字符（用户报过"名字几千字"）
+	const MAX_STEM = 100;
+	if (name.length > MAX_STEM) name = name.slice(0, MAX_STEM).trimEnd();
 	return name + ext;
 }
 

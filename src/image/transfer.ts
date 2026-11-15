@@ -50,7 +50,9 @@ export async function importImageBytes(
 	reservedPaths: Map<string, string>,
 	reservedBasenames: Map<string, string>
 ): Promise<TFile> {
-	const ext = path.extname(source.name);
+	const rawExt = path.extname(source.name);
+	// 剪贴板里偶尔把整段 data URL 当名字：扩展名过长或带非法字符时不要它，按无扩展名处理
+	const ext = rawExt.length > 10 || /[\\/:*?"<>|\s]/.test(rawExt) ? '' : rawExt;
 	const now = window.moment();
 	// 这张图最终会是什么格式：**名字按最终扩展名生成**（`generateUniqueTargetPath` 只认
 	// "文件最终会有的名字"，撞了它自己会往后推一秒）。按源扩展名生成会出这种事：同一批里的

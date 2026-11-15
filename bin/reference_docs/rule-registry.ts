@@ -1059,7 +1059,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: [],
 				impl: { file: 'src/text/pipeline.ts', symbols: ['formatNoteText'] },
 				tests: ['test/text-pipeline.test.ts'],
-				note: '顺序理由写在 pipeline.ts 头部；整条链迭代到不动点（最多 5 轮），因为后面的步骤会改前面的步骤看过的文本',
+				note: '顺序理由写在 pipeline.ts 头部；整条链迭代到不动点（最多 5 轮），因为后面的步骤会改动前面步骤看过的文本',
 			},
 			{
 				id: 'cross.range-indent',

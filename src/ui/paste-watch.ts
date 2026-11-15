@@ -3,6 +3,7 @@ import { Notice } from 'obsidian';
 import type { ImageTransferSettings } from '../settings';
 import type { PasteImage, TaskActions } from '../tasks';
 import { PasteTakeoverHint, imageFilesFromClipboard, pastedImageName } from './paste-images';
+import { isCopyingImages } from '../image/clipboard';
 
 /**
  * 粘贴聊天记录时自动修好 —— **只修刚粘进来的那一段**（设置里可开关，见 `autoFixChatLogOnPaste`）。
@@ -308,6 +309,13 @@ export function registerPasteAutoFix(
 		const start = Math.min(offsetOf(editor, 'from'), offsetOf(editor, 'to'));
 		const takeover = getSettings().takeOverImagePaste !== false;
 		const clipboardImages = takeover ? imageFilesFromClipboard(evt.clipboardData) : [];
+
+		// 复制还在进行：剪贴板里可能还是上一张图，这次粘贴先挡住，别把旧图存进来。
+		if (takeover && clipboardImages.length > 0 && isCopyingImages()) {
+			evt.preventDefault();
+			new Notice('图片还在复制，请稍候再粘贴。');
+			return;
+		}
 
 		// 图片被别的插件抢走了（它已经 preventDefault）：我们不重复处理（那会存两份），
 		// 但一次粘多张时要提醒一句 —— 它那条路会撞名丢图，而让开它的开关在它自己设置里。

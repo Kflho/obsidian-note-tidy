@@ -291,6 +291,28 @@ function tempScriptPath(): string {
 	return path.join(os.tmpdir(), name);
 }
 
+/** 后台预热：首次加载 .NET 程序集很慢（实测 12.4s，之后 0.3s），插件加载后先跑一遍空脚本 */
+export function prewarmClipboard(platform: string = process.platform): void {
+	if (platform !== 'win32') return;
+	const script = [
+		"$ErrorActionPreference = 'Stop'",
+		'Add-Type -AssemblyName System.Windows.Forms',
+		'Add-Type -AssemblyName System.Drawing',
+	].join('\n');
+	const command: ClipboardCommand = {
+		file: 'powershell.exe',
+		args: ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodePowerShellCommand(script)],
+	};
+	void runCommand(command).catch(() => undefined);
+}
+
+/** 正在复制图片的笔数：粘贴处理器据此挡住"剪贴板里还是上一张"的那次粘贴 */
+let copying = 0;
+
+export function isCopyingImages(): boolean {
+	return copying > 0;
+}
+
 /**
  * 把图片文件复制进系统剪贴板。
  *
@@ -309,6 +331,7 @@ export async function copyImageFiles(
 	const command = clipboardCommandFor(platform, paths, bitmapPath, rich, tempScriptPath());
 	if (!command) throw new Error(CLIPBOARD_UNSUPPORTED);
 
+	copying += 1;
 	try {
 		if (command.scriptFile) {
 			// BOM 不能少：Windows PowerShell 5.1 按 ANSI 读没有 BOM 的 .ps1，脚本里的中文注释会变乱码
@@ -317,6 +340,7 @@ export async function copyImageFiles(
 		}
 		await runCommand(command);
 	} finally {
+		copying -= 1;
 		if (command.scriptFile) {
 			// 临时脚本里有选区原文，用完就删（删不掉也不影响这次复制）
 			await fs.rm(command.scriptFile.path, { force: true }).catch(() => undefined);
