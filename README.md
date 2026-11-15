@@ -1,5 +1,7 @@
 # Note Tidy
 
+> 中文说明：[README.zh-CN.md](README.zh-CN.md)
+
 Obsidian desktop plugin that tidies a vault: it brings externally-linked images into your vault, renames garbled image files, and typesets note text — spacing between Chinese / English / formulas, punctuation width, LaTeX layout, tags, block order and chat logs. Everything is available from the right-click menu or the command palette, for one note or the whole vault.
 
 > Previously released as **Absolute Image Transfer** (`absolute-image-transfer`). The plugin id changed with v1.3.0 — see [Renaming](#renaming) if you are upgrading.
