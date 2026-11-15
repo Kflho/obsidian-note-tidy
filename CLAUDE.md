@@ -174,7 +174,7 @@ src/styles.css          # Plugin CSS (notice suppression, size dialog, settings 
 
 ### 排版流水线（text/pipeline.ts）
 
-固定顺序：**行首缩进 → 标记 → 聊天记录 → Bangumi 讨论 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序**。顺序不是随便定的（每一步的依赖写在 `pipeline.ts` 头部注释里）——例如序号与标题级别必须排在聊天记录 / Bangumi 之后（正文缩进定下来才知道谁是子列表）、排在板块排序之前（排序拿标题当锚点、排完还要按列表重排编号）。整条链**迭代到不动点**（最多 5 轮）：后面的步骤会改前面的步骤看过的文本 —— 例如公式排版把 `$w\approx 0$` 规范成 `$w \approx 0$`，板块排序的键随之改变。
+固定顺序：**行首缩进 → 标记 → 聊天记录 → Bangumi 讨论 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序**。顺序不是随便定的（每一步的依赖写在 `pipeline.ts` 头部注释里）——例如序号与标题级别必须排在聊天记录 / Bangumi 之后（正文缩进定下来才知道谁是子列表）、排在板块排序之前（排序拿标题当锚点、排完还要按列表重排编号）。整条链**迭代到不动点**（最多 5 轮）：后面的步骤会改动前面步骤看过的文本 —— 例如公式排版把 `$w\approx 0$` 规范成 `$w \approx 0$`，板块排序的键随之改变。
 
 智能公式只认"写成规范形态"的算式：**二元运算符两侧各留一格**（数学符号 1）才算，紧贴的一律不认 —— `x=0`、`a+b+c`、`5/10mm`、`A-7`、`cd /d`、`x -1` 都不动（那可能是作者故意写的编号 / 连字符 / 命令，也可能只是省了空格）；正负号是修饰符号（数学符号 3），`x = -1`、`f(-1)` 照旧包。
 
@@ -228,7 +228,7 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 **写剪贴板别用 .NET 的 `DataObject`**（本机实测，2026-09）：
 
-- `SetData('HTML Format', $false, [byte[]]…)` 落到剪贴板上的**不是字节**，而是字符串 `"System.Byte[]"` —— .NET 把"HTML Format"当文本格式，会自己转换；中文更是直接丢；
+- `SetData('HTML Format', $false, [byte[]]…)` 落到剪贴板上的值其实是字符串 `"System.Byte[]"` —— .NET 把"HTML Format"当文本格式，会自己转换；中文更是直接丢；
 - 格式的**先后顺序不听我们的**：先 `SetData` 的 HTML，`EnumClipboardFormats` 读出来却是 `CF_HDROP` 打头。而社区实测的结论是"顺序会决定 QQ / 微信 挑哪一份解析"。
 
 所以混排走 **Win32 原生 `SetClipboardData`**（`buildRichScript`）：`OpenClipboard` → `EmptyClipboard` → 只写两样，`HTML Format`（UTF-8 字节 + NUL）→ `CF_UNICODETEXT`(13)。实测读回来正是这个顺序、HTML 字节与偏移都对得上、剪贴板里**没有** FileDrop（`EnumClipboardFormats` 只多出系统自动加的 CF_LOCALE / CF_TEXT / CF_OEMTEXT）。
