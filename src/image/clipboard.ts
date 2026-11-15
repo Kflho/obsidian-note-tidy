@@ -35,13 +35,14 @@ import * as path from 'path';
  *
  * ## 路径怎么进脚本
  *
- * 一律编成 base64 由脚本自己解码：文件名里的 `'`、反引号、换行、emoji 都伤不到
- * PowerShell；整段脚本再经 `-EncodedCommand` 传进去，命令行上不出现任何用户内容
- * （既避免转义问题，也避免文件名被当成命令执行）。`-EncodedCommand` 要 UTF-16LE。
+ * 路径一律编成 base64 由脚本自己解码：文件名里的 `'`、反引号、换行、emoji 都伤不到
+ * PowerShell；脚本正文里不出现任何用户内容（既避免转义问题，也避免文件名被当成命令执行）。
  *
- * 不过 **Windows 一条命令行最多 32767 个字符**（CreateProcess 的限制），而 `-EncodedCommand`
- * 里那串 base64 是脚本的两倍多（UTF-16LE 再 base64）。选区里文字一多（HTML 里带着整段正文），
- * 就会达到这个上限 —— 那时改成把脚本**放到临时文件**、用 `-File` 执行（见 `COMMAND_LINE_LIMIT`）。
+ * 但脚本**不放进命令行**：一律写到固定路径的临时文件，用 `-File` 执行。
+ * 原因是 Windows 会对**新的命令行**做一次扫描（Defender / AMSI）：实测每换一个图片路径，
+ * 新的 `-EncodedCommand` 要 **10 秒**才复制成功；同一条命令第二次只要 0.3 秒。
+ * 固定成 `-File C:\...\note-tidy-clipboard.ps1` 之后命令行长一样，只改文件内容，
+ * 第一次 0.35 秒、之后每次 0.3 秒左右（2026-11 实测）。
  */
 
 /** 要执行的命令（纯数据，方便单测；真正跑起来在 copyImageFiles） */
@@ -49,18 +50,11 @@ export interface ClipboardCommand {
 	file: string;
 	args: string[];
 	/**
-	 * 命令行装不下时（见 `COMMAND_LINE_LIMIT`）：脚本改走这个文件，调用方负责写与删。
-	 * 内容与 `-EncodedCommand` 那条路完全一样，只是为了不撞 Windows 的命令行长度上限。
+	 * Windows 下始终有：脚本写到固定路径，用 `-File` 执行（命令行不随图片变化，见文件头）。
+	 * 内容里有选区原文，跑完由调用方删除。
 	 */
 	scriptFile?: { path: string; content: string };
 }
-
-/**
- * Windows 一条命令行能有多长（CreateProcess 的硬限制是 32767）。
- *
- * 留一点余量：可执行文件路径、参数引号都要占地方。
- */
-export const COMMAND_LINE_LIMIT = 30_000;
 
 /**
  * 图文混排那一份：选区里既有文字又有图片时，除文件列表外再写这两种格式。
@@ -207,7 +201,15 @@ function buildRichScript(rich: RichClipboardContent): string {
 	].join('\n');
 }
 
-/** 把脚本编成 `-EncodedCommand` 要的 base64（UTF-16LE） */
+/**
+ * 脚本写到哪个固定文件：**路径必须稳定**，否则每次新路径都会触发一次命令行扫描（见文件头）。
+ * 放在系统临时目录；内容里有选区原文，跑完就删。
+ */
+function fixedScriptPath(): string {
+	return path.join(os.tmpdir(), 'note-tidy-clipboard.ps1');
+}
+
+/** 把脚本编成 `-EncodedCommand` 要的 base64（UTF-16LE）；保留给测试与旧调用方 */
 export function encodePowerShellCommand(script: string): string {
 	return Buffer.from(script, 'utf16le').toString('base64');
 }
@@ -234,8 +236,9 @@ export function buildAppleScript(paths: string[]): string {
  * `rich` 只在 Windows 上生效：macOS 的 `osascript` 写不了"多格式一次写入"
  * （`set the clipboard to` 一次只能放一样），那边仍旧只放文件。
  *
- * @param tempScriptPath 装不下时脚本要落的临时文件路径（调用方给，写与删也归它）；
- *                       传 null 表示只能走命令行（比如编辑器里选了一大段文字 + 图片时会达到上限）
+ * Windows 一律 `-File` 固定路径：命令行内容不随图片变化，系统只扫描第一次（见文件头）。
+ *
+ * @param scriptPath 脚本落地路径（测试里可指定；默认系统临时目录下的固定名）
  * @returns 不认识的平台 / 没有文件时返回 null，调用方据此给提示
  */
 export function clipboardCommandFor(
@@ -243,26 +246,18 @@ export function clipboardCommandFor(
 	paths: string[],
 	bitmapPath: string | null,
 	rich: RichClipboardContent | null = null,
-	tempScriptPath: string | null = null
+	scriptPath: string = fixedScriptPath()
 ): ClipboardCommand | null {
 	if (paths.length === 0) return null;
 
 	if (platform === 'win32') {
 		const script = buildPowerShellScript(paths, bitmapPath, rich);
 		// -NoProfile 免得用户的 profile 拖慢或打断；-NonInteractive 不弹任何东西
-		const head = ['-NoProfile', '-NonInteractive'];
-		const encoded = ['-EncodedCommand', encodePowerShellCommand(script)];
-
-		if (tempScriptPath !== null && [...head, ...encoded].join(' ').length > COMMAND_LINE_LIMIT) {
-			// 选区里文字多的时候，光 base64 就能把命令行撑爆 —— 落盘最稳
-			return {
-				file: 'powershell.exe',
-				args: [...head, '-ExecutionPolicy', 'Bypass', '-File', tempScriptPath],
-				scriptFile: { path: tempScriptPath, content: script },
-			};
-		}
-
-		return { file: 'powershell.exe', args: [...head, ...encoded] };
+		return {
+			file: 'powershell.exe',
+			args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+			scriptFile: { path: scriptPath, content: script },
+		};
 	}
 
 	if (platform === 'darwin') {
@@ -285,27 +280,6 @@ function runCommand(command: ClipboardCommand): Promise<void> {
 	});
 }
 
-/** 临时脚本放哪儿：系统临时目录 + 随机名（同名并发不会撞车） */
-function tempScriptPath(): string {
-	const name = `note-tidy-clipboard-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.ps1`;
-	return path.join(os.tmpdir(), name);
-}
-
-/** 后台预热：首次加载 .NET 程序集很慢（实测 12.4s，之后 0.3s），插件加载后先跑一遍空脚本 */
-export function prewarmClipboard(platform: string = process.platform): void {
-	if (platform !== 'win32') return;
-	const script = [
-		"$ErrorActionPreference = 'Stop'",
-		'Add-Type -AssemblyName System.Windows.Forms',
-		'Add-Type -AssemblyName System.Drawing',
-	].join('\n');
-	const command: ClipboardCommand = {
-		file: 'powershell.exe',
-		args: ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodePowerShellCommand(script)],
-	};
-	void runCommand(command).catch(() => undefined);
-}
-
 /** 正在复制图片的笔数：粘贴处理器据此挡住"剪贴板里还是上一张"的那次粘贴 */
 let copying = 0;
 
@@ -322,16 +296,33 @@ export function isCopyingImages(): boolean {
  * @param rich 图文混排那份（选区里还有文字时给）；给了它就不放位图，见 `buildPowerShellScript`
  * @throws 系统不支持、或系统命令执行失败时抛错（调用方负责提示）
  */
-export async function copyImageFiles(
+/** 复制排队：固定脚本路径同一时刻只能有一个写入者，避免两次复制互相覆盖 */
+let copyQueue: Promise<void> = Promise.resolve();
+
+export function copyImageFiles(
 	paths: string[],
 	bitmapPath: string | null,
 	platform: string = process.platform,
 	rich: RichClipboardContent | null = null
 ): Promise<void> {
-	const command = clipboardCommandFor(platform, paths, bitmapPath, rich, tempScriptPath());
+	copying += 1;
+	const run = copyQueue.then(
+		() => copyOnce(paths, bitmapPath, platform, rich),
+		() => copyOnce(paths, bitmapPath, platform, rich)
+	);
+	copyQueue = run.then(() => undefined, () => undefined);
+	return run.finally(() => { copying -= 1; });
+}
+
+async function copyOnce(
+	paths: string[],
+	bitmapPath: string | null,
+	platform: string,
+	rich: RichClipboardContent | null
+): Promise<void> {
+	const command = clipboardCommandFor(platform, paths, bitmapPath, rich);
 	if (!command) throw new Error(CLIPBOARD_UNSUPPORTED);
 
-	copying += 1;
 	try {
 		if (command.scriptFile) {
 			// BOM 不能少：Windows PowerShell 5.1 按 ANSI 读没有 BOM 的 .ps1，脚本里的中文注释会变乱码
@@ -340,7 +331,6 @@ export async function copyImageFiles(
 		}
 		await runCommand(command);
 	} finally {
-		copying -= 1;
 		if (command.scriptFile) {
 			// 临时脚本里有选区原文，用完就删（删不掉也不影响这次复制）
 			await fs.rm(command.scriptFile.path, { force: true }).catch(() => undefined);

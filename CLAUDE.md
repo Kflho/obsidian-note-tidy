@@ -210,10 +210,10 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 本机实测（2026-09，Windows）记下来的几条，改这个模块前先看一眼：
 
-- `powershell.exe -NoProfile -NonInteractive -EncodedCommand` 跑起来是 **STA**，`Clipboard.SetDataObject` 才不报错；**别用 `pwsh`**（PowerShell 7 是 MTA，且 `Set-Clipboard` 已移除 `-Path`）；
+- `powershell.exe -NoProfile -NonInteractive -File`（固定脚本）跑起来是 **STA**，`Clipboard.SetDataObject` 才不报错；**别用 `pwsh`**（PowerShell 7 是 MTA，且 `Set-Clipboard` 已移除 `-Path`）；
 - 自己拼 `DataObject` 一次写入，**FileDrop 与 Bitmap 能同时存在**（`Set-Clipboard -Path` 做不到：它会把位图那份挤掉）；只有一张图时才放位图，多张没法只放一张；
 - **不要写文本格式**：CF_UNICODETEXT 与 CF_HDROP 同时存在时有些程序会粘两遍（Windows Terminal 修过这个 bug）；
-- 路径一律 base64 进脚本、整段脚本再 `-EncodedCommand`（UTF-16LE）：命令行上不出现任何用户内容，文件名里的引号 / 反引号 / 换行都伤不到 PowerShell。
+- 路径一律 base64 进脚本；脚本写到固定路径、用 `-File` 执行：命令行上不出现任何用户内容，文件名里的引号 / 反引号 / 换行都伤不到 PowerShell；命令行固定还有个好处，见下面 238 行。
 
 ### 图文混排：粘贴到 QQ / 微信 要"文字 + 图片"（`image/rich-copy.ts` + `clipboard.ts` 的 `buildRichScript`）
 
@@ -235,7 +235,7 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 ⚠️ 这两条只有在 Windows 上成立：macOS 的 `osascript` 一次只能 `set the clipboard to` 一样东西，混排在那边退化成"只放文件"（`clipboardCommandFor` 里明说）。
 
-⚠️ **选区长了要换条路**：Windows 一条命令行最多 32767 个字符，而 `-EncodedCommand` 的 base64 是脚本的两倍多 —— 选区里带上整段正文（HTML 里就是那几千字）就会顶爆。`clipboardCommandFor` 因此会看长度：超过 `COMMAND_LINE_LIMIT` 就把脚本写进系统临时目录、用 `-File` 执行（`copyImageFiles` 负责写与删；**落盘文件必须带 BOM**，否则 Windows PowerShell 5.1 按 ANSI 读，脚本里的中文注释会变乱码）。本机实测（2026-09）：6900 字的选区 → 20KB HTML → 走临时文件那条路，写出来的字节、偏移、格式顺序都对。
+⚠️ **脚本一律走固定的 `-File`**：Windows 会对**新的命令行**做一次扫描，每换一个图片路径就是一条新命令（实测 10 秒才复制成功）；固定 `-File <临时文件>` 后命令行不随图片变化，每次约 0.3 秒。脚本写到系统临时目录的固定名，`copyImageFiles` 负责写与删；**落盘文件必须带 BOM**，否则 Windows PowerShell 5.1 按 ANSI 读，中文注释会变乱码。复制请求排队（固定路径同一时刻只能有一个写入者）。
 
 ### 为什么还要"接管 Ctrl+C"（`ui/copy-shortcut.ts`，默认关）
 

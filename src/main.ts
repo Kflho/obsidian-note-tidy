@@ -8,7 +8,6 @@ import { registerFileMenu } from './ui/menus';
 import { registerImageMenu, TIDY_IMAGES_LABEL } from './ui/image-menu';
 import { registerCopyShortcut } from './ui/copy-shortcut';
 import { registerPasteAutoFix } from './ui/paste-watch';
-import { prewarmClipboard } from './image/clipboard';
 import { NoticeSuppressor } from './ui/notice-suppressor';
 import { StatusBarProgress } from './ui/progress';
 import { SelectionImageCount } from './ui/selection-count';
@@ -59,11 +58,6 @@ export default class ImageTransferPlugin extends Plugin {
 		registerCopyShortcut(this, this.tasks, () => this.settings);
 		// 粘贴聊天记录时自动执行「快速修复聊天记录」（设置里可关）
 		registerPasteAutoFix(this, this.tasks, () => this.settings);
-		// Windows 上 PowerShell 首次加载 .NET 程序集要十几秒（实测 12.4s，第二次 0.3s）。
-		// 插件加载后先在后台预热一次，别让第一次复制图片等这么久。
-		if (process.platform === 'win32') {
-			window.setTimeout(() => { prewarmClipboard(); }, 3000);
-		}
 		// 左侧栏的「整理图片」图标：**一键整理**（转换格式 + 合并重复副本 + 清理没人引用的附件）。
 		// 图标沿用 Clear Unused Images 那个 `image-file` —— 想用它替代对方的按钮时，
 		// 位置与图标都不变，只是干的事变成了"转换 + 合并 + 清理"。

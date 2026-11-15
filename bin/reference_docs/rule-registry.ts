@@ -397,10 +397,10 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: [],
 				impl: {
 					file: 'src/image/clipboard.ts',
-					symbols: ['copyImageFiles', 'clipboardCommandFor', 'buildPowerShellScript', 'buildFileScript', 'buildRichScript', 'encodePowerShellCommand', 'buildAppleScript', 'COMMAND_LINE_LIMIT', 'RichClipboardContent'],
+					symbols: ['copyImageFiles', 'clipboardCommandFor', 'buildPowerShellScript', 'buildFileScript', 'buildRichScript', 'encodePowerShellCommand', 'buildAppleScript', 'RichClipboardContent'],
 				},
 				tests: ['test/image-clipboard.test.ts'],
-				note: 'Electron / 网页剪贴板只能写位图（CF_DIB），资源管理器不认（Image Toolkit 的复制图片就是这个毛病，粘进文件夹什么都没有），所以写**文件拖放列表**（CF_HDROP）得请系统工具代劳：Windows 用 powershell.exe（纯图片走 WinForms 的 `DataObject`，图文混排走 Win32 原生接口，见 `buildRichScript`），macOS 用 osascript 的 POSIX file。**纯图片那条路不写文本格式**：CF_UNICODETEXT 与 CF_HDROP 同时存在时有些程序会粘两遍（Windows Terminal 修过这个 bug）。**图文混排那条路反过来**：只写 HTML + 纯文本，**不放文件列表也不放位图**（有文件 QQ 就只贴图片、有位图微信就不解析 HTML），见 `image.copy-rich`。路径一律 base64 进脚本、整段脚本再走 -EncodedCommand（UTF-16LE），命令行上不出现任何用户内容。**选区里文字一多就得改路子**：Windows 一条命令行最多 32767 个字符，而 -EncodedCommand 里那串 base64 是脚本的两倍多 —— 长选区（HTML 里带着整段正文与内嵌图片）会把命令行撑爆，所以超过 `COMMAND_LINE_LIMIT` 时改成把脚本写进系统临时目录、用 -File 执行（写完即删；落盘文件带 BOM，否则 Windows PowerShell 5.1 按 ANSI 读，脚本里的中文注释变乱码）。⚠️ `.NET` 的 `DataObject` **不能**用来写 CF_HTML：`SetData` 一个 byte[] 进去，落到剪贴板上的是字符串 `"System.Byte[]"`（本机实测），而且格式顺序也不听我们的（实测 `CF_HDROP` 打头）',
+				note: 'Electron / 网页剪贴板只能写位图（CF_DIB），资源管理器不认（Image Toolkit 的复制图片就是这个毛病，粘进文件夹什么都没有），所以写**文件拖放列表**（CF_HDROP）得请系统工具代劳：Windows 用 powershell.exe（纯图片走 WinForms 的 `DataObject`，图文混排走 Win32 原生接口，见 `buildRichScript`），macOS 用 osascript 的 POSIX file。**纯图片那条路不写文本格式**：CF_UNICODETEXT 与 CF_HDROP 同时存在时有些程序会粘两遍（Windows Terminal 修过这个 bug）。**图文混排那条路反过来**：只写 HTML + 纯文本，**不放文件列表也不放位图**（有文件 QQ 就只贴图片、有位图微信就不解析 HTML），见 `image.copy-rich`。路径一律 base64 进脚本；脚本始终写到固定路径的临时文件、用 -File 执行（写完即删；落盘文件带 BOM，否则 Windows PowerShell 5.1 按 ANSI 读，脚本里的中文注释变乱码）。**为什么不用 -EncodedCommand**：Windows 会对新命令行做一次扫描，每换一个图片路径就是一条新命令，实测要 10 秒才复制成功；固定 -File 命令行后每次约 0.3 秒（2026-11 实测）。⚠️ `.NET` 的 `DataObject` **不能**用来写 CF_HTML：`SetData` 一个 byte[] 进去，落到剪贴板上的是字符串 `"System.Byte[]"`（本机实测），而且格式顺序也不听我们的（实测 `CF_HDROP` 打头）',
 			},
 			{
 				id: 'image.copy-shortcut',
