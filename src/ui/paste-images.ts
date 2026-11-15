@@ -17,7 +17,7 @@
  * 的 `importImageBytes`，事件接线在 `ui/paste-watch.ts`。
  */
 
-/** 图片扩展名（小写，不带点）：按 MIME 兜底补文件名时用 */
+/** 图片扩展名（小写，不带点）：按 MIME 保底补文件名时用 */
 const EXTENSION_BY_MIME: Record<string, string> = {
 	'image/png': 'png',
 	'image/jpeg': 'jpg',
@@ -123,11 +123,7 @@ export class PasteTakeoverHint {
 	maybeShow(): void {
 		if (this.shown) return;
 		this.shown = true;
-		this.notify(
-			'ℹ️ 这次粘贴图片被别的插件接管了：它一次粘多张时会算出同一个文件名，后面几张可能丢。'
-			+ '想让 Note Tidy 来处理粘贴图片，就在那个插件（例如 Image Converter）的设置里把'
-			+ '「Never process filenames」填 * —— 那一项只关它的自动粘贴 / 拖放，其它功能不受影响。'
-		);
+		this.notify('其他插件接管了图片粘贴。要让 Note Tidy 处理，请把它的「Never process filenames」填 *。');
 	}
 
 	/** 忘掉"已经提示过"（测试用） */

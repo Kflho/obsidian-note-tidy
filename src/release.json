@@ -1,0 +1,15 @@
+{
+	"name": "obsidian-note-tidy",
+	"remote": "ssh://git@ssh.github.com:443/Kflho/obsidian-note-tidy.git",
+	"branch": "main",
+	"mode": "split-release",
+	"include": [
+		"manifest.json",
+		"versions.json",
+		"README.md",
+		"LICENSE",
+		".github/workflows/release.yml",
+		"bin/exports/main.js",
+		"bin/exports/styles.css"
+	]
+}

@@ -109,7 +109,7 @@ export function withHiddenItem(hidden: HiddenItems, scope: MenuScope, title: str
  * 就再也找不到那个开关，等于永远打不开（用户原话："关掉的选项就不显示了，也就是永远打不开了"）。
  * 名单本身一直存在设置里，并回来就能随时恢复。
  *
- * 去重按去掉首尾空白后的标题比（菜单标题与名单标题都不带空白，这里只是兜底）。
+ * 去重按去掉首尾空白后的标题比（菜单标题与名单标题都不带空白，这里只是保底）。
  */
 export function menuItemsForPanel(detected: string[], hidden: string[]): string[] {
 	const items = detected.map(title => title.trim()).filter(title => title !== '');

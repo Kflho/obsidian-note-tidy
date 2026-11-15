@@ -15,7 +15,7 @@ import { countImageRefs } from '../image/scan';
  * 状态栏文案：一张都没有时返回空串（这一格留空，不写"0 张"占地方）。
  */
 export function formatSelectionImageCount(count: number): string {
-	return count > 0 ? `🖼 选中 ${count} 张图片` : '';
+	return count > 0 ? `选中 ${count} 张图片` : '';
 }
 
 /**

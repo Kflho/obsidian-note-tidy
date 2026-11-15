@@ -6,7 +6,7 @@ import { MANAGED_IMAGE_EXT_RE, unescapeTableTarget, wikiEmbedRe } from './consta
  *
  * 这里集中解决两个功能的共同根因 —— **同名图片歧义**：
  * 全库存在多张同名图片时，裸文件名链接 `![[图.png]]` 到底指向哪一张并不确定，
- * 旧实现「全局按文件名取第一个匹配」的兜底逻辑可能返回另一张图，
+ * 旧实现「全局按文件名取第一个匹配」的保底逻辑可能返回另一张图，
  * 于是插件会去改错文件、把链接指向别的图片。
  *
  * 现在统一为：能确定才返回文件，不能确定就返回 null 并标记歧义，由调用方跳过。
@@ -180,6 +180,6 @@ export function buildCopyName(takenLowercase: Set<string>, name: string): string
 		const candidate = `${stem} ${i}${ext}`;
 		if (!takenLowercase.has(candidate.toLowerCase())) return candidate;
 	}
-	// 极端情况：加时间戳兜底
+	// 极端情况：加时间戳保底
 	return `${stem} ${Date.now()}${ext}`;
 }

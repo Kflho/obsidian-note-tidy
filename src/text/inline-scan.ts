@@ -35,7 +35,7 @@ export function isSpaceChar(char: string): boolean {
  * - 裸域名 `www.example.com/x?y=1` → `www. example. com/x? y=1`；
  * - `localhost:8080` → `localhost: 8080`；`main.ts` → `main. ts`；
  * - UNC 路径 `\\server\share\file.txt` 里的文件名同样被拆；
- * - HTML 实体 `&nbsp;` → `&nbsp；`（分号被"半角标点换全角"吃掉）。
+ * - HTML 实体 `&nbsp;` → `&nbsp；`（分号被"半角标点换全角"覆盖）。
  *
  * 保护方式与其它区间一致：整段当一个"英文单词"，**里面一个字符都不动**，
  * 只按"中文 ↔ 英文"规则决定它与左右邻居之间那一格。
@@ -47,7 +47,7 @@ export function isSpaceChar(char: string): boolean {
  *
  * 中日韩**文字**照收：`https://a.com/中文English?x=1.2.2` 是作者写的地址，整体保住
  * （test/spacing.test.ts 钉着这一条）；中日韩**标点**一律不收 ——
- * `见 https://a.com/b，然后` 里那个逗号是正文的，吃进来会把后半句一起冻住。
+ * `见 https://a.com/b，然后` 里那个逗号是正文的，匹配进来会把后半句一起冻住。
  */
 const URI_TAIL_CHAR = String.raw`[^\s<>()\[\]（）【】〖〗《》〈〉「」『』〔〕“”‘’′″、。，；：！？…‥—～·]`;
 const URI_TAIL = `${URI_TAIL_CHAR}+`;
@@ -187,7 +187,7 @@ export function dollarMarks(lines: string[], protectedLines: boolean[]): Array<{
  *   `1.矩阵指数$e^{At}$是…$$…$$` 里 `1.` 后面缺的空格、公式两侧缺的空格全都修不了。
  * - **跨行的 `$$ … $$` 区块**：中间那些行整行是 LaTeX 代码，必须跳过；
  *   起始行 `$$` **之前**、结束行 `$$` **之后**的正文仍要排版。
- * - **落单的 `$$`**（没配成对）：不当区块，整行按普通文字处理，免得吃掉后面整篇。
+ * - **落单的 `$$`**（没配成对）：不当区块，整行按普通文字处理，免得覆盖后面整篇。
  */
 export function mathRanges(lines: string[], protectedLines: boolean[]): Array<[number, number] | null> {
 	const ranges: Array<[number, number] | null> = lines.map((line) => [0, (line ?? '').length]);

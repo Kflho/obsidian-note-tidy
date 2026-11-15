@@ -16,7 +16,7 @@ import { IMAGE_SUBMENU_TITLE, TEXT_SUBMENU_TITLE, TIDY_IMAGES_LABEL, recordDetec
 /**
  * MenuItem 的运行时扩展：Obsidian 一直有原生子菜单，只是没写进公开类型定义。
  * 调用 setSubmenu() 后菜单项会获得 `has-submenu` 类，并在最右侧自动画出 › 箭头
- * （`div.menu-item-icon.mod-submenu`，配合 `.menu-item-title { flex: 1 0 0 }` 顶到行尾）。
+ * （`div.menu-item-icon.mod-submenu`，配合 `.menu-item-title { flex: 1 0 0 }` 达到行尾）。
  * 拿不到时（旧版本 / 未来被移除）回退到"点击后在光标处弹出"，功能不受影响。
  */
 type MenuItemWithSubmenu = MenuItem & { setSubmenu?: () => Menu };
@@ -207,7 +207,7 @@ function addTextSubmenu(
 	addSubmenuEntry(parent, TEXT_SUBMENU_TITLE, 'message-square', (menu) => {
 		menu.addItem((item) => {
 			item
-				.setTitle(`修复${where}的排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）`)
+				.setTitle(`修复${where}的排版`)
 				.setIcon('message-square')
 				.onClick(async () => {
 					await actions.typeset(files, where);
@@ -219,7 +219,7 @@ function addTextSubmenu(
 		if (files.length === 1) {
 			menu.addItem((item) => {
 				item
-					.setTitle(`快速修复${where}的聊天记录（转换外部图片 + 修复排版）`)
+					.setTitle(`快速修复${where}的聊天记录`)
 					.setIcon('zap')
 					.onClick(async () => {
 						const target = files[0];

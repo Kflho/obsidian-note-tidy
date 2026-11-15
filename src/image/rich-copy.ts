@@ -207,7 +207,7 @@ export function buildHtmlFragment(
 	let cursor = 0;
 
 	for (const image of [...images].sort((a, b) => a.from - b.from)) {
-		// 位置重叠的（同一个位置解析出两条引用）只认前一条，免得片段里文字被吃掉
+		// 位置重叠的（同一个位置解析出两条引用）只认前一条，免得片段里文字被覆盖
 		if (image.from < cursor || image.to > text.length) continue;
 		parts.push(escapeHtml(text.slice(cursor, image.from)));
 		parts.push(`<img src="${escapeHtml(srcOf(image.path))}">`);

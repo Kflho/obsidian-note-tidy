@@ -81,7 +81,7 @@ export function markProtectedLines(lines: string[]): boolean[] {
  *
  * 给"拿到的是笔记片段而不是整篇"的调用方用（例如状态栏数选区内图片张数）：
  * 片段开头那个 `---` 多半是分隔线，照 `markProtectedLines` 判会把
- * "以 `---` 开头、以 `---` 结尾"的选区整段当成 frontmatter 吃掉。
+ * "以 `---` 开头、以 `---` 结尾"的选区整段当成 frontmatter 覆盖。
  */
 export function markFenceLines(lines: string[]): boolean[] {
 	const trackFence = createFenceTracker();

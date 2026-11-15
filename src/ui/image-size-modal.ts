@@ -55,7 +55,7 @@ export class ImageSizeModal extends Modal {
 
 		new Setting(contentEl)
 			.setName('宽度')
-			.setDesc('单位为像素。宽度和高度都留空表示移除已有尺寸')
+			.setDesc('留空表示移除已有尺寸')
 			.addText(text => text
 				.setPlaceholder('100')
 				.setValue(this.width)
@@ -66,7 +66,7 @@ export class ImageSizeModal extends Modal {
 
 		new Setting(contentEl)
 			.setName('高度')
-			.setDesc('可留空，此时图片按宽度等比例缩放')
+			.setDesc('留空时按宽度等比例缩放')
 			.addText(text => text
 				.setPlaceholder('留空')
 				.setValue(this.height)
@@ -77,7 +77,7 @@ export class ImageSizeModal extends Modal {
 
 		new Setting(contentEl)
 			.setName('覆盖已有尺寸')
-			.setDesc('关闭后只给还没有尺寸的图片补上，已有尺寸的图片保持不动')
+			.setDesc('只修改还没有尺寸的图片')
 			.addToggle(toggle => toggle
 				.setValue(this.overwrite)
 				.onChange(value => {
@@ -159,7 +159,7 @@ export class ImageSizeModal extends Modal {
 
 		const error = validateImageSize(this.width, this.height);
 		if (error) {
-			el.createDiv({ cls: 'mod-warning', text: `⚠️ ${error}` });
+			el.createDiv({ cls: 'mod-warning', text: error });
 			this.setConfirmEnabled(false);
 			return;
 		}

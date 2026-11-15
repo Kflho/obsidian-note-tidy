@@ -1,4 +1,6 @@
 import type { ChatImageOrder, ChatIndent } from '../text/chat-log';
+import { DEFAULT_BANGUMI_OPTIONS } from '../text/bangumi';
+import type { BangumiOptions } from '../text/bangumi';
 import { DEFAULT_LEADING_INDENT_MODE } from '../text/indent';
 import type { LeadingIndentMode } from '../text/indent';
 import { DEFAULT_SPACING_OPTIONS, resolveCjkDigitMode, resolveSpacingMode } from '../text/spacing';
@@ -97,6 +99,27 @@ export interface ImageTransferSettings {
 	chatSortByTime: boolean;
 	/** 是否去掉消息正文里的 `@昵称` 提及 */
 	chatStripMentions: boolean;
+	// ---- Bangumi 讨论排版 ----
+	/** 用户名后是否显示楼层号（`#3` / `#3-1`） */
+	bangumiShowFloor: boolean;
+	/** 用户名后是否显示楼层时间（`2025-09-15 20:15`，不带秒） */
+	bangumiShowTime: boolean;
+	/** 是否保留用户签名（`(无可救药的百合豚)`） */
+	bangumiShowSignature: boolean;
+	/** 是否去掉贴贴计数与页面控件（`36 回复` / `收集` / `贴贴` / `顺序` / 块尾纯数字） */
+	bangumiStripReactions: boolean;
+	/** 是否去掉表情（纯文本 `(bgm38)` / 网页导入的 `img.smile`） */
+	bangumiStripSmiles: boolean;
+	/** 网页导入时用户名是否带主页链接（纯文本复制没有地址，只能加粗） */
+	bangumiLinkUsers: boolean;
+	/** 网页导入时的图片处理方式：`link` 保留远程链接 / `import` 静态图片收进仓库（GIF / 视频仍留链接） */
+	bangumiImageMode: string;
+	/** 网页导入时主题标题的处理：`none` 丢弃 / `heading` 插为二级标题 / `rename` 重命名当前文件 */
+	bangumiTitleMode: string;
+	/** 同一楼层内部段落之间是否留空行 */
+	bangumiBlankLineWithinPost: boolean;
+	/** 不同楼层之间是否留空行 */
+	bangumiBlankLineBetweenPosts: boolean;
 	/**
 	 * 粘贴后**自动排版**刚粘进来的那一段：像聊天记录（有"用户名 + 时间戳"头部）就整段修一遍
 	 * （收图 + 排版），不像就只把整块的缩进对齐到光标那一层（内容一个字不改）。
@@ -222,6 +245,21 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	chatSortByTime: true,
 	// 去掉 @ 提及会删正文，默认关：要用的自己打开（设置 → 聊天记录排版）
 	chatStripMentions: false,
+	// Bangumi 讨论页：楼层号与时间默认不显示（手写笔记的样式就是只有名字与正文），
+	// 贴贴与页面控件默认去掉（那是网页的装饰，不是讨论内容）
+	bangumiShowFloor: DEFAULT_BANGUMI_OPTIONS.showFloor,
+	bangumiShowTime: DEFAULT_BANGUMI_OPTIONS.showTime,
+	bangumiShowSignature: DEFAULT_BANGUMI_OPTIONS.showSignature,
+	bangumiStripReactions: DEFAULT_BANGUMI_OPTIONS.stripReactions,
+	bangumiStripSmiles: DEFAULT_BANGUMI_OPTIONS.stripSmiles,
+	bangumiLinkUsers: DEFAULT_BANGUMI_OPTIONS.linkUsers,
+	// 网页导入的图片默认保留链接；想收进仓库的在设置里选「收进仓库」
+	bangumiImageMode: 'link',
+	// 主题标题默认不处理；插入标题或改文件名都在设置里选
+	bangumiTitleMode: 'none',
+	// 楼层内部默认紧凑；不同楼层之间默认留一行
+	bangumiBlankLineWithinPost: false,
+	bangumiBlankLineBetweenPosts: true,
 	// 粘贴聊天记录就顺手修好：默认开启（判定从宽到窄分两档 —— 带日期的"用户名 + 时间戳"头部
 	// 一条就算，只有时分秒的那种要两条），不想让它自动改笔记的在设置里关掉即可，
 	// 手动那条命令 / 菜单项不受影响
@@ -288,6 +326,25 @@ export function getSpacingOptions(settings: ImageTransferSettings): SpacingOptio
 		halfToFullPunct: settings.spacingHalfToFullPunct !== false,
 		symbolPad: settings.spacingSymbolPad !== false,
 		chapterTitle: settings.spacingChapterTitle !== false,
+	};
+}
+
+/**
+ * 把插件设置转换成 Bangumi 讨论页排版选项。
+ *
+ * 三个"默认开"的项（签名 / 去贴贴 / 用户名链接）用 `!== false` 读：
+ * 老 data.json 里没有这些字段时按默认值走，用户不用先去设置里点一遍。
+ */
+export function getBangumiOptions(settings: ImageTransferSettings): BangumiOptions {
+	return {
+		showFloor: settings.bangumiShowFloor === true,
+		showTime: settings.bangumiShowTime === true,
+		showSignature: settings.bangumiShowSignature !== false,
+		stripReactions: settings.bangumiStripReactions !== false,
+		stripSmiles: settings.bangumiStripSmiles === true,
+		linkUsers: settings.bangumiLinkUsers !== false,
+		blankLineWithinPost: settings.bangumiBlankLineWithinPost === true,
+		blankLineBetweenPosts: settings.bangumiBlankLineBetweenPosts !== false,
 	};
 }
 

@@ -20,7 +20,7 @@ import { inlineCodeRanges, markFenceLines } from '../text/line-scan';
  *
  * 围栏代码块与行内代码里的链接**不算**：那里写的是代码，不是笔记里的图片。
  * 保护区判定走 `text/line-scan.ts`（只取围栏那一半 —— 拿到的是选区或整篇文本，
- * 开头的 `---` 多半是分隔线，按 frontmatter 判会把"以 --- 包起来"的内容整段吃掉）。
+ * 开头的 `---` 多半是分隔线，按 frontmatter 判会把"以 --- 包起来"的内容整段覆盖）。
  *
  * **表格里的图片也算**：`![[图.png\|100]]` 里那个反斜杠是转义（GFM 表格里 `|` 必须转义），
  * 取到目标后走 `unescapeTableTarget` 还原成 `图.png` —— 不还原就认不出是图片，
@@ -67,7 +67,7 @@ function collectFromLine(line: string, lineStart: number, out: ImageRef[]): void
 	// 双链嵌入 `![[目标]]` / `![[目标|别名]]`
 	const wiki = wikiEmbedRe();
 	while ((match = wiki.exec(line)) !== null) {
-		// 空匹配兜底：不让 lastIndex 停在同一处，否则死循环（同 inlineCodeRanges 的写法）
+		// 空匹配保底：不让 lastIndex 停在同一处，否则死循环（同 inlineCodeRanges 的写法）
 		if (wiki.lastIndex === match.index) wiki.lastIndex++;
 		if (isInRanges(match.index, codeRanges)) continue;
 		const target = unescapeTableTarget((match[1] ?? '').trim());

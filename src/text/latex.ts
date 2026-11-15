@@ -7,17 +7,17 @@
  * 核心原则一句话：**代码里写出来的空格 = 公式渲染出来的空格**。
  * - 渲染出来有缝的地方（二元运算、关系符两侧，逗号之后）→ 代码里留一个空格；
  * - 渲染出来贴在一起的地方（`\partial` 与它的参数、上下标、命令与花括号、
- *   `\begin{bmatrix}` 与第一个元素）→ 代码里也贴在一起，必要时补花括号保证命令名不被吃掉；
+ *   `\begin{bmatrix}` 与第一个元素）→ 代码里也贴在一起，必要时补花括号保证命令名不被覆盖；
  * - 数学模式里**看不见**的空格（源码里随手打的、换行留下的）→ 一律删掉。
  *
- * 六个规则落到实现上：
+ * 六个规则放到实现上：
  * 1. 运算 / 逻辑 / 排版符号（`= + - \le \to \in`、`&`、`\\`）左右各一个空格，某一侧没内容就不留。
  * 2. 一元正负号与修饰符（`\partial \delta \sin` …）和参数之间没有空格 —— 必要时写 `\delta{x}`。
  * 3. `$$` 与里面的内容之间不留空格。
  * 4. 续行缩进 = 首行缩进 + 1 个 tab；`\begin{}` / `\end{}` 不额外缩进。
- * 5. 只在 `\\` 处换行：`\\` 就换行（后面的 `\end{bmatrix}}` 也落到续行上），
+ * 5. 只在 `\\` 处换行：`\\` 就换行（后面的 `\end{bmatrix}}` 也放到续行上），
  *    没有 `\\` 的换行全部拼回一行。
- * 6. 渲染里连在一起的内容，代码里也连在一起；直接把命令名吃掉会出错时给后一个字符加花括号。
+ * 6. 渲染里连在一起的内容，代码里也连在一起；直接把命令名覆盖会出错时给后一个字符加花括号。
  *    间距命令与后面的字母粘连（`\quadA`，LaTeX 会当成未定义命令报错）按这条修：
  *    前面已有逗号等分隔就删掉这个多余的间距，否则写成 `\quad{A}`。
  *
@@ -58,7 +58,7 @@ type TokenKind =
 interface Token {
 	kind: TokenKind;
 	text: string;
-	/** 反斜杠命令的名字（不含 `\`）；只有字母命令才可能在拼接时吃掉后面的字符 */
+	/** 反斜杠命令的名字（不含 `\`）；只有字母命令才可能在拼接时覆盖后面的字符 */
 	command?: string;
 	/** 由"间距命令 + 字母"粘连拆出来的（`\quadA` → `\quad` + `A`），见 splitGluedSpacing */
 	glued?: boolean;
@@ -425,7 +425,7 @@ function separator(previous: Item | null, next: Item): string {
 	return '';
 }
 
-/** 把命令与后面的字符拼在一起时，会不会把命令名吃掉（`\delta x` → `\deltax` 是非法的） */
+/** 把命令与后面的字符拼在一起时，会不会把命令名覆盖（`\delta x` → `\deltax` 是非法的） */
 function needsBrace(previous: Item, next: Item): boolean {
 	if (!previous.command || !/^[a-zA-Z]+$/.test(previous.command)) return false;
 	if (previous.kind !== 'word') return false;
@@ -475,7 +475,7 @@ function renderTokens(tokens: Token[]): string[] {
 
 		const gap = separator(previous, item);
 		let text = item.text;
-		// 拼接会把命令名吃掉时补花括号：`\delta x` → `\delta{x}`
+		// 拼接会把命令名覆盖时补花括号：`\delta x` → `\delta{x}`
 		if (gap === '' && previous && needsBrace(previous, item)) text = `{${text}}`;
 
 		current += gap + text;
@@ -546,7 +546,7 @@ function formatDisplayBlocks(content: string): string {
 
 	// 配对：从每个 `$$` 往后找第一个"配起来像公式"的 `$$`。
 	// 落单的 `$$`（例如正文里手滑打的一个）因此不会把后面的真公式连累掉，
-	// 也不会把一大段正文当成公式吃掉。
+	// 也不会把一大段正文当成公式覆盖。
 	for (let i = 0; i + 1 < marks.length; i++) {
 		const openMark = marks[i];
 		if (!openMark) continue;
@@ -559,7 +559,7 @@ function formatDisplayBlocks(content: string): string {
 			if (closeAt < openAt) continue;
 
 			const body = content.substring(openAt + 2, closeAt);
-			// 含 `%` 注释的公式：注释会把后面的内容吃掉，拼行会改变语义
+			// 含 `%` 注释的公式：注释会把后面的内容覆盖，拼行会改变语义
 			if (body.includes('%')) continue;
 			if (!looksLikeFormulaRegion(body, closeMark.line - openMark.line + 1)) continue;
 

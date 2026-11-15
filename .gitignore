@@ -1,5 +1,5 @@
 # vscode
-.vscode 
+.vscode
 
 # Intellij
 *.iml
@@ -21,7 +21,7 @@ main.js
 dist/
 build/
 
-# Test build output
+# Test build output（旧位置；现在在 data/test-build/）
 test/.build/
 
 # obsidian
@@ -29,6 +29,29 @@ data.json
 
 # 本地 AI 工具配置
 .claude/
+
+# Build output / 交付包（可重新生成；bin/exports/README.md 保留）
+main.js
+bin/exports/main.js
+bin/exports/manifest.json
+bin/exports/styles.css
+
+# 中间产物（测试打包、日志、临时结果）；README 说明用途，保留
+data/*
+!data/README.md
+
+# 本机草稿 / 临时产物（kf-personal-development：dev/ 不进 git）
+dev/
+temp/
+logs/
+*.log
+
+# 本机配置 / 密钥
+local.json
+local.*.json
+deploy.local.json
+.env
+.env.*
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store

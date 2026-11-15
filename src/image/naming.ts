@@ -95,7 +95,7 @@ export function buildVaultBasenameMap(app: App): Map<string, string> {
  * 转格式之后（`img.png` → `img.webp`，见 `image/convert.ts`）也要用同一套规则重算一次。
  */
 export function vaultPathFor(folder: string, fileName: string): string {
-	// 先自己收掉首尾斜杠，别指望 normalizePath 兜底：根目录（`/`）与"没有附件夹"（`''`）
+	// 先自己收掉首尾斜杠，别指望 normalizePath 保底：根目录（`/`）与"没有附件夹"（`''`）
 	// 必须拼出同一种形态，否则"这个路径有没有被占用"的检查会两处对不上
 	const clean = folder.replace(/^\/+|\/+$/g, '');
 	return normalizePath(clean === '' ? fileName : `${clean}/${fileName}`);

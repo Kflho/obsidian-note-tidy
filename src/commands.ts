@@ -10,12 +10,12 @@ import { editorImagePicks, TIDY_IMAGES_LABEL } from './ui/image-menu';
  * （test/commands.test.ts 会逐条比对菜单与命令表，漏注册就失败）。
  *
  * 「当前笔记」类命令在没打开笔记时立刻提示；「整个仓库」类命令直接铺开跑。
- * 唯一的例外是「复制图片」：它挂在**编辑器 / 图片的右键菜单**上（不是文件菜单），
+ * 唯一的例外是「复制图片」：它放在**编辑器 / 图片的右键菜单**上（不是文件菜单），
  * 所以审计表里单独列在 EDITOR_OPERATIONS。
  */
 
 /** 命令里反复用到的「拿当前文件」检查 */
-const NO_FILE_MESSAGE = '⚠️ 无法获取当前文件，请确保您打开了一篇笔记！';
+const NO_FILE_MESSAGE = '请先打开一篇笔记。';
 
 export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 	const app = plugin.app;
@@ -81,7 +81,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'force-rename-all-images-entire-vault',
-		name: '强制重命名整个仓库中的所有图片（包括已符合格式的图片）',
+		name: '强制重命名仓库图片',
 		callback: async () => {
 			await tasks.renameEntireVaultToPreset(true);
 		}
@@ -194,7 +194,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 	// ---------------------------------------------------------- 文本排版
 	plugin.addCommand({
 		id: 'format-chat-log-current-note',
-		name: '修复当前笔记的排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）',
+		name: '修复当前笔记的排版',
 		editorCallback: async (_editor: Editor, ctx: MarkdownView | MarkdownFileInfo) => {
 			const file = currentFile(ctx);
 			if (!file) {
@@ -207,7 +207,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'format-chat-log-entire-vault',
-		name: '修复整个仓库的排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）',
+		name: '修复整个仓库的排版',
 		callback: async () => {
 			await tasks.typeset(app.vault.getMarkdownFiles(), '整个仓库');
 		}
@@ -215,7 +215,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'typeset-selection',
-		name: '排版选中的内容（转换选区里的外部图片 + 修复排版）',
+		name: '排版选中的内容',
 		// 不用 editorCallback：那个在阅读模式下会让命令从面板里消失；这里本来也要求有选区
 		checkCallback: (checking: boolean) => {
 			const view = app.workspace.getActiveViewOfType(MarkdownView);
@@ -231,7 +231,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'quick-fix-chat-log-current-note',
-		name: '快速修复聊天记录（转换外部图片 + 修复排版）',
+		name: '快速修复聊天记录',
 		// 不用 editorCallback：那个在阅读模式下会让命令从面板里消失，而聊天记录多半是在阅读模式里看的
 		checkCallback: (checking: boolean) => {
 			const view = app.workspace.getActiveViewOfType(MarkdownView);
@@ -239,6 +239,20 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 			if (!file) return false;
 			if (!checking) {
 				void tasks.quickFixChatLog(file);
+			}
+			return true;
+		}
+	});
+
+	plugin.addCommand({
+		id: 'import-bangumi-topic',
+		name: '从 bgm.tv 网页导入讨论到当前笔记',
+		checkCallback: (checking: boolean) => {
+			const view = app.workspace.getActiveViewOfType(MarkdownView);
+			const file = view?.file ?? null;
+			if (!file) return false;
+			if (!checking) {
+				void tasks.importBangumiTopic();
 			}
 			return true;
 		}

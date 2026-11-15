@@ -1,4 +1,4 @@
-import { Notice, Plugin } from 'obsidian';
+import { Plugin } from 'obsidian';
 import { BatchRunner } from './batch';
 import { registerCommands } from './commands';
 import { DEFAULT_SETTINGS, ImageTransferSettingTab } from './settings';
@@ -52,7 +52,7 @@ export default class ImageTransferPlugin extends Plugin {
 
 		registerCommands(this, this.tasks);
 		registerFileMenu(this, this.tasks, () => this.settings);
-		// 「复制图片」挂在编辑器 / 图片的右键菜单上（不是文件菜单）
+		// 「复制图片」放在编辑器 / 图片的右键菜单上（不是文件菜单）
 		registerImageMenu(this, this.tasks, () => this.settings);
 		// 可选的 Ctrl+C 接管（设置里开启后才生效）
 		registerCopyShortcut(this, this.tasks, () => this.settings);
@@ -68,8 +68,6 @@ export default class ImageTransferPlugin extends Plugin {
 		this.refreshRibbonIcon();
 
 		this.addSettingTab(new ImageTransferSettingTab(this.app, this));
-
-		new Notice(`Note Tidy v${this.manifest.version} 已加载`);
 	}
 
 	async loadSettings() {

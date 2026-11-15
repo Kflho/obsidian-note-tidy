@@ -230,7 +230,7 @@ export function removeHiddenItems(
  * - `showAtMouseEvent` / `showAtPosition`：确认"这份菜单真的显示了"，从菜单 DOM 里补读一遍项目、
  *   把隐藏名单里的项摘掉，并把我们自己的项挪到最前面。
  *
- * @param options.ownTitles 不在 `addItem` 那条路上、但我们自己的项（兜底用）
+ * @param options.ownTitles 不在 `addItem` 那条路上、但我们自己的项（保底用）
  */
 export function observeMenuInstance(
 	menu: Menu,
@@ -339,13 +339,13 @@ export function installMenuInjector(menuClass: typeof Menu, options: MenuInjecto
 	 * 认错了就会把二级菜单的项当成"笔记菜单里有什么"（2026-09 的 bug）。
 	 */
 	let buffers = new Map<MarkedMenu, string[]>();
-	/** 这一轮最后建的那份菜单（万一某条路径不经过 show*，兜底就认它 —— 主菜单通常最后建） */
+	/** 这一轮最后建的那份菜单（万一某条路径不经过 show*，保底就认它 —— 主菜单通常最后建） */
 	let lastMenu: MarkedMenu | null = null;
 	/** 真要显示的那份菜单里有哪些项（管理面板看的就是它） */
 	let detected: string[] = [];
 	/** 这次上膛已经把项插进去了吗 */
 	let surfaced = false;
-	/** 兜底只排一次（见 addItem 末尾） */
+	/** 保底只排一次（见 addItem 末尾） */
 	let fallbackScheduled = false;
 	/**
 	 * 最近一次上膛的作用域（下膛后仍留着）。
@@ -423,7 +423,7 @@ export function installMenuInjector(menuClass: typeof Menu, options: MenuInjecto
 
 		const added = originalAddItem.call(this, builder);
 
-		// 兜底：万一某条路径没经过 show*，菜单建完之后的微任务里认最后那份菜单
+		// 保底：万一某条路径没经过 show*，菜单建完之后的微任务里认最后那份菜单
 		if (!fallbackScheduled) {
 			fallbackScheduled = true;
 			queueMicrotask(() => {

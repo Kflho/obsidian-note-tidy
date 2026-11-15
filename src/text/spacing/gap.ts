@@ -119,7 +119,7 @@ function isUnknownPiece(piece: Piece): boolean {
  * 取一个符号对自己某一侧的要求。
  *
  * `scope: 'latin'` 的符号已经由 `markLatinContextPieces` 定过语境（非西文语境的一律改成贴紧），
- * 所以这里的判断只是兜底。
+ * 所以这里的判断只是保底。
  *
  * - `space`（要一格）：邻居在规则的作用范围里就留一格（`word, word`、`A & B`、
  *   `1.矩阵指数` → `1. 矩阵指数`）；邻居是中文或认得的符号却不在范围内 → 贴紧
@@ -179,13 +179,13 @@ export function decideGap(
 	// 书名号 / 引号内部：专有名词与引文原样保留，《a子计划》不能被拆成《a 子计划》
 	if (previous.title && next.title) return null;
 
-	// 符号自己的规则优先：`如, ：` 的那一格不能被子句的"全角标点前不留空格"吃掉
+	// 符号自己的规则优先：`如, ：` 的那一格不能被子句的"全角标点前不留空格"覆盖
 	if (options.symbolPad) {
 		const pad = symbolGap(previous, next);
 		if (pad !== null) return pad;
 	}
 
-	// 括号：包裹符号自己不添空格（通用符号 3 的包裹符号子条目「内外均没有空格」）—— 内侧的填充删掉，
+	// 括号：包裹符号自己不添空格（标点符号·概论 3 的包裹符号子条目「内外均没有空格」）—— 内侧的填充删掉，
 	// 外侧也不主动加，就是 `f(x)` 那种函数写法（`中文 (说明)` → `中文(说明)`）。
 	// 英文句子里括号两侧是**英文自带的词距**，不算包裹符号的空格，保留（与全角标点同一条规矩）
 	if (options.bracketInner) {
@@ -197,6 +197,12 @@ export function decideGap(
 	// 全角标点：两侧不留空格（引号两侧、书名号内侧除外）
 	// 英文句子里的全角标点（`see 《book》 and`）两侧是英文词距，不删
 	if (options.fullPunct && previous.en !== true && next.en !== true) {
+		// 符号交互 3：符号属于它所在的那块文字的格式。中文块里的右包裹符号后面接西文
+		// （`阿童木（1963） ai 字幕`）是中文 ↔ 西文的语言边界，那一格不能按"标点旁不空"删掉。
+		if (previous.kind === 'fpunct' && FP_WRAPPER_CLOSE.has(previous.text)
+			&& (isForeign(next) || next.kind === 'math')) {
+			return ' ';
+		}
 		// 包裹符号内侧不留空格：包裹符号本身不算内容，`（ 内容 ）` → `（内容）`、
 		// `《 书名 》` → `《书名》`、`“ 引文 ”` → `“引文”`（里面的专有名词空格照旧保留）
 		if (previous.kind === 'fpunct' && FP_WRAPPER_OPEN.has(previous.text)) return '';

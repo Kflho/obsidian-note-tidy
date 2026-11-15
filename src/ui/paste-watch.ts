@@ -13,7 +13,7 @@ import { PasteTakeoverHint, imageFilesFromClipboard, pastedImageName } from './p
  * （`06集` 这类小标题、自己插的截图）与消息正文之间没有空行时，整篇排版只能把它们算作正文
  * —— 猜过两次都猜错（见 `structure.chat-log` 的登记说明）。
  *
- * 而"刚粘进来的那一段"是**确定的**：粘贴开始时记下光标位置，粘贴落进编辑器后，
+ * 而"刚粘进来的那一段"是**确定的**：粘贴开始时记下光标位置，粘贴放进编辑器后，
  * 从那个位置到光标之间的就是这次粘贴进文档的全部内容。于是不需要猜，也不会碰到
  * 你自己写的东西。
  *
@@ -21,14 +21,14 @@ import { PasteTakeoverHint, imageFilesFromClipboard, pastedImageName } from './p
  *
  * 1. `editor-paste`：只登记（那时内容还没进文档 —— Obsidian 的剪贴板管理器发这个事件，
  *    真正插入内容的是 CodeMirror 的处理器，排在我们后面）。不阻止这次粘贴。
- * 2. `editor-change`：粘贴落进编辑器了。把这一段（`[粘贴起点, 光标处)`）整个交给
+ * 2. `editor-change`：粘贴放进编辑器了。把这一段（`[粘贴起点, 光标处)`）整个交给
  *    `ImageTasks.fixPastedRange`，由它按**各自的开关**做三件事（见 `pasteFixPlanFrom`）：
  *    **收图**（这段里的 `file:///D:\…` 外部图片复制进仓库、换成内部链接）、
  *    **排版**（像聊天记录就整段排；不像就一个字的正文都不改，只把整块缩进对齐到光标那一层 ——
  *    编辑器粘贴只把第一行放在光标那一列、其余行从第 0 列开始）、
  *    **套尺寸**（`|宽x高`）。三件事合并在**同一次写回**里，**不写盘**
  *    （走编辑器自己的保存路径），撤销一次一起回退，笔记其余部分一个字符都不动。
- * 3. 兜底定时器（`PASTE_FALLBACK_MS`）：编辑器迟迟没有变化（这次粘贴被别的插件吞了、
+ * 3. 保底定时器（`PASTE_FALLBACK_MS`）：编辑器迟迟没有变化（这次粘贴被别的插件吞了、
  *    视图不是 Markdown 视图……）就把这笔等待丢掉 —— 宁可什么都不做，也绝不去动整篇。
  *
  * ## 还有一笔：粘贴进来的图片套尺寸（`autoSetImageSizeOnPaste`）
@@ -42,7 +42,7 @@ import { PasteTakeoverHint, imageFilesFromClipboard, pastedImageName } from './p
  *
  * - **别的插件接管了也要跟着**：Image Converter 会 `preventDefault` 自己处理图片文件，
  *   但它同样把图片存进仓库、把链接插进正文 —— 那正是要套尺寸的图片；
- * - **要盯着看一会儿**（`PasteSizeWatcher`）：一次粘贴可能分几次落进编辑器（粘贴多张图时
+ * - **要盯着看一会儿**（`PasteSizeWatcher`）：一次粘贴可能分几次放进编辑器（粘贴多张图时
  *   逐张存盘 / 转码，每存好一张才插一条链接），所以粘贴后几秒内每变一次就再看一眼。
  */
 
@@ -66,7 +66,7 @@ export interface PasteTarget {
 export interface PasteFixSchedulerOptions {
 	/** 时间到了 / 编辑器变了：把这一笔交给调用方（由它读回那段文字并收拾） */
 	take: (target: PasteTarget) => void;
-	/** 兜底时长，默认 `PASTE_FALLBACK_MS` */
+	/** 保底时长，默认 `PASTE_FALLBACK_MS` */
 	fallbackMs?: number;
 	/** 定时器（测试里换成手动控制） */
 	setTimer?: (handler: () => void, ms: number) => number;
@@ -77,7 +77,7 @@ export interface PasteFixSchedulerOptions {
  * "刚粘过、等着修"的等待表（按笔记路径记，一篇只留最后一笔）。
  *
  * 一笔等待只有两种下场：编辑器真的变了（`onEditorChange` → 取出交给调用方），
- * 或者超时（兜底定时器 → 直接丢掉）。**摘掉之后才回调** —— 我们自己的
+ * 或者超时（保底定时器 → 直接丢掉）。**摘掉之后才回调** —— 我们自己的
  * `replaceRange` 也会触发 `editor-change`，不摘就会自己触发自己。
  */
 export class PasteFixScheduler {
@@ -128,7 +128,7 @@ export class PasteFixScheduler {
 		}
 	}
 
-	/** 撤销一笔等待（连同它的兜底定时器） */
+	/** 撤销一笔等待（连同它的保底定时器） */
 	private forget(path: string): void {
 		const entry = this.pending.get(path);
 		if (!entry) return;
@@ -187,7 +187,7 @@ export interface PasteSizeWatcherOptions {
 /**
  * 「粘贴进来的图片要套尺寸」的观望表（按笔记路径记，一篇只留最后一笔）。
  *
- * 为什么不像文本修复那样"一笔只做一次"：**一次粘贴可能分好几次落进编辑器** ——
+ * 为什么不像文本修复那样"一笔只做一次"：**一次粘贴可能分好几次放进编辑器** ——
  * 粘贴多张图时 Obsidian（或 Image Converter）逐张存盘 / 转码，每存好一张才插一条链接。
  * 第一笔 `editor-change` 只看得到第一张，一笔即摘的话后面几张就漏了。
  *
@@ -286,7 +286,7 @@ export function registerPasteAutoFix(
 	actions: TaskActions,
 	getSettings: () => ImageTransferSettings
 ): void {
-	// 文本那一笔：粘贴落进编辑器后把"刚粘的那一段"整个交给任务层
+	// 文本那一笔：粘贴放进编辑器后把"刚粘的那一段"整个交给任务层
 	// （收图 / 排版 / 套尺寸三件事各自认开关，见 `pasteFixPlanFrom`；三件事全关时任务自己立刻返回）
 	const pendingTextFix: { target: PasteTarget | null } = { target: null };
 	const scheduler = new PasteFixScheduler({ take: (target) => { pendingTextFix.target = target; } });
@@ -343,7 +343,7 @@ export function registerPasteAutoFix(
 
 	plugin.registerEvent(plugin.app.workspace.on('editor-paste', handlePaste));
 
-	// ② 粘贴落进编辑器：正是等着的那一篇就把刚粘的那段交出去
+	// ② 粘贴放进编辑器：正是等着的那一篇就把刚粘的那段交出去
 	const handleEditorChange = (editor: Editor, info: MarkdownView | MarkdownFileInfo): void => {
 		const file = info.file ?? null;
 		if (!file) return;

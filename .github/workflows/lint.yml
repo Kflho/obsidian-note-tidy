@@ -22,8 +22,8 @@ jobs:
               with:
                   node-version: ${{ matrix.node-version }}
                   cache: "npm"
-            - run: npm ci
-            - run: npm run build --if-present
-            - run: npm test
-            - run: npm run lint
+            - run: npm ci --prefix src
+            - run: npm run build --prefix src
+            - run: npm run lint --prefix src
+            # 测试在私有测试仓 kf-development-project/obsidian-note-tidy-test，不在本仓 CI
 

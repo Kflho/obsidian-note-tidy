@@ -315,7 +315,7 @@ export const encodeWithCanvas: EncodeImage = async (request: EncodeRequest) => {
  * "先转换、再落盘"是刻意的：先按原格式写进仓库再转换，中间那一刻会多出一个谁也指不到的
  * png（同步插件可能已经把它传走了），转完还得把它删掉 —— 走内存既没有中转文件，也不需要删除步骤。
  *
- * @param input 原文件名（含扩展名，用来判格式）、原始字节，以及要落到哪个附件夹
+ * @param input 原文件名（含扩展名，用来判格式）、原始字节，以及要放到哪个附件夹
  * @param plan `null` = 不转换（调用方没开这一步）
  * @param encode 编码器（默认 canvas；测试里换成替身）
  * @param pngquant 目标格式是 `PNGQUANT` 时用的执行器（默认真跑 pngquant；测试里换成替身）

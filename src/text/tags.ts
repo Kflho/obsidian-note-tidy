@@ -130,7 +130,7 @@ function findTags(text: string): TagMatch[] {
  *
  * 标签连同它前面的一处空白一起摘掉，剩下的空白收成一个 ——
  * 这样 `"今天 #数学 很好"` 摘完是 `"今天 很好"` 而不是 `"今天  很好"`。
- * 标签后面紧跟标点时（`"正文 #标签。"`），连标签前面那处空白一起吃掉，
+ * 标签后面紧跟标点时（`"正文 #标签。"`），连标签前面那处空白一起覆盖，
  * 标点直接接回正文：`"正文。"`，而不是留下 `"正文 。"` 这种孤零零的空格。
  */
 function stripTags(body: string): { text: string; tags: string[] } {
@@ -239,7 +239,7 @@ function parseLine(line: string): ParsedLine {
 	return { prefix: quoted.prefix, body: quoted.body, marker: 'none' };
 }
 
-/** 取某行的解析结果（noUncheckedIndexedAccess 下的兜底） */
+/** 取某行的解析结果（noUncheckedIndexedAccess 下的保底） */
 function parsedAt(parsed: ParsedLine[], index: number): ParsedLine {
 	return parsed[index] ?? EMPTY_LINE;
 }

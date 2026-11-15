@@ -54,7 +54,7 @@ export function basePathOf(app: App): string | null {
 /**
  * 把 Obsidian 的资源 URL（`app://local/D:/仓库/附件/图.png?1699`）还原成仓库内路径。
  *
- * 阅读视图里的 `<img>` 只有这个 src，没有链接文本，`internal-embed` 又拿不到时靠它兜底。
+ * 阅读视图里的 `<img>` 只有这个 src，没有链接文本，`internal-embed` 又拿不到时靠它保底。
  * Obsidian 的写法是"磁盘绝对路径"接在协议头后面（还常带个时间戳查询串），
  * 所以拿适配器的 basePath 一比就出来了 —— 比不出来（不在仓库里、外链图）返回 null。
  */

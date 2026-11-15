@@ -8,7 +8,7 @@ import { Notice } from 'obsidian';
  *
  * 三层，各管一段：
  * 1. body 上加 `suppress-notices`，styles.css 里按选择器隐藏 —— 零延迟，无闪烁
- * 2. MutationObserver 兜底 —— 给 CSS 漏掉的弹窗元素补一个 `note-tidy-suppressed` 类
+ * 2. MutationObserver 保底 —— 给 CSS 漏掉的弹窗元素补一个 `note-tidy-suppressed` 类
  * 3. **收尾时把"还在页面上的旧通知"逐条打上同一个类，再立刻撤掉 body 上的类** ——
  *    结果通知因此可以**马上**弹出来（旧通知里没到期的那几条继续藏着，到期自己消失）
  *
@@ -20,7 +20,7 @@ import { Notice } from 'obsidian';
  * 通知容器，连带其它插件（如 Image Converter）的弹窗一起消失（见 v1.1.4）。
  */
 
-/** 兜底隐藏用的类名，见 styles.css */
+/** 保底隐藏用的类名，见 styles.css */
 const SUPPRESSED_CLASS = 'note-tidy-suppressed';
 
 /**
@@ -92,7 +92,7 @@ export class NoticeSuppressor {
 	}
 
 	/**
-	 * 撤掉屏蔽：此刻还挂在页面上的旧通知逐条打上隐藏类，剩下的立刻放开。
+	 * 撤掉屏蔽：此刻还放在页面上的旧通知逐条打上隐藏类，剩下的立刻放开。
 	 *
 	 * 两步在同一个任务里跑完，中间没有重绘 —— 旧通知不会闪一下再消失。
 	 */

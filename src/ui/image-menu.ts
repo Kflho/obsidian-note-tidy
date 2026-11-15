@@ -77,12 +77,12 @@ export const TIDY_IMAGES_LABEL = '整理图片（转换格式 + 合并重复副�
  */
 export const OWN_ITEMS: Record<OwnItemKey, { title: string; icon: string; desc: string }> = {
 	copy: { title: '复制图片（Note Tidy）', icon: 'copy', desc: '复制图片文件，可粘贴到文件夹或聊天窗口' },
-	quickSize: { title: QUICK_SIZE_MENU_TITLE, icon: 'image', desc: '使用默认尺寸直接修改当前笔记的图片大小，不弹出设置窗口' },
-	quickFix: { title: QUICK_FIX_MENU_TITLE, icon: 'zap', desc: '转换本文件内引用的外部路径图片，并把整篇排版修一遍（空格 / 缩进 / 聊天记录 / 标签 / 公式）' },
-	typesetSelection: { title: TYPESET_SELECTION_MENU_TITLE, icon: 'wand-2', desc: '只排版选中的那段内容（含选区里的外部图片转换），笔记其余部分一个字符都不动' },
-	manage: { title: MANAGE_MENU_TITLE, icon: 'settings-2', desc: '打开本面板；关闭后可从命令面板打开' },
-	imageSubmenu: { title: IMAGE_SUBMENU_TITLE, icon: 'image', desc: '转换外部图片、重命名、整理位置、整理图片（转换格式 + 合并重复副本 + 清理没人引用的附件）、设置大小' },
-	textSubmenu: { title: TEXT_SUBMENU_TITLE, icon: 'message-square', desc: '修复笔记排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）' },
+	quickSize: { title: QUICK_SIZE_MENU_TITLE, icon: 'image', desc: '用默认尺寸修改图片大小' },
+	quickFix: { title: QUICK_FIX_MENU_TITLE, icon: 'zap', desc: '转换外部图片并修复整篇排版' },
+	typesetSelection: { title: TYPESET_SELECTION_MENU_TITLE, icon: 'wand-2', desc: '只排版选中内容，并转换选区里的外部图片' },
+	manage: { title: MANAGE_MENU_TITLE, icon: 'settings-2', desc: '打开右键菜单管理面板' },
+	imageSubmenu: { title: IMAGE_SUBMENU_TITLE, icon: 'image', desc: '转换图片、重命名、整理位置、整理图片、设置大小' },
+	textSubmenu: { title: TEXT_SUBMENU_TITLE, icon: 'message-square', desc: '修复笔记排版' },
 };
 
 /**
@@ -244,7 +244,7 @@ function armMenu(doc: Document, context: ArmedMenu): void {
 	const disarm = (): void => {
 		if (armed === context) armed = null;
 	};
-	// contextmenu 派发完（菜单就是在这次派发里建的）就下膛；没等到 contextmenu（按 Esc、拖动）时兜底超时
+	// contextmenu 派发完（菜单就是在这次派发里建的）就下膛；没等到 contextmenu（按 Esc、拖动）时保底超时
 	doc.addEventListener('contextmenu', () => { window.setTimeout(disarm, 0); }, { capture: true, once: true });
 	window.setTimeout(disarm, 1500);
 }

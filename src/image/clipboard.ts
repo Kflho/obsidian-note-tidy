@@ -41,7 +41,7 @@ import * as path from 'path';
  *
  * 不过 **Windows 一条命令行最多 32767 个字符**（CreateProcess 的限制），而 `-EncodedCommand`
  * 里那串 base64 是脚本的两倍多（UTF-16LE 再 base64）。选区里文字一多（HTML 里带着整段正文），
- * 就会顶到这个上限 —— 那时改成把脚本**落到临时文件**、用 `-File` 执行（见 `COMMAND_LINE_LIMIT`）。
+ * 就会达到这个上限 —— 那时改成把脚本**放到临时文件**、用 `-File` 执行（见 `COMMAND_LINE_LIMIT`）。
  */
 
 /** 要执行的命令（纯数据，方便单测；真正跑起来在 copyImageFiles） */
@@ -151,7 +151,7 @@ function buildFileScript(paths: string[], bitmapPath: string | null): string {
  * **为什么不接着用 DataObject**（2026-09 本机实测，两条都是坑）：
  * 1. `SetData('HTML Format', $false, [byte[]]…)` 写进去的不是字节，而是 `ToString()` 出来的
  *    字符串 `"System.Byte[]"` —— 中文更是直接丢；.NET 把"HTML Format"当文本格式，会自己转换；
- * 2. 格式的**顺序不听我们的**：明明先 `SetData` 的 HTML，落到剪贴板上却是
+ * 2. 格式的**顺序不听我们的**：明明先 `SetData` 的 HTML，放到剪贴板上却是
  *    `CF_HDROP → FileNameW → HTML Format → CF_UNICODETEXT`。而社区里的实测结论是
  *    "顺序会决定 QQ / 微信 挑哪一份解析"（贴出来是问号、不出图，多半就出在顺序与编码上）。
  *
@@ -235,7 +235,7 @@ export function buildAppleScript(paths: string[]): string {
  * （`set the clipboard to` 一次只能放一样），那边仍旧只放文件。
  *
  * @param tempScriptPath 装不下时脚本要落的临时文件路径（调用方给，写与删也归它）；
- *                       传 null 表示只能走命令行（比如编辑器里选了一大段文字 + 图片时会顶到上限）
+ *                       传 null 表示只能走命令行（比如编辑器里选了一大段文字 + 图片时会达到上限）
  * @returns 不认识的平台 / 没有文件时返回 null，调用方据此给提示
  */
 export function clipboardCommandFor(

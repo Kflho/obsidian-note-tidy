@@ -23,7 +23,7 @@ export class ConfirmRenameModal extends Modal {
 		this.texts = {
 			title: '确认批量重命名',
 			message: `发现 ${imageCount} 张图片将被重命名为预设格式，确认执行？`,
-			warning: '⚠️ 此操作会调用 Obsidian 原生接口，自动更新全库所有引用链接，不会产生断链。',
+			warning: '此操作会更新全库引用链接。',
 			confirmLabel: '确认重命名',
 			...texts,
 		};

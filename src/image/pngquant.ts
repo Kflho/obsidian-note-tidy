@@ -9,7 +9,7 @@ import { existsSync } from 'fs';
  * 设置里填了就用用户那份（完整路径，或者命令名）；**留空＝按系统里装的那份找**：
  * 先在 `PATH` 里找 `pngquant`（Windows 上 Node 会自己补 `.exe`），再退到几个常见安装位置
  * （见 `pngquantCandidates`）—— 后者是给"刚装完、Obsidian 还没重启、进程的 PATH 还是旧的"
- * 这种情况兜底的。都找不到时这一档整步不做（图片保持原样），命令那边会提示去装或去填路径。
+ * 这种情况保底的。都找不到时这一档整步不做（图片保持原样），命令那边会提示去装或去填路径。
  *
  * ## 为什么是自己装
  *
@@ -228,7 +228,7 @@ function warnOnce(executable: string, message: string, err: unknown): void {
 /**
  * 跑一次 `<候选> --version`：能起来、退出码 0、stdout 有内容才算找到。
  *
- * 超时兜底 5 秒（进程卡住时别把整批拖死）；计时器 `unref()`，不挡着进程退出（测试里尤其重要）。
+ * 超时保底 5 秒（进程卡住时别把整批拖死）；计时器 `unref()`，不挡着进程退出（测试里尤其重要）。
  */
 async function probeOne(executable: string): Promise<PngquantProbeResult | null> {
 	return await new Promise<PngquantProbeResult | null>((resolve) => {

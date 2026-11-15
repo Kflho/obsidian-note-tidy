@@ -28,7 +28,7 @@ export function selectionCountExtension(onSelectionText: (text: string) => void)
 
 	class SelectionObserver {
 		constructor(view: EditorView) {
-			// 光标刚落到这篇笔记 / 切回来时，先把当前选区报一次
+			// 光标刚放到这篇笔记 / 切回来时，先把当前选区报一次
 			report(view);
 		}
 

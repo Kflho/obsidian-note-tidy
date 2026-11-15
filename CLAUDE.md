@@ -16,39 +16,70 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm install              # Install dependencies
-npm run dev              # Watch mode (esbuild --watch)；每次重建后自动同步到插件目录
-npm run build            # Type-check then bundle for production (tsc --noEmit + esbuild minified)；同样自动同步
-npm run deploy           # 只把 main.js / manifest.json / styles.css 复制到插件目录（不重新打包）
-npm test                 # Run test/*.test.ts through test/run-tests.mjs (no framework needed)
-npm run lint             # ESLint
-npm run version          # Bump manifest.json version + update versions.json (reads from npm_package_version env var)
+npm --prefix src install   # Install dependencies（npm 工程根在 src/）
+npm --prefix src run dev   # Watch mode (esbuild --watch)；每次重建后自动同步到插件目录
+npm --prefix src run build # Type-check（tsc -p tsconfig.json）then bundle for production；同样自动同步
+npm --prefix src run deploy # 只把 main.js / manifest.json / styles.css 复制到插件目录（不重新打包）
+npm --prefix src run lint  # ESLint
+npm --prefix src run version # Bump manifest.json version + update versions.json
 ```
 
-The esbuild config (`esbuild.config.mjs`) bundles `src/main.ts` into `main.js` (CJS, ES2018 target). Obsidian, electron, and CodeMirror packages are marked external.
+**测试不在本仓**：整套测试在 `kf-development-project/obsidian-note-tidy-test`（私有测试仓，`src/` / `bin/` / `node_modules/` 用 junction 指回本仓）；到那边跑 `npm test`。本仓的 `npm test` 已移除。
+
+```bash
+cd <test-repo>
+npm test
+```
+
+The esbuild config (`src/scripts/esbuild.config.mjs`) bundles `src/main.ts` into `bin/exports/main.js` (CJS, ES2018 target); `npm run build` then copies `manifest.json` from the repo root and `src/styles.css` into `bin/exports/` so the folder is a complete install bundle. Obsidian, electron, and CodeMirror packages are marked external.
+
+## 目录职责（kf-personal-development 规范）
+
+本项目按 `kf-personal-development/references/docs.md` 的约定整理过（2026-11）。**根目录只剩 Obsidian 必需的 `manifest.json` / `versions.json` 两个 JSON**；npm 工程（`package.json` / 锁 / `node_modules` / `tsconfig` / `styles.css` / 构建脚本）整体在 `src/`，`--prefix src` 运行。
+
+| 路径 | 放什么 | 能不能搬 |
+| --- | --- | --- |
+| `src/` | 插件源码（`text/` 纯函数、`image/`、`ui/`、`settings/`） | 规范要求 |
+| `src/scripts/` | 构建 / 部署 / 发版脚本：`esbuild.config.mjs`、`deploy.mjs`、`version-bump.mjs`、`eslint.config.mts` | 2026-11 从根目录收进 src |
+| `bin/exports/` | **交付包**（构建生成）：`main.js` + 从根复制的 `manifest.json` / 从 `src/` 复制的 `styles.css`；`README.md` 说明来由 | 生成物 gitignore，README 进 |
+| `bin/reference_docs/` | 调研、原始复制文本、设计记录、规则登记表源码 `rule-registry.ts` 与生成的 `规则登记表.md` | 规范要求 |
+| `kf-development-project/obsidian-note-tidy-test` | **测试仓**（私有，不在本仓）：`test/`、夹具；`src/` / `bin/` / `node_modules/` junction 指回本仓 | 规范要求（非最终用户测试） |
+| `dev/` | 本机草稿、网页快照、开发日志（`.gitignore` 忽略，不进 git） | 规范要求 |
+| `data/` | **中间产物**：日志、临时结果；gitignore（测试已迁到测试仓，不再生成 test-build） | 按需 |
+| `package.json` / `package-lock.json` / `node_modules/` | npm 工程（脚本、锁、依赖）；项目根是 `src/` | 已在 src |
+| `manifest.json` / `versions.json` | Obsidian 插件元数据与版本映射；Obsidian 社区校验固定读仓库根路径 | **必须留根**（配置文件，不是构建产物） |
+| `src/tsconfig.json` | `tsc` 与 ESLint 的项目配置（源码在 src，配置跟源码走） | 已在 src |
+| `src/styles.css` | 插件样式源文件；构建 / 部署时复制成 `styles.css` | 已在 src |
+| `bin/exports/main.js` | 唯一真正的构建产物 | 由 `npm run build` 生成 |
+| `README.md` / `LICENSE` | GitHub 仓库入口与许可（根上是必需位置） | **必须留根** |
+| `bin/exports/README.md` / `bin/exports/README.zh-CN.md` | 交付说明与用户文档（中文 README 已迁到这里） | 交付物 |
+| `CLAUDE.md` | 唯一的 agent 开发约定（kf 模板要求放根上做发现标记；本机草稿/日志/问题单在 `dev/`） | 开发文档（留根） |
+| `.github/` | CI / release 工作流 | 保留 |
+
+`doc/` 已并入 `bin/reference_docs/`；构建产物（`bin/exports/main.js`）与 `node_modules/` 都可以重新生成，不进 git；`dev/` 是 gitignore 的本机草稿区。
 
 ## 仓库在哪儿：源码仓库 ↔ 插件目录（2026-09 迁移）
 
-**源码只在本仓库**：`D:\data\local\software\programming\JavaScript\projects\js_02`（不在 vault 里，git 仓库、`node_modules`、测试、文档都在这儿）。
+**源码只在本仓库**：`<repo-root>`（不在 vault 里，git 仓库、`node_modules`、测试、文档都在这儿）。
 
-**vault 里的插件目录**：`D:\data\online\software\common\obsidian\.obsidian\plugins\note-tidy\` —— **只放运行用文件**，就四个：
+**vault 里的插件目录**：`<vault>/.obsidian/plugins/note-tidy/` —— **只放运行用文件**，就四个：
 
 | 文件 | 谁写的 |
 | --- | --- |
-| `main.js` | `npm run build` / `npm run dev` 产出后由 `deploy.mjs` 复制过去 |
-| `manifest.json` | 仓库里的同名文件（版本号改了要同步，`build` / `deploy` 会带过去） |
-| `styles.css` | 仓库里的同名文件 |
+| `main.js` | `npm run build` / `npm run dev` 产出到 `bin/exports/main.js`，再由 `src/scripts/deploy.mjs` 复制过去 |
+| `manifest.json` | 仓库根的同名文件（版本号改了要同步，`build` / `deploy` 会带过去） |
+| `styles.css` | `src/styles.css`（构建 / 部署时复制成这个名字） |
 | `data.json` | **Obsidian 自己写**（用户设置），仓库里没有、永远别删 |
 
 所以：**别在插件目录里改代码、跑 npm**（那边没有 `package.json`，也没有 `src/`）。改完源码跑 `npm run build`（或开着 `npm run dev`），产物会自动落到插件目录，回 Obsidian 里重新加载插件即可。
 
-同步逻辑就一个文件 `deploy.mjs`：目标目录取 `OBSIDIAN_PLUGIN_DIR` 环境变量，没设就用里面写死的本机 vault 路径；目录不存在（CI 上跑 build）就打印一行提示跳过，**不会让构建失败**。`esbuild.config.mjs` 挂了个 `onEnd` 插件调它，所以 `dev` 的 watch 与 `build` 都自动同步。换 vault / 换机器时设环境变量即可，不用改代码。
+同步逻辑就一个文件 `src/scripts/deploy.mjs`：目标目录先取 `OBSIDIAN_PLUGIN_DIR` 环境变量，没设就读仓库根的 `deploy.local.json`（gitignore，只存本机路径）；目录不存在（CI 上跑 build）就打印一行提示跳过，**不会让构建失败**。`src/scripts/esbuild.config.mjs` 挂了个 `onEnd` 插件调它，所以 `dev` 的 watch 与 `build` 都自动同步。换 vault / 换机器时改环境变量或本地配置即可，不用改代码。
 
 ⚠️ `npm run dev` 同步过去的是**开发版** `main.js`（未压缩、带 inline sourcemap，体积是压缩版的十倍上下）—— 开发时正常，**出 release / 发版前跑一次 `npm run build`**，插件目录里那份才是压缩版。
 
 ⚠️ 两个连带影响：
 
-- `rules.test.ts` 核对规范出处要用 vault 里的 `data/data note/data note.md`。仓库搬出 vault 后那句相对路径（`../../../data/...`）指到了 `projects/` 下，核对会被**静默跳过**（只打印一行 ℹ️）。现在 `src/rule-registry.ts` 的 `SPEC_NOTE_PATH` 先认 `NOTE_TIDY_SPEC` 环境变量，再按候选列表找第一份存在的（第一条是本机 vault 的绝对路径），换机器时用环境变量指路。
+- `rules.test.ts` 核对规范出处要用 vault 里的 `data/data note/data note.md`。仓库搬出 vault 后那句相对路径（`../../../data/...`）指到了 `projects/` 下，核对会被**静默跳过**（只打印一行 ℹ️）。现在 `bin/reference_docs/rule-registry.ts` 的 `SPEC_NOTE_PATH` 先认 `NOTE_TIDY_SPEC` 环境变量，再按相对候选找第一份存在的；换机器时用环境变量指路。
 - 分支 / 发版流程不变：git 操作、`npm run build`、`npm test`、tag 与 release 工作流全在新仓库里跑，CI 不碰 vault。
 
 ## Architecture
@@ -57,22 +88,24 @@ The esbuild config (`esbuild.config.mjs`) bundles `src/main.ts` into `main.js` (
 ```
 src/
   main.ts               # 插件入口：只做生命周期与装配（读设置、把各部件接起来、注册命令与菜单）
-  commands.ts           # 17 条命令的注册（命令 ID 是稳定接口，test/commands.test.ts 逐条比对菜单）
+  commands.ts           # 18 条命令的注册（命令 ID 是稳定接口，test/commands.test.ts 逐条比对菜单）
   tasks.ts              # 任务编排：每种操作一份实现，命令面板 / 右键菜单 / 弹窗三条路都落到这里
   batch.ts              # 批量外壳：互斥锁 + 通知屏蔽 + 状态栏进度 + 出错兜底 + 结果通知
-  rule-registry.ts      # 规则登记表：规范出处 ↔ 开关 ↔ 实现 ↔ 测试（不进 main.js，只有测试与文档用它）
+  scripts/              # 构建 / 部署 / 发版脚本（esbuild、deploy、version-bump、eslint 配置）
   settings/
     model.ts            # ImageTransferSettings + DEFAULT_SETTINGS + 设置 → 各功能选项的转换
     fields/             # 字段表（面板的单一数据源）：image.ts 图片页 / text.ts 文本排版页 / interface.ts 菜单与交互页
     tab.ts              # 设置面板：声明式定义（1.13+）与手写 DOM（1.13 以下）都由字段表生成
   text/                 # 排版（纯函数，不依赖 Obsidian API）
-    pipeline.ts         # 流水线：缩进 → 标记 → 聊天记录 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序
+    pipeline.ts         # 流水线：缩进 → 标记 → 聊天记录 → Bangumi 讨论 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序
     indent.ts           # 行首缩进归一（4 空格 = 1 tab）
     markers.ts          # 引用 / 列表 / 标题标记的空白规范化
     list-numbering.ts   # 列表序号整理（保证每个列表首项编号是 1）
     heading-levels.ts   # 标题级别整理（子标题与父标题恰好差一级，多标题并行算）
     chapter-title.ts    # 章节 / 课次 / 附录这类标题标记的判定（空格排版与智能公式共用一份）
     chat-log.ts         # QQ/微信聊天记录排版 + looksLikeChatLog（这段文本像不像聊天记录）
+    bangumi.ts          # Bangumi 讨论页排版：楼层头 / 贴贴计数 / 页面控件 / 签名；looksLikeBangumiLog
+    bangumi-page.ts     # Bangumi 网页解析：网址校验 + div#post_<id> → 结构化楼层（不依赖 DOMParser）
     context-indent.ts   # 一段内容的上下文缩进与接缝：按光标处的缩进对齐整块（placeBlockAt / shiftBlockTo）、首尾换行数还原
     math-wrap.ts        # 智能公式：正文里的 `矩阵 A`、`n维`、`V(F)`、`x = 0`、`λ` 自动包 `$…$`
     latex.ts            # 代码格式：$$…$$ 与行内 $…$ 的 LaTeX 代码
@@ -110,19 +143,21 @@ src/
     paste-watch.ts      # 粘贴时自动动手：图片接管（见 paste-images.ts）+ 粘进来那一段的三件事（收图 / 排版 / 套尺寸，各认开关、一笔一次）+ 别人家粘贴的套尺寸（观望式）
     paste-images.ts     # 「粘贴图片」的纯函数：挑出剪贴板里的图、补文件名、拼要写进正文的文字与链接
     image-size-modal.ts # 图片大小弹窗
+    bangumi-import-modal.ts # 「从 Bangumi 网页导入讨论」弹窗（只收网址，抓取在 tasks）
     confirm-rename-modal.ts # 批量重命名确认
     progress.ts         # 状态栏进度
     selection-count.ts  # 状态栏"选中内容的图片张数"：计数 + 文案（纯函数，不 import obsidian）
     selection-status.ts # 选区监听（CodeMirror 扩展），把选中文本交给上面那一格
     notice-suppressor.ts# 批量期间屏蔽通知；收尾立刻弹结果，没到期的旧通知逐条藏住自己过期
-test/*.test.ts          # 每个纯函数模块一份测试（含幂等）；rules.test.ts 核对规则登记表与文档
-docs/规则登记表.md       # 由 src/rule-registry.ts 生成（node test/run-tests.mjs --update-rules-doc）
-main.js                 # Bundled output（.gitignore 忽略，不进仓库；由 build / CI 生成，release 时上传）
-manifest.json           # Plugin metadata
-styles.css              # Plugin CSS (notice suppression, size dialog, settings sub-headings)
+test（测试仓）          # kf-development-project/obsidian-note-tidy-test；本仓不保留 test/
+bin/reference_docs/rule-registry.ts  # 规则登记表源码（测试 / 文档生成用；不进 main.js）
+bin/exports/            # 交付包：main.js（构建产物）+ manifest.json / styles.css（构建时复制）
+bin/reference_docs/规则登记表.md       # 由 rule-registry.ts 生成（node test/run-tests.mjs --update-rules-doc）
+manifest.json           # Plugin metadata（Obsidian 校验固定读根路径；配置文件）
+src/styles.css          # Plugin CSS (notice suppression, size dialog, settings sub-headings)
 ```
 
-**Note:** feature logic lives in the modules above; `main.ts` is only lifecycle + wiring. Every pipeline step is a pure, idempotent function so it can be tested without Obsidian. `src/rule-registry.ts` maps each typesetting/image rule to its spec item, settings switch, implementation and tests — the spec lives in the vault at `data/data note/data note.md`.
+**Note:** feature logic lives in the modules above; `main.ts` is only lifecycle + wiring. Every pipeline step is a pure, idempotent function so it can be tested without Obsidian. `bin/reference_docs/rule-registry.ts` maps each typesetting/image rule to its spec item, settings switch, implementation and tests — the spec lives in the vault at `data/data note/data note.md`.
 
 ### Three core features
 
@@ -139,11 +174,11 @@ styles.css              # Plugin CSS (notice suppression, size dialog, settings 
 
 ### 排版流水线（text/pipeline.ts）
 
-固定顺序：**行首缩进 → 标记 → 聊天记录 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序**。顺序不是随便定的（每一步的依赖写在 `pipeline.ts` 头部注释里）——例如序号与标题级别必须排在聊天记录之后（正文缩进定下来才知道谁是子列表）、排在板块排序之前（排序拿标题当锚点、排完还要按列表重排编号）。整条链**迭代到不动点**（最多 5 轮）：后面的步骤会改前面的步骤看过的文本 —— 例如公式排版把 `$w\approx 0$` 规范成 `$w \approx 0$`，板块排序的键随之改变。
+固定顺序：**行首缩进 → 标记 → 聊天记录 → Bangumi 讨论 → 列表序号 → 标题级别 → 智能公式 → 公式 → 空格 → 标签 → 板块排序**。顺序不是随便定的（每一步的依赖写在 `pipeline.ts` 头部注释里）——例如序号与标题级别必须排在聊天记录 / Bangumi 之后（正文缩进定下来才知道谁是子列表）、排在板块排序之前（排序拿标题当锚点、排完还要按列表重排编号）。整条链**迭代到不动点**（最多 5 轮）：后面的步骤会改前面的步骤看过的文本 —— 例如公式排版把 `$w\approx 0$` 规范成 `$w \approx 0$`，板块排序的键随之改变。
 
 智能公式只认"写成规范形态"的算式：**二元运算符两侧各留一格**（数学符号 1）才算，紧贴的一律不认 —— `x=0`、`a+b+c`、`5/10mm`、`A-7`、`cd /d`、`x -1` 都不动（那可能是作者故意写的编号 / 连字符 / 命令，也可能只是省了空格）；正负号是修饰符号（数学符号 3），`x = -1`、`f(-1)` 照旧包。
 
-每一步都是纯函数且严格幂等，整篇没有真正变化时不写盘。改任何一步之前先看 `src/rule-registry.ts` 与 `docs/规则登记表.md`：那条规则对应规范里的哪一条、归谁实现、哪个测试在守。
+每一步都是纯函数且严格幂等，整篇没有真正变化时不写盘。改任何一步之前先看 `bin/reference_docs/rule-registry.ts` 与 `bin/reference_docs/规则登记表.md`：那条规则对应规范里的哪一条、归谁实现、哪个测试在守。
 
 ### Path resolution engine (`flexibleProbing`, `image/external-path.ts`)
 
@@ -213,7 +248,7 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 ### 「快速修复聊天记录」与粘贴自动修复（`tasks.quickFixChatLog` + `ui/paste-watch.ts`）
 
-一条命令把两件事做完：**转换本文件内的外部图片**（`image.transfer`）+ **修一遍排版**（`text.*` 整条流水线）。从 QQ / 微信 复制出来的聊天记录正文里往往是 `file:///D:\…` 这类外部图片、排版也乱，用户要的是"一下就干净"。入口：命令面板（`quick-fix-chat-log-current-note`）、笔记正文 / 笔记里图片的右键菜单（`QUICK_FIX_MENU_TITLE`，受 `imageMenuQuickFixItem` 管）、文件浏览器「文本排版」二级栏（只给单篇笔记 —— 文件夹那一路是一键改一堆笔记，不该没有确认步骤）。
+一条命令把两件事做完：**转换本文件内的外部图片**（`image.transfer`）+ **修一遍排版**（`text.*` 整条流水线）。从 QQ / 微信 复制出来的聊天记录正文里往往是 `file:///<drive>:/…` 这类外部图片、排版也乱，用户要的是"一下就干净"。入口：命令面板（`quick-fix-chat-log-current-note`）、笔记正文 / 笔记里图片的右键菜单（`QUICK_FIX_MENU_TITLE`，受 `imageMenuQuickFixItem` 管）、文件浏览器「文本排版」二级栏（只给单篇笔记 —— 文件夹那一路是一键改一堆笔记，不该没有确认步骤）。
 
 - **两步必须在同一个批量壳里**：`BatchRunner` 有互斥锁，分两次调用第二次会被"已有任务在执行"挡掉。顺序是先收图片再排版（排版会把聊天记录里的图片挪到消息尾部，收进来的 `![[…]]` 也一并排好）；
 - **结果按实际发生了什么汇报**：只有真的改了东西才说"修复完成"，什么都没改时提示"没有需要修复的内容"。
@@ -221,7 +256,7 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 粘贴后自动收拾刚粘进来的那一段（设置面板「图片 → 粘贴」那一组，**三件事各认各的开关、默认都开**）：
 
 - **三件事**（`settings/model.ts` 的 `pasteFixPlanFrom` 一处算出来，`ImageTasks.fixPastedRange` → 私有的 `typesetEditorRange` 依次做，**合并在同一次写回**里 —— 不写盘、撤销一次一起回退）：
-  ① **收图**（`autoTransferImagesOnPaste`）：这一段里的 `![说明](file:///D:\图.png)` 这类**外部路径图片**复制进附件夹、换成 `![[新名字]]`（按「格式转换」的目标格式转码），**与像不像聊天记录无关**；
+  ① **收图**（`autoTransferImagesOnPaste`）：这一段里的 `![说明](file:///<drive>:/图.png)` 这类**外部路径图片**复制进附件夹、换成 `![[新名字]]`（按「格式转换」的目标格式转码），**与像不像聊天记录无关**；
   ② **排版**（`autoFixChatLogOnPaste`）：`looksLikeChatLog` 认得出就整段排（流水线 + 缩进跟随光标），认不出就**一个字的正文都不改**、只把整块缩进对齐到光标那一层；
   ③ **套尺寸**（`autoSetImageSizeOnPaste` → `pastedImageSizeOptions`，见下）；
 - **为什么把「排版」与「收图」拆成两个开关**（2026-09 用户要的）：它们本来是两件事 —— 这段文字怎么排、图片要不要进库。单条 QQ 消息（"两张图 + 一段话"）没有时间戳头部，排版那条路认不出它，可图片照样指着别人机器的绝对路径、换台机器就是裂图（"本来就应该放进仓库，转换图片本来就是智能排版的功能"）。三件事全关时 `pasteFixPlanFrom` 返回 `null`，整趟立刻返回一笔都不动；
@@ -247,7 +282,7 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 以前这三件事分别靠 **Image Converter**（转格式）与 **Clear Unused Images**（清孤儿附件）。拆掉的理由与做法，改这几块前先读：
 
-- **转格式**（`image/convert.ts`）：解码 → 画到 canvas → `canvas.toBlob(mime, quality/100)`，浏览器自带的编码器，没有额外依赖、没有许可证问题。四个入口共用 `convertPlanFrom(settings)` 算出来的计划（`vaultConvertFormat` + `convertQuality`，默认 webp / 75）：导入外部图片（`convertImportedImages`）、粘贴图片（`paste-images`）、两条命令、整理图片那一步（`tidyConvertFormat`）。两条硬规矩：**`.gif` 一律不转**（canvas 只有一帧，动图会被拍成静图）、**已是目标格式不转**（PNGQUANT 那档例外，见下）；解不开的格式（HEIC / TIFF）走 `decodeImage` 的两条路都失败就按原样留着。**"转完更大"不再是留下来的理由**（2026-09 用户明确要的）：用户判定"这张图优化过没有"看的就是**它是不是 webp**，转完比原图大也照用转换结果。**名字按最终扩展名生成**（`plannedExtension`）：落盘的是转换后那个文件，命名就得按它来 —— 按源扩展名生成会让同一秒里的 png 与 jpg 各占一个名字（2026-09 用户报的"粘多张只有第一张转 webp"）。**不再有"读它的预设"这件事**：质量、格式都在本插件设置里，`preset` / `avif` 这类认不出来的值一律当"这一步不做"。**PNG 还能走 pngquant 那一档**（`vaultConvertFormat: "pngquant"`）：那是**装在系统里的**外部可执行文件（GPL，插件不捆绑、不下载 —— 二进制进不了市场安装包，只能编进 `main.js`，要多背 1 MB base64），只接 `.png` 源、输出仍是 `.png`（所以库里已有的图名字不变、`convertVaultImage` 跳过改名直接写回内容）。**路径留空＝自动找**（`pngquantCandidates`：先 `PATH` 里的 `pngquant`，再试常见安装位置），命令与「整理图片」动手前会 `probePngquant` 探一次、探不到就整步不做并提示；细节与理由见 `src/rule-registry.ts` 的 `image.pngquant`。
+- **转格式**（`image/convert.ts`）：解码 → 画到 canvas → `canvas.toBlob(mime, quality/100)`，浏览器自带的编码器，没有额外依赖、没有许可证问题。四个入口共用 `convertPlanFrom(settings)` 算出来的计划（`vaultConvertFormat` + `convertQuality`，默认 webp / 75）：导入外部图片（`convertImportedImages`）、粘贴图片（`paste-images`）、两条命令、整理图片那一步（`tidyConvertFormat`）。两条硬规矩：**`.gif` 一律不转**（canvas 只有一帧，动图会被拍成静图）、**已是目标格式不转**（PNGQUANT 那档例外，见下）；解不开的格式（HEIC / TIFF）走 `decodeImage` 的两条路都失败就按原样留着。**"转完更大"不再是留下来的理由**（2026-09 用户明确要的）：用户判定"这张图优化过没有"看的就是**它是不是 webp**，转完比原图大也照用转换结果。**名字按最终扩展名生成**（`plannedExtension`）：落盘的是转换后那个文件，命名就得按它来 —— 按源扩展名生成会让同一秒里的 png 与 jpg 各占一个名字（2026-09 用户报的"粘多张只有第一张转 webp"）。**不再有"读它的预设"这件事**：质量、格式都在本插件设置里，`preset` / `avif` 这类认不出来的值一律当"这一步不做"。**PNG 还能走 pngquant 那一档**（`vaultConvertFormat: "pngquant"`）：那是**装在系统里的**外部可执行文件（GPL，插件不捆绑、不下载 —— 二进制进不了市场安装包，只能编进 `main.js`，要多背 1 MB base64），只接 `.png` 源、输出仍是 `.png`（所以库里已有的图名字不变、`convertVaultImage` 跳过改名直接写回内容）。**路径留空＝自动找**（`pngquantCandidates`：先 `PATH` 里的 `pngquant`，再试常见安装位置），命令与「整理图片」动手前会 `probePngquant` 探一次、探不到就整步不做并提示；细节与理由见 `bin/reference_docs/rule-registry.ts` 的 `image.pngquant`。
 - **粘贴图片**（`ui/paste-images.ts` + `tasks.pasteImages`）：剪贴板里有图片文件时自己接管（`takeOverImagePaste`，默认开），一张一张存、名字不撞、顺手转格式，再把文字与链接写进正文。原因是 Image Converter 那条路**并发跑**（`files.map(async …)`）会撞名丢图（见上一节）。**要同时把它的「Never process filenames」填 `*`**，否则两边都存一份。
 - **清理没人引用的图片**（`image/unused.ts`）：判定只有一条 —— 文件名没在任何一篇笔记或 canvas 里出现过（复用 `dedupe.ts` 的 `collectImageTargets`）。只清图片、走回收站、**有一个文档读不出来就整步不做**。入口：「整理图片」第 ④ 步（`autoClearUnusedImages`）与命令 `clear-unused-images`（先弹确认框）。
 
@@ -290,14 +325,14 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 2. **接线**：`src/text/pipeline.ts` 的 `TextPipelineOptions` + `runPipelineOnce`（决定它在第几步，顺序理由补进文件头那份编号列表）；
 3. **开关**：`src/settings/model.ts`（字段 + 默认值）与 `src/settings/fields/text.ts`（表单一条）；
 4. **转换**：`src/tasks.ts` 的 `getTextPipelineOptions()`（设置 → 流水线选项）与 `describeLayoutSwitches()`（结果提示里列出开了哪几步）；
-5. **登记**：`src/rule-registry.ts` 加一条记录，再跑 `node test/run-tests.mjs --update-rules-doc` 生成 `docs/规则登记表.md`；
+5. **登记**：`bin/reference_docs/rule-registry.ts` 加一条记录，再跑 `node test/run-tests.mjs --update-rules-doc` 生成 `bin/reference_docs/规则登记表.md`；
 6. **测试**：`test/<模块>.test.ts`（期望输出 + 边界 + 幂等），并在 `test/run-tests.mjs` 的 entryPoints 里登记。
 
 **加一个设置项**：只改 `src/settings/model.ts` + `src/settings/fields/`。面板的两条渲染路径（1.13+ 声明式 / 1.13 以下手写 DOM）都由字段表生成，`test/settings.test.ts` 核对"每个字段有且只有一条定义"；同时要让 `rule-registry.ts` 里某条规则用上这个开关（测试会查"有没有没人管的开关"）。
 
 **加一条命令 / 菜单项**：`src/commands.ts` + `src/ui/menus.ts`，插进笔记 / 图片菜单的项还要在 `src/ui/image-menu.ts` 登记（`OWN_ITEMS` 标题说明图标、`OWN_ITEM_SCOPES` 出现在哪几层、`OWN_ITEM_COMMANDS` 对应哪条命令、`INJECTED_ITEM_KEYS` 参与注入），设置里给它一个开关并在 `tasks.ts` 的 `openMenuManager` 里接上，最后同步管理面板。命令 ID 是已发布版本的稳定接口，`test/commands.test.ts` 会逐条比对菜单与命令表 —— **文件菜单**（`file-menu`）记在 `OPERATIONS`，**编辑器 / 图片右键菜单**（`editor-menu`，如「复制图片」）记在 `EDITOR_OPERATIONS`，**注入进图片 / 文件夹菜单的项**记在 `INJECTED_OPERATIONS` 与 `EXPECTED_OWN_ITEMS`，几张表各自与命令一一对应。
 
-**改了规范笔记之后**：先改 `src/rule-registry.ts` 里的章节路径与条目号，跑 `npm test` —— 对不上会直接列出是哪几条；再重新生成 `docs/规则登记表.md`。规范笔记不在仓库里（在 vault 的 `data/data note/data note.md`），`SPEC_NOTE_PATH` 找不到时**只打印一行 ℹ️ 就跳过核对**（CI 上正常），本地要看到核对结果就确认那个路径对得上，必要时用 `NOTE_TIDY_SPEC` 指过去。注意测试能抓到"找不到第 N 条"，但抓不到"编号没变、内容换了"（例如 `英文符号 2` 从引号改成了省略号），所以改完要顺手核对该条目说的还是不是那条规则。
+**改了规范笔记之后**：先改 `bin/reference_docs/rule-registry.ts` 里的章节路径与条目号，跑 `npm test` —— 对不上会直接列出是哪几条；再重新生成 `bin/reference_docs/规则登记表.md`。规范笔记不在仓库里（在 vault 的 `data/data note/data note.md`），`SPEC_NOTE_PATH` 找不到时**只打印一行 ℹ️ 就跳过核对**（CI 上正常），本地要看到核对结果就确认那个路径对得上，必要时用 `NOTE_TIDY_SPEC` 指过去。注意测试能抓到"找不到第 N 条"，但抓不到"编号没变、内容换了"（例如 `英文符号 2` 从引号改成了省略号），所以改完要顺手核对该条目说的还是不是那条规则。
 
 规范措辞有歧义时**先问清楚再改实现**。例如「包裹符号：括号、引号等，内外均没有空格」（通用符号 3 的包裹符号子条目）指的是**包裹符号自己不添空格**：内侧的填充空格要删，外侧不主动加、也不删**语言自带**的词距（`appendix (page 3)`、`He said "hello" loudly` 里那一格是英文词距，正如 `he said 你好(nihao)` 里中文旁本来就没有）。照字面理解成"外侧的空格也删掉"会把好好的英文词距删没。
 
@@ -311,13 +346,23 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 - **`src/text/` 不 import obsidian**：测试用 `test/obsidian-stub.mjs` 替身跑，这样才能脱离 Obsidian 验证幂等。
 - **导出符号、命令 ID、设置字段名都是稳定接口**：改名要同步 `rule-registry.ts` 与测试。
 
-## Git workflow
+## 仓库模型（发布库 ≠ 开发库）
+
+- 本仓是**开发库**，已移除 `origin`（发布库不能挂成开发库的 origin）。
+- GitHub `Kflho/obsidian-note-tidy` 是**发布库**，只接 `manifest.json` / `versions.json` /
+  构建交付包 / release workflow / README，不收 `src/`、`test/`、`dev/`、`data/`。
+- 发布走 `kf-personal-development` 的 `release.py push --role user-facing`；**禁止从本仓
+  `git push` 发布库**，也禁止把发布库当源码仓 merge / rebase。
+- 迁移待办（未完成前不要发版）：`release.json` 白名单、release-only workflow（不跑 npm build）、
+  首次转换需 `--allow-delete` 清掉发布库里的旧源码。发布前先与用户确认。
+
+## Git workflow（旧 single-repo 流程，已作废，勿执行）
 
 - Branch naming: 纯版本号，不带后缀（`1.3.5`，不要写 `1.3.5更新`）；tag 同样只用版本号，不带 `v`
 - **每次发版都要把版本分支 merge 进 `main`**（`main` 是仓库默认分支，插件市场只认默认分支上的代码）：**默认流程就是 merge 到 `main`**，不用每次问。顺序是 分支 push → 合并进 `main` → push `main` → 在 `main` 上打 tag（tag 必须落在 `main` 的历史里）。
 - CI (`.github/workflows/lint.yml`): runs on push/PR, tests Node 20.x and 22.x — `npm ci` → `npm run build` → `npm test` → `npm run lint`
 - Lint pins `eslint-plugin-obsidianmd` to the version the community-plugin review uses — keep it current, or the review will report findings the local lint misses
-- `version-bump.mjs` reads `npm_package_version`, writes `manifest.json` and `versions.json`
+- `src/scripts/version-bump.mjs` reads `npm_package_version`, writes `manifest.json` and `versions.json`
 - Releases: tag must match `manifest.json` version (no leading `v`); attach `main.js`, `manifest.json`, `styles.css`
 - Release automation (`.github/workflows/release.yml`): pushing the version tag runs `npm ci` → `npm test` → `npm run build`, checks the tag against `manifest.json`, generates [artifact attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations) for the three assets, and creates the release. Do not create the release by hand — a hand-made release has no attestations, which the plugin review flags
 

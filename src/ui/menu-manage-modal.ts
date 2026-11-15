@@ -40,9 +40,9 @@ export interface MenuManageModalOptions {
 
 /** 三层各自"还没打开过"时的提示：告诉用户怎么把清单弄出来 */
 const EMPTY_HINTS: Record<MenuScope, string> = {
-	image: '暂时没有可显示的项目。请先在笔记中右键一次图片，再打开本面板。',
-	note: '暂时没有可显示的项目。请先在笔记正文中右键一次，再打开本面板。',
-	folder: '暂时没有可显示的项目。请先在左侧文件列表中右键一次文件或文件夹，再打开本面板。',
+	image: '还没有检测到图片菜单。请先在笔记中右键一次图片。',
+	note: '还没有检测到笔记菜单。请先在笔记正文中右键一次。',
+	folder: '还没有检测到文件菜单。请先在文件列表中右键一次。',
 };
 
 /**
@@ -53,8 +53,8 @@ const EMPTY_HINTS: Record<MenuScope, string> = {
  */
 function hiddenHint(detectedNow: boolean): string {
 	return detectedNow
-		? '已隐藏：打开开关即可恢复显示'
-		: '已隐藏：最近一次检测这个菜单时没有见到它（可能是旧版本留下的记录），打开开关即可恢复显示';
+		? '已隐藏，打开开关即可恢复。'
+		: '已隐藏，最近一次没有检测到；打开开关即可恢复。';
 }
 
 export class MenuManageModal extends Modal {
@@ -87,7 +87,7 @@ export class MenuManageModal extends Modal {
 		contentEl.createEl('h2', { text: '右键菜单' });
 		contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: '按 图片 / 笔记 / 文件夹 三层分别列出最近一次打开该菜单时其中的项目，包括 Obsidian 自带的和其它插件添加的。打开开关即在菜单中显示该项，关闭即隐藏；关掉的项会一直留在下面的清单里，随时可以再打开。',
+			text: '按 图片 / 笔记 / 文件夹列出菜单项。打开显示，关闭隐藏；关掉的项仍留在清单里。',
 		});
 
 		for (const scope of MENU_SCOPES) {
@@ -131,7 +131,7 @@ export class MenuManageModal extends Modal {
 		contentEl.createEl('h3', { text: '恢复' });
 		new Setting(contentEl)
 			.setName('全部恢复显示')
-			.setDesc('清空隐藏名单：三个菜单里被关掉的项全部恢复显示。本插件自己的五项由上面的开关控制，不受影响。')
+			.setDesc('恢复三个菜单里被隐藏的项。')
 			.addButton(button => button
 				.setButtonText('全部恢复显示')
 				.onClick(async () => {

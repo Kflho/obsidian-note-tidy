@@ -87,7 +87,7 @@ export async function importImageBytes(
 
 	const imported = await app.vault.createBinary(finalPath, converted?.bytes ?? source.bytes);
 	if (converted) {
-		// 命名时已经占过这个名字；这里再占一次只是兜底，同一批里的后续图片不会撞上它
+		// 命名时已经占过这个名字；这里再占一次只是保底，同一批里的后续图片不会撞上它
 		reservedPaths.set(finalPath, '');
 		reservedBasenames.set(finalName, '');
 	}
@@ -172,6 +172,101 @@ export async function transferImagesInText(
 
 		} catch (err) {
 			console.error(`❌ 处理图片时出错: ${finalPhysicalPath}`, err);
+		}
+	}
+
+	return { content, changed: content !== originalContent, created };
+}
+
+/**
+ * 远程图片导入：Bangumi 网页里的正文图片是 `https://…jpg`，聊天记录那条
+ * `transferImagesInText` 只认 `file:///…` / 盘符路径，所以这里补一条**只给网页导入用**的入口。
+ *
+ * 不把这个逻辑放进 `transferImagesInText`：那条路会在整库排版 / 粘贴时跑，
+ * 不能让普通排版突然去下载全库的远程图片。
+ */
+
+/** 会下载进仓库的静态图片扩展名；GIF 与视频刻意不在里面（保留成链接） */
+const REMOTE_IMPORT_EXT_RE = /\.(png|jpe?g|webp|bmp|heic)(?:[?#][^\s)]*)?$/i;
+
+/** 这个远程地址是不是值得收进仓库的静态图片（GIF / 视频 / svg / avif 返回 false） */
+export function isImportableRemoteImage(url: string): boolean {
+	return /^https?:\/\//i.test(url.trim()) && REMOTE_IMPORT_EXT_RE.test(url.trim());
+}
+
+/** Markdown 图片里的 http(s) 地址；`![说明](<url>)` 也认 */
+export function remoteImageRe(): RegExp {
+	return /!\[([^\]]*)\]\((<?https?:\/\/[^)\s]+>?)\)/gi;
+}
+
+/**
+ * 把一段 Markdown 里的远程静态图片下载进附件夹，并换成内部 `![[...]]`。
+ *
+ * 复用 `importImageBytes` 的命名 / 转格式 / 预留逻辑，不另写一套落盘规则。
+ * `fetchBytes` 由调用方注入（生产用 Obsidian 的 `requestUrl`，便于测试时替换）。
+ * 下载失败的图片保留原链接，不影响其余楼层。
+ */
+export async function transferRemoteImagesInText(
+	app: App,
+	settings: TransferSettings,
+	file: TFile,
+	content: string,
+	fetchBytes: (url: string) => Promise<ArrayBuffer>
+): Promise<{ content: string; changed: boolean; created: TFile[] }> {
+	const originalContent = content;
+	const created: TFile[] = [];
+	const importedByUrl = new Map<string, string>();
+	const matches = Array.from(content.matchAll(remoteImageRe()));
+	if (matches.length === 0) return { content, changed: false, created };
+
+	const currentAttachFolder = await getTargetAttachmentFolder(app, settings, file);
+	const reservedPaths = new Map<string, string>();
+	const reservedBasenames = new Map<string, string>();
+	const plan = settings.convertImportedImages === false
+		? null
+		: convertPlanFrom(
+			settings.vaultConvertFormat,
+			settings.convertQuality,
+			settings.pngquantPath,
+			settings.pngquantQuality
+		);
+
+	for (const match of matches) {
+		const fullMatch = match[0];
+		const altText = (match[1] ?? '').replace(/^\|/, '');
+		const rawLink = (match[2] ?? '').replace(/^</, '').replace(/>$/, '');
+		if (!isImportableRemoteImage(rawLink)) continue;
+
+		// 同一张图（同一个 URL）在同一篇里可以出现多次：文件只下载一次，链接复用
+		const cachedName = importedByUrl.get(rawLink);
+		if (cachedName) {
+			content = content.replace(fullMatch, `![[${cachedName}${altText ? `|${altText}` : ''}]]`);
+			continue;
+		}
+
+		try {
+				const bytes = await fetchBytes(rawLink);
+				let name = 'remote-image';
+				try {
+					name = decodeURIComponent(new URL(rawLink).pathname.split('/').pop() || name);
+				} catch {
+					// URL 解析失败时用保底名；`importImageBytes` 会按扩展名补
+				}
+				const imported = await importImageBytes(
+					app,
+					settings,
+					currentAttachFolder,
+					{ name, bytes },
+					plan,
+					reservedPaths,
+					reservedBasenames
+				);
+				created.push(imported);
+				importedByUrl.set(rawLink, imported.name);
+				content = content.replace(fullMatch, `![[${imported.name}${altText ? `|${altText}` : ''}]]`);
+		} catch (error) {
+			// 单张图失败就留着原链接；提示打到控制台，不打扰整篇导入
+			console.error(`❌ 下载远程图片失败（保留链接）：${rawLink}`, error);
 		}
 	}
 

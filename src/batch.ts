@@ -7,7 +7,7 @@ import type { StatusBarProgress } from './ui/progress';
  * 批量处理外壳（从 main.ts 抽出）。
  *
  * 九条批量入口（命令面板 / 右键菜单 / 弹窗确认后）共用同一套壳：
- * **互斥锁 + 通知屏蔽 + 状态栏进度 + 出错兜底 + 结果通知**。
+ * **互斥锁 + 通知屏蔽 + 状态栏进度 + 出错处理 + 结果通知**。
  * 以前每个入口各抄一份，加一个功能就要再抄一遍，改一处忘一处。
  *
  * 各入口自己的差异只有三样，都由参数表达：进度标签、出错提示语、要不要全库文件名索引。
@@ -33,7 +33,7 @@ export interface BatchProgress {
 }
 
 export interface BatchOptions {
-	/** 状态栏进度标签，如 `📷 图片重命名` */
+	/** 状态栏进度标签，如 ` 图片重命名` */
 	label: string;
 	/** 参与处理的笔记 */
 	files: TFile[];
@@ -65,7 +65,7 @@ export class BatchRunner {
 	 */
 	async run(options: BatchOptions, body: (ctx: BatchContext) => Promise<string>): Promise<void> {
 		if (this.busy) {
-			new Notice('⚠️ 已有重命名/转换任务在执行中，请等待完成后再试。');
+			new Notice('已有任务在执行，请稍后再试。');
 			return;
 		}
 		this.busy = true;

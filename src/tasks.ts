@@ -1,4 +1,4 @@
-import { App, Notice, TFile } from 'obsidian';
+import { App, MarkdownView, Notice, TFile, requestUrl } from 'obsidian';
 import type { Editor } from 'obsidian';
 import type { BatchContext, BatchRunner } from './batch';
 import { copyImageFiles } from './image/clipboard';
@@ -31,16 +31,21 @@ import {
 	importImageBytes,
 	transferExternalImages,
 	transferImagesInText,
+	transferRemoteImagesInText,
 } from './image/transfer';
 import { looksLikeChatLog, resolveIndent } from './text/chat-log';
 import type { ChatLogOptions } from './text/chat-log';
+import { formatBangumiPosts, looksLikeBangumiLog, titleAsFileName } from './text/bangumi';
+import type { BangumiPost } from './text/bangumi';
+import { extractBangumiPageUrls, parseBangumiPage, parseBangumiUrl } from './text/bangumi-page';
 import { dedentBy, keepEdgeNewlines, placeBlockAt, resolveRangeIndent, shiftBlockTo } from './text/context-indent';
-import { getSpacingOptions, pasteFixPlanFrom, resolveConvertPlan } from './settings';
+import { getBangumiOptions, getSpacingOptions, pasteFixPlanFrom, resolveConvertPlan } from './settings';
 import type { ImageTransferSettings } from './settings';
 import { resolveLeadingIndentMode } from './text/indent';
 import { formatNoteText } from './text/pipeline';
 import type { TextPipelineOptions } from './text/pipeline';
 import { ConfirmRenameModal } from './ui/confirm-rename-modal';
+import { BangumiImportModal } from './ui/bangumi-import-modal';
 import { MenuManageModal } from './ui/menu-manage-modal';
 import { lastDetectedMenuItems } from './ui/image-menu';
 import { parseHiddenItems, serializeHiddenItems } from './ui/menu-hidden';
@@ -51,9 +56,9 @@ import type { StatusBarProgress } from './ui/progress';
 /**
  * 任务编排（从 main.ts 抽出）。
  *
- * 命令面板、右键菜单、弹窗确认后三条路最终都落到这里，每种操作只有一份实现。
+ * 命令面板、右键菜单、弹窗确认后三条路最终都放到这里，每种操作只有一份实现。
  * 每个任务都只管两件事：**这一批要做什么**、**结果怎么汇报**；
- * 互斥锁、通知屏蔽、进度、出错兜底都在 batch.ts 的壳里。
+ * 互斥锁、通知屏蔽、进度、出错处理都在 batch.ts 的壳里。
  */
 
 /** 「粘贴图片」要存的一张图：剪贴板里的文件名 + 字节（由 `ui/paste-watch.ts` 读出来） */
@@ -98,6 +103,8 @@ export interface TaskActions {	/** 转换外部绝对路径图片（逐篇，单
 	quickFixChatLog(file: TFile | null): Promise<void>;
 	/** 只排版**选中的那段内容**（转换选区里的外部图片 + 修复排版），笔记其余部分不动 */
 	typesetSelection(file: TFile, editor: Editor): Promise<void>;
+	/** 从 Bangumi 讨论页网址导入：抓网页、排版、插到当前光标（命令面板入口） */
+	importBangumiTopic(): Promise<void>;
 	/** 粘贴自动修复：收拾刚粘进来的那一段 `[start, 光标处)`（收图 / 排版 / 套尺寸各认开关） */
 	fixPastedRange(file: TFile, editor: Editor, start: number): Promise<boolean>;
 	/** 粘贴进来的那一段里的图片按默认尺寸加上 `|宽x高`（只改这一段，不写盘） */
@@ -127,16 +134,11 @@ export interface TaskActions {	/** 转换外部绝对路径图片（逐篇，单
 	clearUnusedImagesWithConfirm(): Promise<void>;
 }
 
-/** 提示里列图片名：最多三个，其余用"…"带过（提示太长会挡住屏幕上的内容） */
-function summarizeNames(names: string[]): string {
-	return names.length > 3 ? `${names.slice(0, 3).join('、')}…` : names.join('、');
-}
-
 /** 转换前确认弹窗里那句警告（当前笔记 / 全库共用） */
-const CONVERT_WARNING = '⚠️ 转换会重写这些图片文件并改扩展名（例如 png → webp），笔记里的链接由 Obsidian 自动更新；动图（gif）与已经是目标格式的图片不会被动。';
+const CONVERT_WARNING = '转换会重写图片文件并改扩展名，动图与已是目标格式的图片不动。';
 
 /** 目标格式选了 pngquant、系统里又找不到它时说的话（怎么装、怎么指路都写清楚） */
-const PNGQUANT_MISSING_MESSAGE = '⚠️ 系统里没找到 pngquant —— 压 PNG 要靠它。到 pngquant.org 下 Windows 包解压，把 pngquant.exe 放进任意一个 PATH 目录（或 `choco install pngquant`），也可以在设置里直接填它的完整路径。';
+const PNGQUANT_MISSING_MESSAGE = '未找到 pngquant。请安装它，或在设置中填写路径。';
 
 /** 转换一次要用的东西：目标格式 + 质量 + 格式标签（两条转换命令与「整理图片」共用） */
 interface ConversionReady {
@@ -173,7 +175,7 @@ async function countDocumentUsages(app: App): Promise<DocumentUsage> {
 			text = await app.vault.read(doc);
 		} catch (err) {
 			complete = false;
-			console.error(`⚠️ 读不出 ${doc.path}，无法确认图片还有没有别人在用`, err);
+			console.error(` 读不出 ${doc.path}，无法确认图片还有没有别人在用`, err);
 			continue;
 		}
 		for (const name of new Set(collectImageTargets(text))) {
@@ -209,19 +211,19 @@ export class ImageTasks implements TaskActions {
 	async transferCurrentNote(file: TFile | null): Promise<void> {
 		await this.runner.run(
 			{
-				label: '📷 外部图片转换',
+				label: '外部图片转换',
 				files: file ? [file] : [],
-				failureMessage: '❌ 处理过程中发生意外错误，请检查控制台。',
+				failureMessage: '处理失败，请查看控制台。',
 			},
 			async (ctx) => {
-				if (!file) return '⚠️ 无法获取当前文件，请确保您打开了一篇笔记！';
+				if (!file) return '请先打开一篇笔记。';
 				const updated = await transferExternalImages(this.app, this.getSettings(), file);
 				if (updated) {
-					ctx.progress.finish('✅ 转换完成');
-					return '✅ 当前笔记外部图片转换完成！';
+					ctx.progress.finish(' 转换完成');
+					return '转换完成。';
 				}
 				ctx.progress.clear();
-				return '没有发现需要转换的外部本地图片。';
+				return '没有需要转换的图片。';
 			}
 		);
 	}
@@ -234,9 +236,9 @@ export class ImageTasks implements TaskActions {
 
 		await this.runner.run(
 			{
-				label: '📷 外部图片转换',
+				label: '外部图片转换',
 				files,
-				failureMessage: '❌ 全局处理中断，请检查控制台。',
+				failureMessage: '处理失败，请查看控制台。',
 			},
 			async (ctx) => {
 				const settings = this.getSettings();
@@ -248,8 +250,8 @@ export class ImageTasks implements TaskActions {
 					if (updated) processedCount++;
 					ctx.progress.step(i + 1);
 				}
-				ctx.progress.finish('✅ 转换完成');
-				return `🎉 全局处理完毕！共更新了 ${processedCount} 篇笔记。`;
+				ctx.progress.finish(' 转换完成');
+				return `全局处理完毕！共更新了 ${processedCount} 篇笔记。`;
 			}
 		);
 	}
@@ -260,10 +262,10 @@ export class ImageTasks implements TaskActions {
 		const reservedPaths = new Map<string, string>();
 		const reservedBasenames = buildVaultBasenameMap(this.app);
 		await this.runPerFile(
-			'📷 外部图片转换',
+			' 外部图片转换',
 			files,
 			async (file) => (await transferExternalImages(this.app, settings, file, reservedPaths, reservedBasenames)) ? 1 : 0,
-			(count) => `🎉 ${where}共更新了 ${count} 篇笔记。`
+			(count) => ` ${where}共更新了 ${count} 篇笔记。`
 		);
 	}
 
@@ -280,10 +282,10 @@ export class ImageTasks implements TaskActions {
 		const reservedPaths = new Map<string, string>();
 		const reservedBasenames = buildVaultBasenameMap(this.app);
 		await this.runPerFile(
-			'🔍 乱码图片扫描',
+			' 乱码图片扫描',
 			files,
 			(file, ctx) => renameGarbledImages(this.app, settings, file, ctx.index, reservedPaths, reservedBasenames),
-			(count) => `🎉 ${where}共重命名了 ${count} 张乱码图片。`,
+			(count) => ` ${where}共重命名了 ${count} 张乱码图片。`,
 			async () => { await fixImageLinkFormats(this.app, settings); }
 		);
 	}
@@ -300,7 +302,7 @@ export class ImageTasks implements TaskActions {
 
 			if (totalCount === 0) {
 				await fixImageLinkFormats(this.app, settings);
-				new Notice('ℹ️ 仓库中没有需要重命名的图片，已检查并修正链接格式。');
+				new Notice('没有需要重命名的图片。');
 				return;
 			}
 
@@ -309,20 +311,20 @@ export class ImageTasks implements TaskActions {
 				const reservedBasenames = buildVaultBasenameMap(this.app);
 				const processedFiles = new Set<string>();
 				await this.runPerFile(
-					force ? '📷 图片重命名（强制）' : '📷 图片重命名',
+					force ? ' 图片重命名（强制）' : ' 图片重命名',
 					files,
 					(file, ctx) => renameImagesToPreset(
 						this.app, settings, file, ctx.index,
 						reservedPaths, reservedBasenames, force, undefined, processedFiles
 					),
-					(count) => `🎉 全局处理完毕！共重命名了 ${count} 张图片。`,
+					(count) => ` 全局处理完毕！共重命名了 ${count} 张图片。`,
 					async () => { await fixImageLinkFormats(this.app, settings); }
 				);
 			}).open();
 		} catch (e) {
 			this.progress.clear();
 			console.error(e);
-			new Notice('❌ 全局处理中断，请检查控制台。');
+			new Notice('处理失败，请查看控制台。');
 		}
 	}
 
@@ -333,7 +335,7 @@ export class ImageTasks implements TaskActions {
 
 		if (total === 0) {
 			await fixImageLinkFormats(this.app, settings);
-			new Notice(`ℹ️ ${where}没有需要重命名的图片，已检查并修正链接格式。`);
+			new Notice(`${where}没有需要重命名的图片。`);
 			return;
 		}
 
@@ -342,13 +344,13 @@ export class ImageTasks implements TaskActions {
 			const reservedBasenames = buildVaultBasenameMap(this.app);
 			const processedFiles = new Set<string>();
 			await this.runPerFile(
-				force ? '📷 图片重命名（强制）' : '📷 图片重命名',
+				force ? ' 图片重命名（强制）' : ' 图片重命名',
 				files,
 				(file, ctx) => renameImagesToPreset(
 					this.app, settings, file, ctx.index,
 					reservedPaths, reservedBasenames, force, undefined, processedFiles
 				),
-				(count) => `🎉 ${where}共重命名了 ${count} 张图片。`,
+				(count) => ` ${where}共重命名了 ${count} 张图片。`,
 				async () => { await fixImageLinkFormats(this.app, settings); }
 			);
 		}).open();
@@ -381,7 +383,7 @@ export class ImageTasks implements TaskActions {
 
 		const targets = selectConvertibleImages(this.app.vault.getFiles(), ready.plan);
 		if (targets.length === 0) {
-			new Notice(`ℹ️ 全库图片都已经是 ${ready.label} 了（动图 gif 与不支持转换的格式会跳过）。`);
+			new Notice(`图片都已经是 ${ready.label}。`);
 			return;
 		}
 
@@ -403,7 +405,7 @@ export class ImageTasks implements TaskActions {
 	 */
 	async convertNoteImages(file: TFile | null): Promise<void> {
 		if (!file) {
-			new Notice('⚠️ 无法获取当前文件，请确保您打开了一篇笔记！');
+			new Notice('请先打开一篇笔记。');
 			return;
 		}
 
@@ -414,7 +416,7 @@ export class ImageTasks implements TaskActions {
 		const linked = await collectLinkedImageFiles(this.app, file, index);
 		const targets = selectConvertibleImages(linked, ready.plan);
 		if (targets.length === 0) {
-			new Notice(`ℹ️ 这篇笔记里没有需要转换的图片（都已经是 ${ready.label}，动图与不支持的格式会跳过）。`);
+			new Notice('没有需要转换的图片。');
 			return;
 		}
 
@@ -440,7 +442,7 @@ export class ImageTasks implements TaskActions {
 	private async prepareConversion(): Promise<ConversionReady | null> {
 		const ready = this.readConversion();
 		if (!ready) {
-			new Notice('⚠️ 读不出「转换图片格式」的目标格式：请到设置里选一个（webp / JPEG / PNG / pngquant）。');
+			new Notice('请先在设置里选择图片目标格式。');
 			return null;
 		}
 		if (!(await this.pngquantReady(ready.plan))) {
@@ -459,7 +461,7 @@ export class ImageTasks implements TaskActions {
 		if (plan.format !== 'PNGQUANT') return true;
 		const found = await probePngquant(plan.pngquant?.path ?? '');
 		if (found) return true;
-		console.warn(`⚠️ 没找到 pngquant（当前设置：${plan.pngquant?.path || '留空＝按系统 PATH 找'}）`);
+		console.warn(` 没找到 pngquant（当前设置：${plan.pngquant?.path || '留空＝按系统 PATH 找'}）`);
 		return false;
 	}
 
@@ -477,9 +479,9 @@ export class ImageTasks implements TaskActions {
 		const { plan, label } = ready;
 		await this.runner.run(
 			{
-				label: `🖼️ 转换为 ${label}`,
+				label: ` 转换为 ${label}`,
 				files: targets,
-				failureMessage: '❌ 图片格式转换中断，请检查控制台。',
+				failureMessage: '处理失败，请查看控制台。',
 			},
 			async (ctx) => {
 				let converted = 0;
@@ -496,24 +498,24 @@ export class ImageTasks implements TaskActions {
 						} catch (e) {
 							// 单张出错不拖垮整批：继续跑，最后一起汇报
 							failed++;
-							console.error(`❌ [ImageTransfer] 转换失败：${file.path}`, e);
+							console.error(` [ImageTransfer] 转换失败：${file.path}`, e);
 						}
 					}
 					ctx.progress.step(i + 1);
 				}
 
 				if (converted > 0) {
-					ctx.progress.finish('✅ 转换完成');
-					let message = `🎉 已把 ${converted} 张图片转换为 ${label}。`;
+					ctx.progress.finish(' 转换完成');
+					let message = ` 已把 ${converted} 张图片转换为 ${label}。`;
 					if (skipped > 0) message += `另有 ${skipped} 张没转（已是 ${label}、动图，或这张解不开 / 名字被占着），按原样留着。`;
-					if (failed > 0) message += `⚠️ 有 ${failed} 张出错，详情见控制台。`;
+					if (failed > 0) message += ` 有 ${failed} 张出错，详情见控制台。`;
 					return message;
 				}
 				ctx.progress.clear();
 				if (failed > 0) {
-					return `⚠️ 没有图片转换成功，有 ${failed} 张出错，详情见控制台。`;
+					return `没有图片转换成功，有 ${failed} 张出错，详情见控制台。`;
 				}
-				return `ℹ️ 没有图片需要转换（可能都已经是 ${label}，或这些图解不开 / 名字被占着）。`;
+				return `没有图片需要转换（可能都已经是 ${label}，或这些图解不开 / 名字被占着）。`;
 			}
 		);
 	}
@@ -550,7 +552,7 @@ export class ImageTasks implements TaskActions {
 				try {
 					text = await this.app.vault.read(doc);
 				} catch (err) {
-					console.error(`⚠️ 读取失败，跳过这篇的引用统计：${doc.path}`, err);
+					console.error(` 读取失败，跳过这篇的引用统计：${doc.path}`, err);
 					continue;
 				}
 				docs.push({ file: doc, text });
@@ -608,10 +610,10 @@ export class ImageTasks implements TaskActions {
 		const run = async (): Promise<void> => {
 			await this.runner.run(
 				{
-					label: '🧩 整理图片',
+					label: '整理图片',
 					// 进度总量 = 要合并的 + 要转换的（两件事都是实打实要跑的动作）
 					files: [...dropFiles, ...convertTargets],
-					failureMessage: '❌ 整理图片中断，请检查控制台。',
+					failureMessage: '处理失败，请查看控制台。',
 				},
 				async (ctx) => {
 					// ① 先把引用改写到留下的那张 —— 顺序反了就会留下断链
@@ -637,7 +639,7 @@ export class ImageTasks implements TaskActions {
 								await this.app.fileManager.trashFile(file);
 								removed++;
 							} catch (err) {
-								console.error(`❌ [ImageTransfer] 合并失败：${file.path}`, err);
+								console.error(` [ImageTransfer] 合并失败：${file.path}`, err);
 							}
 						}
 						ctx.progress.step(i + 1);
@@ -660,7 +662,7 @@ export class ImageTasks implements TaskActions {
 							} catch (err) {
 								// 单张出错不拖垮整批：继续跑，最后一起汇报
 								convertFailed++;
-								console.error(`❌ [ImageTransfer] 转换失败：${file.path}`, err);
+								console.error(` [ImageTransfer] 转换失败：${file.path}`, err);
 							}
 							ctx.progress.step(++step);
 						}
@@ -685,19 +687,19 @@ export class ImageTasks implements TaskActions {
 					if (parts.length === 0) {
 						ctx.progress.clear();
 						if (convertSkipped > 0) {
-							return `ℹ️ 没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但这些图解不开 / 名字被占着，按原样留着）。`;
+							return `没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但这些图解不开 / 名字被占着，按原样留着）。`;
 						}
-						return `ℹ️ 没有需要整理的图片（没有内容相同的重复副本，也没有需要转换格式的图片${convertHint ? `；${convertHint}` : ''}）。`;
+						return `没有需要整理的图片（没有内容相同的重复副本，也没有需要转换格式的图片${convertHint ? `；${convertHint}` : ''}）。`;
 					}
 
-					if (removed > 0 || converted > 0) ctx.progress.finish('✅ 整理完成');
+					if (removed > 0 || converted > 0) ctx.progress.finish(' 整理完成');
 					else ctx.progress.clear();
 
-					let message = `🎉 已整理：${parts.join('，')}。`;
+					let message = ` 已整理：${parts.join('，')}。`;
 					if (convertSkipped > 0) {
 						message += `另有 ${convertSkipped} 张没转（已经是 ${ready?.label ?? ''}、动图，或这张解不开 / 名字被占着），按原样留着。`;
 					}
-					if (convertFailed > 0) message += `⚠️ 有 ${convertFailed} 张转换出错，详情见控制台。`;
+					if (convertFailed > 0) message += ` 有 ${convertFailed} 张转换出错，详情见控制台。`;
 					if (convertHint) message += `（${convertHint}）`;
 					return message;
 				}
@@ -725,7 +727,7 @@ export class ImageTasks implements TaskActions {
 		new ConfirmRenameModal(this.app, dropFiles.length + convertTargets.length, run, {
 			title: '确认整理图片',
 			message: planLines.join(''),
-			warning: '⚠️ 合并掉的是内容一模一样的副本（会进回收站）；笔记里指向它们的链接会改写到留下的那一张，显示效果不变。跨文件夹的同图不动 —— 那是「整理图片位置」特意给每篇笔记拷的副本。格式转换会重写图片文件并改扩展名（如 png → webp），链接由 Obsidian 自动更新；动图（gif）与已经是目标格式的图片不会被动。',
+			warning: '合并掉的是内容相同的副本（进回收站），链接会改写到留下的那张。',
 			confirmLabel: '确认整理',
 		}).open();
 	}
@@ -751,7 +753,7 @@ export class ImageTasks implements TaskActions {
 				texts.push(await this.app.vault.read(doc));
 			} catch (err) {
 				// 读不出来的那一篇当作"可能引用了一切"：宁可少清，也不能把有人用的图删了
-				console.error(`⚠️ 读不出 ${doc.path}，这一次不清理没人引用的附件`, err);
+				console.error(` 读不出 ${doc.path}，这一次不清理没人引用的附件`, err);
 				return 0;
 			}
 		}
@@ -763,7 +765,7 @@ export class ImageTasks implements TaskActions {
 				await this.app.fileManager.trashFile(file);
 				removed++;
 			} catch (err) {
-				console.error(`⚠️ 清理 ${file.path} 失败（不影响其它图片）`, err);
+				console.error(` 清理 ${file.path} 失败（不影响其它图片）`, err);
 			}
 		}
 		return removed;
@@ -783,24 +785,24 @@ export class ImageTasks implements TaskActions {
 			try {
 				texts.push(await this.app.vault.read(doc));
 			} catch (err) {
-				console.error(`⚠️ 读不出 ${doc.path}，中止清理`, err);
-				new Notice('⚠️ 有笔记读不出来，为安全起见这一次不清理。');
+				console.error(` 读不出 ${doc.path}，中止清理`, err);
+				new Notice('有笔记读取失败，本次未清理。');
 				return;
 			}
 		}
 
 		const unused = selectUnusedImages(images, texts);
 		if (unused.length === 0) {
-			new Notice('ℹ️ 全库图片都有笔记或 canvas 引用，没有可清理的。');
+			new Notice('没有可清理的图片。');
 			return;
 		}
 
 		new ConfirmRenameModal(this.app, unused.length, async () => {
 			await this.runner.run(
 				{
-					label: '🧹 清理没人引用的图片',
+					label: '清理没人引用的图片',
 					files: unused,
-					failureMessage: '❌ 清理没人引用的图片时出错，请检查控制台。',
+					failureMessage: '处理失败，请查看控制台。',
 				},
 				async (ctx) => {
 					let removed = 0;
@@ -811,23 +813,23 @@ export class ImageTasks implements TaskActions {
 								await this.app.fileManager.trashFile(file);
 								removed++;
 							} catch (err) {
-								console.error(`⚠️ 清理 ${file.path} 失败（不影响其它图片）`, err);
+								console.error(` 清理 ${file.path} 失败（不影响其它图片）`, err);
 							}
 						}
 						ctx.progress.step(i + 1);
 					}
 					if (removed === 0) {
 						ctx.progress.clear();
-						return '⚠️ 一张都没清掉，详情见控制台。';
+						return '没有清理任何图片。';
 					}
-					ctx.progress.finish('✅ 清理完成');
-					return `🎉 已把 ${removed} 张没人引用的图片送进回收站（只清图片、只认笔记与 canvas 里的引用）。`;
+					ctx.progress.finish(' 清理完成');
+					return `已把 ${removed} 张没人引用的图片送进回收站（只清图片、只认笔记与 canvas 里的引用）。`;
 				}
 			);
 		}, {
 			title: '确认清理没人引用的图片',
 			message: `发现 ${unused.length} 张图片没有任何笔记或 canvas 引用，确认清理？`,
-			warning: '⚠️ 这些图片会被送进回收站（可在回收站里恢复）。只清图片；pdf、音频等其它附件一个都不碰。',
+			warning: '图片会送进回收站，可恢复。',
 			confirmLabel: '确认清理',
 		}).open();
 	}
@@ -848,9 +850,9 @@ export class ImageTasks implements TaskActions {
 		const settings = this.getSettings();
 		await this.runner.run(
 			{
-				label: '🧹 整理图片位置',
+				label: '整理图片位置',
 				files,
-				failureMessage: '❌ 整理图片位置中断，请检查控制台。',
+				failureMessage: '处理失败，请查看控制台。',
 				needsIndex: true,
 			},
 			async (ctx) => {
@@ -897,8 +899,8 @@ export class ImageTasks implements TaskActions {
 
 				let finalMsg: string;
 				if (touched > 0) {
-					ctx.progress.finish('✅ 整理完成');
-					const parts = [`🎉 ${where}共整理 ${touched} 篇笔记`];
+					ctx.progress.finish(' 整理完成');
+					const parts = [` ${where}共整理 ${touched} 篇笔记`];
 					if (moved > 0) parts.push(`搬过来 ${moved} 张`);
 					if (copied > 0) parts.push(`复制 ${copied} 张`);
 					if (relinked > 0) parts.push(`改写 ${relinked} 处链接`);
@@ -909,7 +911,7 @@ export class ImageTasks implements TaskActions {
 					}
 				} else {
 					ctx.progress.clear();
-					finalMsg = 'ℹ️ 没有需要整理的图片位置。';
+					finalMsg = '没有需要整理的图片位置。';
 				}
 				if (skipped > 0 && reasons.length > 0) {
 					finalMsg += `（${reasons.join('；')}）`;
@@ -926,9 +928,9 @@ export class ImageTasks implements TaskActions {
 	async setImageSize(files: TFile[], options: ImageSizeOptions, scopeLabel: string): Promise<void> {
 		await this.runner.run(
 			{
-				label: '🖼️ 设置图片大小',
+				label: '设置图片大小',
 				files,
-				failureMessage: '❌ 设置图片大小中断，请检查控制台。',
+				failureMessage: '处理失败，请查看控制台。',
 			},
 			async (ctx) => {
 				let changedFiles = 0;
@@ -949,11 +951,11 @@ export class ImageTasks implements TaskActions {
 				}
 
 				if (changedLinks > 0) {
-					ctx.progress.finish('✅ 尺寸设置完成');
-					return `🎉 ${scopeLabel}处理完毕！共修改 ${changedLinks} 处图片尺寸（${changedFiles} 篇笔记）。`;
+					ctx.progress.finish(' 尺寸设置完成');
+					return `${scopeLabel}处理完毕！共修改 ${changedLinks} 处图片尺寸（${changedFiles} 篇笔记）。`;
 				}
 				ctx.progress.clear();
-				return 'ℹ️ 没有需要修改的图片尺寸。';
+				return '没有需要修改的图片尺寸。';
 			}
 		);
 	}
@@ -968,7 +970,7 @@ export class ImageTasks implements TaskActions {
 		const settings = this.getSettings();
 		const invalid = validateImageSize(settings.imageSizeWidth, settings.imageSizeHeight);
 		if (invalid !== null) {
-			new Notice(`⚠️ 默认尺寸无效：${invalid}。请在「图片大小」中修改默认宽度与高度。`);
+			new Notice('默认尺寸无效，请修改宽度或高度。');
 			return;
 		}
 		await this.setImageSize(
@@ -985,7 +987,7 @@ export class ImageTasks implements TaskActions {
 	/** 打开图片大小设置弹窗 */
 	openImageSize(files: TFile[], scopeLabel: string): void {
 		if (files.length === 0) {
-			new Notice('ℹ️ 没有可以处理的笔记。');
+			new Notice('没有可处理的笔记。');
 			return;
 		}
 
@@ -1018,13 +1020,13 @@ export class ImageTasks implements TaskActions {
 	 */
 	async copyImages(file: TFile, refs: ImageRef[], selection: CopySelection | null = null): Promise<void> {
 		if (refs.length === 0) {
-			new Notice('没有找到可复制的图片。请把光标放到图片链接上，或选中包含图片的内容。');
+			new Notice('没有找到可复制的图片。');
 			return;
 		}
 
 		const images = await resolveImageFiles(this.app, file.path, refs);
 		if (images.length === 0) {
-			new Notice('没有找到对应的图片文件，它可能不在仓库中，或存在同名图片而无法确定。');
+			new Notice('没有找到图片文件。');
 			return;
 		}
 
@@ -1035,16 +1037,15 @@ export class ImageTasks implements TaskActions {
 			const bitmapPath = rich === null && images.length === 1 ? images[0]?.path ?? null : null;
 			await copyImageFiles(images.map(image => image.path), bitmapPath, process.platform, rich);
 
-			const names = summarizeNames(images.map(image => image.name));
 			new Notice(
 				rich === null
-					? `📋 已复制 ${images.length} 张图片：${names}\n可粘贴到文件夹或聊天窗口。`
-					: `📋 已复制文字和 ${images.length} 张图片：${names}\n粘贴到聊天窗口是图文混排。`,
-				4000
+					? `已复制 ${images.length} 张图片。`
+					: `已复制文字和 ${images.length} 张图片。`,
+				3000
 			);
 		} catch (e) {
-			console.error('❌ [Note Tidy] 复制图片失败：', e);
-			new Notice('❌ 复制图片失败，详情请见控制台。');
+			console.error(' [Note Tidy] 复制图片失败：', e);
+			new Notice('复制图片失败，请查看控制台。');
 		}
 	}
 
@@ -1093,11 +1094,11 @@ export class ImageTasks implements TaskActions {
 	 */
 	async typeset(files: TFile[], where: string): Promise<void> {
 		await this.runPerFile(
-			'💬 排版修复',
+			' 排版修复',
 			files,
 			async (file) => (await this.typesetOne(file)) ? 1 : 0,
 			(count, processed, failed) =>
-				`🎉 ${where}共修复了 ${count} 篇笔记的排版。` +
+				` ${where}共修复了 ${count} 篇笔记的排版。` +
 				`本次处理 ${processed} 篇${failed > 0 ? `（${failed} 篇出错）` : ''}；${this.describeLayoutSwitches()}`
 		);
 	}
@@ -1116,12 +1117,12 @@ export class ImageTasks implements TaskActions {
 	async quickFixChatLog(file: TFile | null): Promise<void> {
 		await this.runner.run(
 			{
-				label: '⚡ 快速修复聊天记录',
+				label: '快速修复聊天记录',
 				files: file ? [file] : [],
-				failureMessage: '❌ 处理过程中发生意外错误，请检查控制台。',
+				failureMessage: '处理失败，请查看控制台。',
 			},
 			async (ctx) => {
-				if (!file) return '⚠️ 无法获取当前文件，请确保您打开了一篇笔记！';
+				if (!file) return '请先打开一篇笔记。';
 
 				// ① 外部路径的图片 → 收进仓库并换成内部链接
 				const transferred = await transferExternalImages(this.app, this.getSettings(), file);
@@ -1130,16 +1131,172 @@ export class ImageTasks implements TaskActions {
 
 				if (!transferred && !typeset) {
 					ctx.progress.clear();
-					return 'ℹ️ 没有需要修复的内容：本文件里没有外部图片，排版也已经规范。';
+					return '没有需要修复的内容。';
 				}
 
-				ctx.progress.finish('✅ 修复完成');
+				ctx.progress.finish(' 修复完成');
 				const done: string[] = [];
 				if (transferred) done.push('已转换外部图片');
 				if (typeset) done.push('已修复排版');
-				return `🎉 聊天记录快速修复完成（${done.join('，')}）。${this.describeLayoutSwitches()}`;
+				return `聊天记录快速修复完成（${done.join('，')}）。${this.describeLayoutSwitches()}`;
 			}
 		);
+	}
+
+	/**
+	 * 从 Bangumi 讨论页网址导入：抓网页 → 解析楼层 → 排版 → 插到当前光标。
+	 *
+	 * 只在用户点命令、填网址并确认之后联网（`requestUrl`），失败一律给提示，不静默。
+	 * 结果用 `editor.replaceSelection` 插进当前文档，不写盘；撤销一次即可回退。
+	 */
+	async importBangumiTopic(): Promise<void> {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const file = view?.file ?? null;
+		const editor = view?.editor ?? null;
+		if (!file || !editor) {
+			new Notice('请先打开一篇笔记。');
+			return;
+		}
+		new BangumiImportModal(this.app, url => {
+			void this.fetchAndInsertBangumi(url, editor, file);
+		}).open();
+	}
+
+	/** 「从 Bangumi 网页导入」的实际动作：抓取 + 解析 + 排版 + 插到光标 */
+	private async fetchAndInsertBangumi(url: string, editor: Editor, file: TFile): Promise<void> {
+		const ref = parseBangumiUrl(url);
+		if (!ref) {
+			new Notice('只支持 bgm.tv 的小组或条目讨论页。');
+			return;
+		}
+
+		new Notice('正在抓取讨论页…');
+		const posts: BangumiPost[] = [];
+		const seenPages = new Set<string>();
+		const queue = [ref.url];
+		let title = '';
+		let pagesFetched = 0;
+		let failed = false;
+		const MAX_PAGES = 50;
+
+		while (queue.length > 0 && pagesFetched < MAX_PAGES) {
+			const pageUrl = queue.shift();
+			if (!pageUrl || seenPages.has(pageUrl)) continue;
+			seenPages.add(pageUrl);
+
+			let response;
+			try {
+				response = await requestUrl({ url: pageUrl });
+			} catch (error) {
+				console.error(`[ImageTransfer] 抓取 Bangumi 讨论页失败：${pageUrl}`, error);
+				if (pagesFetched === 0) {
+					new Notice('抓取失败，请检查网络或代理。');
+					return;
+				}
+				failed = true;
+				break;
+			}
+			if (response.status !== 200) {
+				if (pagesFetched === 0) {
+					new Notice(`抓取失败：服务器返回 ${response.status}。`);
+					return;
+				}
+				failed = true;
+				break;
+			}
+
+			const page = parseBangumiPage(response.text);
+			pagesFetched++;
+			if (pagesFetched === 1 && page.posts.length === 0) {
+				new Notice('没有识别到讨论楼层。');
+				return;
+			}
+			if (!title) title = page.title;
+			posts.push(...page.posts);
+			for (const next of extractBangumiPageUrls(response.text, pageUrl)) {
+				if (!seenPages.has(next) && !queue.includes(next)) queue.push(next);
+			}
+		}
+
+		// 分页之间理论上不会重复；万一页面给了重复楼层（或翻页时重复渲染），按楼层号 + 正文去重
+		const seenPosts = new Set<string>();
+		const uniquePosts = posts.filter(post => {
+			const key = `${post.floor}|${post.user}|${post.body.slice(0, 40)}`;
+			if (seenPosts.has(key)) return false;
+			seenPosts.add(key);
+			return true;
+		});
+		if (uniquePosts.length === 0) {
+			new Notice('没有识别到讨论楼层。');
+			return;
+		}
+
+		const options = getBangumiOptions(this.getSettings());
+		const settings = this.getSettings();
+		let text = formatBangumiPosts(uniquePosts, options);
+		if (settings.bangumiTitleMode === 'heading' && title) {
+			text = `## ${title}\n\n${text}`;
+		}
+		// 网页里的静态图片收进仓库；GIF / 视频保持链接。命名 / 转格式复用 importImageBytes。
+		let createdImages: TFile[] = [];
+		if (settings.bangumiImageMode === 'import') {
+			const remote = await transferRemoteImagesInText(
+				this.app,
+				settings,
+				file,
+				text,
+				async imageUrl => {
+					const response = await requestUrl({ url: imageUrl });
+					if (response.status !== 200) {
+						throw new Error(`HTTP ${response.status}`);
+					}
+					return response.arrayBuffer;
+				}
+			);
+			text = remote.content;
+			createdImages = remote.created;
+		}
+		// 与「排版选中内容」同一条流水线：中文 / 英文 / 标点 / 公式顺手整一遍
+		text = formatNoteText(text, this.getTextPipelineOptions());
+
+		// 插在当前光标处；光标那一行前面已经有字时先空一行，免得标题粘在正文后面
+		const cursor = editor.getCursor();
+		const lineBeforeCursor = (editor.getLine(cursor.line) ?? '').slice(0, cursor.ch);
+		const prefix = lineBeforeCursor.trim() === '' ? '' : '\n\n';
+		try {
+			editor.replaceSelection(`${prefix}${text}\n`);
+		} catch (error) {
+			// 写不进就回滚刚下载的图片，不留孤儿附件
+			await discardImportedFiles(this.app, createdImages);
+			throw error;
+		}
+
+		const tail = failed ? '，后续页失败' : '';
+		new Notice(`已导入 ${uniquePosts.length} 楼${tail}。`);
+
+		if (settings.bangumiTitleMode === 'rename' && title) {
+			await this.renameNoteToTitle(file, title);
+		}
+	}
+
+	/** 用讨论主题标题重命名当前笔记；重名时追加序号，不改其它文件 */
+	private async renameNoteToTitle(file: TFile, title: string): Promise<void> {
+		const name = titleAsFileName(title);
+		const folder = file.parent?.path ?? '';
+		const base = folder ? `${folder}/${name}` : name;
+		let target = `${base}.md`;
+		let index = 2;
+		while (target !== file.path && this.app.vault.getAbstractFileByPath(target) !== null) {
+			target = `${base} ${index}.md`;
+			index++;
+		}
+		if (target === file.path) return;
+		try {
+			await this.app.fileManager.renameFile(file, target);
+		} catch (error) {
+			console.error(`[ImageTransfer] 重命名笔记失败：${file.path} → ${target}`, error);
+			new Notice('重命名失败，请查看控制台。');
+		}
 	}
 
 	/**
@@ -1158,28 +1315,28 @@ export class ImageTasks implements TaskActions {
 		const from = editor.posToOffset(editor.getCursor('from'));
 		const to = editor.posToOffset(editor.getCursor('to'));
 		if (to <= from || editor.getSelection().trim() === '') {
-			new Notice('ℹ️ 先选中要排版的内容，再运行这条命令。');
+			new Notice('请先选中要排版的内容。');
 			return;
 		}
 
 		await this.runner.run(
 			{
-				label: '✍️ 排版选中内容',
+				label: '排版选中内容',
 				files: [file],
-				failureMessage: '❌ 排版选中内容时发生意外错误，请检查控制台。',
+				failureMessage: '处理失败，请查看控制台。',
 			},
 			async (ctx) => {
 				const result = await this.typesetEditorRange(file, editor, from, to, SELECTION_FIX_PLAN);
 				if (result.status === 'unchanged') {
 					ctx.progress.clear();
-					return 'ℹ️ 选中的内容没有需要修复的地方。';
+					return '选中的内容没有需要修复的地方。';
 				}
 				if (result.status === 'skipped') {
 					ctx.progress.clear();
-					return 'ℹ️ 这段内容已经变了，没有改动它。';
+					return '这段内容已经变了，没有改动它。';
 				}
-				ctx.progress.finish('✅ 排版完成');
-				return `🎉 选中内容已排版。${this.describeLayoutSwitches()}`;
+				ctx.progress.finish(' 排版完成');
+				return `选中内容已排版。${this.describeLayoutSwitches()}`;
 			}
 		);
 	}
@@ -1203,12 +1360,6 @@ export class ImageTasks implements TaskActions {
 
 		const end = editor.posToOffset(editor.getCursor('to'));
 		const result = await this.typesetEditorRange(file, editor, start, end, plan);
-		if (result.status === 'fixed') {
-			// 只提示"看得出发生了什么"的那两种：整段当聊天记录排了版、图片进了仓库。
-			// 只对齐了缩进、只套了尺寸就不打扰（那是每次粘贴都可能发生的顺手事）
-			if (result.chatLog) new Notice('⚡ 已修好刚粘贴的聊天记录。');
-			else if (result.imported > 0) new Notice(`⚡ 已把刚粘贴的 ${result.imported} 张图片收进仓库。`);
-		}
 		return result.status === 'fixed';
 	}
 
@@ -1220,7 +1371,7 @@ export class ImageTasks implements TaskActions {
 	 * 粘贴文本里带的图片链接）都走它；**本插件自己接管的那条路**（`pasteImages`）不用它 ——
 	 * 那一条是我们自己写的，尺寸在 `fixPastedRange` / 这里当场就做掉了。
 	 *
-	 * 为什么单独留一条路：**别人家的粘贴**可能分几次落进编辑器（一张一张存盘 / 转码，
+	 * 为什么单独留一条路：**别人家的粘贴**可能分几次放进编辑器（一张一张存盘 / 转码，
 	 * 每存好一张才插一条链接），而文本修复那边一笔只做一次。粘贴过后的几秒里，
 	 * 这段范围每变一次就再看一眼（见 `ui/paste-watch.ts` 的观望表）；
 	 * 已经有尺寸的图片不会再动，所以重复跑是幂等的。
@@ -1313,7 +1464,7 @@ export class ImageTasks implements TaskActions {
 				);
 				links.push(`![[${imported.name}]]`);
 			} catch (err) {
-				console.error(`❌ 粘贴的图片存不进仓库: ${image.name}`, err);
+				console.error(` 粘贴的图片存不进仓库: ${image.name}`, err);
 			}
 		}
 		return links;
@@ -1375,10 +1526,10 @@ export class ImageTasks implements TaskActions {
 
 		// ② 排版（开了才做）：
 		//    像聊天记录 —— 先把这一段原本那一层缩进剥掉，让流水线看到"顶格的这一段"，
-		//    排完版再由 `placeBlockAt` 整块落到光标那一层（顺序反了会吃掉正文自己的缩进）；
+		//    排完版再由 `placeBlockAt` 整块放到光标那一层（顺序反了会覆盖正文自己的缩进）；
 		//    不像 —— 一个字的正文都不改（也不跑流水线），只把整块的行首缩进对齐到光标那一层：
 		//    编辑器粘贴只把第一行放在光标那一列、其余行从第 0 列开始。
-		const chatLog = plan.typeset && looksLikeChatLog(core);
+		const chatLog = plan.typeset && (looksLikeChatLog(core) || looksLikeBangumiLog(core));
 		let typed = plan.typeset && chatLog ? dedentBy(core, indent.baseIndent) : core;
 		if (chatLog) {
 			typed = placeBlockAt(formatNoteText(typed, this.getTextPipelineOptions()), indent.prefix);
@@ -1443,6 +1594,7 @@ export class ImageTasks implements TaskActions {
 		return {
 			leadingIndent: resolveLeadingIndentMode(settings.textLeadingIndentFix),
 			chat: this.getChatLogOptions(),
+			bangumi: getBangumiOptions(settings),
 			// 序号与标题级别：只修不齐的地方（首项编号不是 1、父子标题差不止一级）
 			listRenumber: settings.listRenumber,
 			headingLevels: settings.headingLevelFix,
@@ -1483,6 +1635,7 @@ export class ImageTasks implements TaskActions {
 		const enabled: string[] = [];
 		if (resolveLeadingIndentMode(settings.textLeadingIndentFix) !== 'off') enabled.push('缩进与标记');
 		enabled.push('聊天记录');
+		enabled.push('Bangumi 讨论');
 		if (settings.listRenumber) enabled.push('列表序号');
 		if (settings.headingLevelFix) enabled.push('标题级别');
 		if (settings.mathLayout) enabled.push('公式');
@@ -1511,7 +1664,7 @@ export class ImageTasks implements TaskActions {
 		after?: () => Promise<void>
 	): Promise<void> {
 		await this.runner.run(
-			{ label, files, failureMessage: '❌ 处理中断，请检查控制台。', needsIndex: true },
+			{ label, files, failureMessage: '处理失败，请查看控制台。', needsIndex: true },
 			async (ctx) => {
 				let total = 0;
 				let processed = 0;
@@ -1526,7 +1679,7 @@ export class ImageTasks implements TaskActions {
 						} catch (e) {
 							// 单篇出错不拖垮整批：继续跑，最后一起汇报
 							failed++;
-							console.error(`❌ [ImageTransfer] ${file.path} 处理失败：`, e);
+							console.error(` [ImageTransfer] ${file.path} 处理失败：`, e);
 						}
 					}
 					ctx.progress.step(i + 1);
@@ -1537,14 +1690,14 @@ export class ImageTasks implements TaskActions {
 
 				let finalMsg: string;
 				if (total > 0) {
-					ctx.progress.finish('✅ 处理完成');
+					ctx.progress.finish(' 处理完成');
 					finalMsg = success(total, processed, failed);
 				} else {
 					ctx.progress.clear();
-					finalMsg = 'ℹ️ 没有需要处理的笔记。';
+					finalMsg = '没有需要处理的笔记。';
 				}
 				if (failed > 0) {
-					finalMsg += `⚠️ 有 ${failed} 篇处理失败，详情见控制台。`;
+					finalMsg += ` 有 ${failed} 篇处理失败，详情见控制台。`;
 				}
 				return finalMsg;
 			}

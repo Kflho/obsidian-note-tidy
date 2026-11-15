@@ -10,7 +10,7 @@
  * 环境缺少中文排序数据时（极老的运行时）退回到默认 Collator，仍能正确排英文与数字。
  */
 
-/** 中文优先、英文兜底的排序器；数字按数值比较 */
+/** 中文优先、英文保底的排序器；数字按数值比较 */
 function createCollator(): Intl.Collator {
 	const options: Intl.CollatorOptions = { numeric: true, sensitivity: 'base' };
 	try {
