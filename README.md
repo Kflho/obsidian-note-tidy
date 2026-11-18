@@ -51,7 +51,9 @@ Reformats exported chat logs from messy single-line timestamps into clean, inden
 	你好，文件收到了吗
 ```
 
-Idempotent — running it multiple times on the same text won't produce duplicate newlines or extra whitespace.
+Idempotent — running it multiple times on the same text won't produce duplicate newlines or extra whitespace. Consecutive messages from the same person are merged into one (only the first header is kept).
+
+**Two ways to paste**: <kbd>Ctrl</kbd>+<kbd>V</kbd> pastes **pure content** — no username, date or time, no blank line between messages, and text/image order inside a message is kept as-is; indentation, time sorting and `@` stripping still follow the settings. Use the note right-click item **粘贴为聊天记录（Note Tidy）** to paste with the full header (username / date / time, per **Settings → 文本排版 → 聊天记录格式**). Both entries share the same options, so the body-layout options are not duplicated.
 
 The same command also fixes **broken leading indentation**, which is what copied QQ/WeChat text usually suffers from: a line starts with a space plus a tab (`" \t"`), or tabs with trailing spaces (`"\t\t "`). Indentation should be tabs only, with 4 spaces counting as one tab:
 
@@ -107,7 +109,7 @@ The layout is configurable (see **Settings** below):
 
 The result replaces the selection in the editor (so <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it, and nothing is written to disk), and the menu entry only appears while something is selected. Practical use: paste a chat log, select it, run this — the messages around it are never touched, so no pass has to guess where a message ends. The indent and the seams work exactly as they do for a paste (see **Fix on paste** below): a selection inside a list item or a quote stays on that level, and the line breaks around it are left as they were.
 
-**@-mentions can be dropped** (**Settings → 文本排版 → 聊天记录 → 去掉 @ 提及**, off by default, because it deletes words): in a group chat every reply starts with `@昵称`, and the nickname points at nobody once the log is in your vault. With the switch on:
+**@-mentions can be dropped** (**Settings → 文本排版 → 提取为纯内容的格式 → 去掉 @ 提及**, off by default, because it deletes words): in a group chat every reply starts with `@昵称`, and the nickname points at nobody once the log is in your vault. With the switch on:
 
 | Before | After |
 |--------|-------|
@@ -120,7 +122,7 @@ The result replaces the selection in the editor (so <kbd>Ctrl</kbd>+<kbd>Z</kbd>
 
 **Quick chat-log fix** — one entry in the command palette and in the right-click menus that does both jobs at once: transfer the external-path images referenced by this note, then fix the note's layout (spaces / indent / chat log / tags / formulas). Chat logs pasted out of QQ / WeChat usually carry `file:///<drive>:/…` images and messy spacing, so one click leaves them clean.
 
-**Fix on paste** (on by default, **Settings → 文本排版 → 聊天记录**) tidies a chat log the moment you paste it — and it only touches **the text you just pasted**. The gate is at least **two** message headers (a username before a timestamp), so mentioning `会议 14:30:25` in prose does not trigger it and copying a single message (which carries no header) does not either.
+**Fix on paste** (on by default, **Settings → 图片 → 粘贴 → 自动排版聊天记录**) tidies the pasted range as **pure content** the moment you paste it — and it only touches **the text you just pasted**. The gate is at least **two** message headers (a username before a timestamp), so mentioning `会议 14:30:25` in prose does not trigger it and copying a single message (which carries no header) does not either.
 
 How it knows which part is "just pasted": the paste event itself is only used to note *where* the paste happened (that event fires before the text is in the document — the insertion is done by CodeMirror's own handler afterwards), and as soon as the editor reports the change, everything from that position to the cursor is the pasted text. That range is read back, checked with the same "does this look like a chat log" test, and then reformatted in place: the images it references by absolute path are copied into the vault, the layout rules run on it, and the result is written back through the editor. So:
 
