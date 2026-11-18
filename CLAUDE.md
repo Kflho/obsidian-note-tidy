@@ -355,8 +355,17 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
   构建交付包 / release workflow / README，不收 `src/`、`test/`、`dev/`、`data/`。
 - 发布走 `kf-personal-development` 的 `release.py push --role user-facing`；**禁止从本仓
   `git push` 发布库**，也禁止把发布库当源码仓 merge / rebase。
-- 迁移待办（未完成前不要发版）：`release.json` 白名单、release-only workflow（不跑 npm build）、
-  首次转换需 `--allow-delete` 清掉发布库里的旧源码。发布前先与用户确认。
+- 发布清单是根目录的 `release.json`（split-release，白名单 8 个文件：`manifest.json`、
+  `versions.json`、`LICENSE`、两个 README、`.github/workflows/release.yml`、
+  `bin/exports/main.js`、`bin/exports/styles.css`）。
+- 发布库 remote 用 SSH（`ssh://git@ssh.github.com:443/Kflho/obsidian-note-tidy.git`）：
+  release.py 走 `git clone` / `git push`，HTTPS 这边连不上。
+- 完整流程：`npm run build`（产出 `bin/exports/main.js` + `styles.css`）→
+  `release.py verify` → `release.py push --role user-facing` → 在发布库上打 tag
+  （`git clone --depth 1` → `git tag x.y.z` → push）→ release workflow 建 release。
+- 插件的 verify 会跳过 `SKILL.md` / `local.example.json` 与 github 用户名脱敏：
+  release.py 识别 `manifest.json` 存在且没有 `SKILL.md` 时为插件项目（`is_plugin_tree`），
+  因为插件的 `authorUrl` 本来就要写作者主页。
 
 ## Git workflow（旧 single-repo 流程，已作废，勿执行）
 
