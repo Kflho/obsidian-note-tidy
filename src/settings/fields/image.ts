@@ -119,8 +119,8 @@ export const IMAGE_SECTION: FieldSection = {
 			fields: [
 				{
 					key: 'takeOverImagePaste',
-					name: '接管图片粘贴',
-					desc: '默认开；一次粘多张时逐张保存，避免并发撞名丢图。',
+					name: '粘贴图片时逐张保存',
+					desc: '默认开；关闭后由 Obsidian 或其他插件处理粘贴的图片。',
 					control: { type: 'toggle' },
 				},
 				{

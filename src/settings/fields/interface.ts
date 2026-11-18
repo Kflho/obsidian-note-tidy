@@ -41,6 +41,12 @@ export const INTERFACE_SECTION: FieldSection = {
 					control: { type: 'toggle' },
 				},
 				{
+					key: 'noteMenuPasteChatItem',
+					name: '「粘贴为聊天记录」',
+					desc: 'Ctrl+V 粘贴的是纯内容。',
+					control: { type: 'toggle' },
+				},
+				{
 					key: 'imageMenuManageItem',
 					name: '「管理右键菜单」',
 					desc: '',

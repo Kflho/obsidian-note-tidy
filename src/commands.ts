@@ -40,7 +40,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'convert-images-entire-vault',
-		name: '把整个仓库的图片转换为指定格式',
+		name: '转换整个仓库的图片格式',
 		callback: async () => {
 			await tasks.convertEntireVault();
 		}
@@ -48,7 +48,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'convert-images-current-note',
-		name: '把当前笔记的图片转换为指定格式',
+		name: '转换当前笔记的图片格式',
 		editorCallback: async (_editor: Editor, ctx: MarkdownView | MarkdownFileInfo) => {
 			await tasks.convertNoteImages(currentFile(ctx));
 		}
@@ -224,6 +224,22 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 			if (!file || !editor) return false;
 			if (!checking) {
 				void tasks.typesetSelection(file, editor);
+			}
+			return true;
+		}
+	});
+
+	plugin.addCommand({
+		id: 'paste-as-chat-log',
+		name: '粘贴为聊天记录',
+		// 和「排版选中内容」一样走 checkCallback：阅读模式下命令也要在面板里看得到
+		checkCallback: (checking: boolean) => {
+			const view = app.workspace.getActiveViewOfType(MarkdownView);
+			const file = view?.file ?? null;
+			const editor = view?.editor;
+			if (!file || !editor) return false;
+			if (!checking) {
+				void tasks.pasteAsChatLog(file, editor);
 			}
 			return true;
 		}

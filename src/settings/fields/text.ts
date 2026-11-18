@@ -16,7 +16,7 @@ import type { FieldSection } from './types';
 export const TEXT_SECTION: FieldSection = {
 	type: 'page',
 	heading: '文本排版',
-	desc: '按排版流水线顺序列出开关。',
+	desc: '控制笔记里的缩进、标题、聊天记录、公式与空格。',
 	groups: [
 		{
 			heading: '行首与标记',
@@ -24,7 +24,7 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'textLeadingIndentFix',
 					name: '行首缩进修复',
-					desc: '修复行首缩进与标记空白。',
+					desc: '修复行首缩进，以及列表、引用标记前面的空格。',
 					control: {
 						type: 'dropdown',
 						options: {
@@ -50,30 +50,60 @@ export const TEXT_SECTION: FieldSection = {
 			],
 		},
 		{
-			heading: '聊天记录',
+			heading: '聊天记录格式',
 			fields: [
 				{
 					key: 'chatShowUsername',
 					name: '显示用户名',
-					desc: '默认开；关闭后聊天记录只留正文。',
+					desc: '右键「粘贴为聊天记录」用；纯内容只留正文。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'chatShowDate',
 					name: '显示日期',
-					desc: '默认开；日期写在每条的头部。',
+					desc: '',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'chatShowTime',
 					name: '显示时间',
-					desc: '默认开；时间写在每条的头部。',
+					desc: '',
 					control: { type: 'toggle' },
 				},
 				{
+					key: 'chatMergeSameUser',
+					name: '同一个人多句话合并',
+					desc: '连发多条时只留第一条的用户名和时间。',
+					control: { type: 'toggle' },
+				},
+				{
+					key: 'chatBlankLineBetweenMessages',
+					name: '消息之间插入空行',
+					desc: '纯文字消息之间会插入空行；纯内容不会插入。',
+					control: { type: 'toggle' },
+				},
+				{
+					key: 'chatImageOrder',
+					name: '图文消息中图片的位置',
+					desc: '纯内容里图片位置不变。',
+					control: {
+						type: 'dropdown',
+						options: {
+							keep: '保持原顺序',
+							above: '图片在上方',
+							below: '图片在下方',
+						},
+					},
+				},
+			],
+		},
+		{
+			heading: '提取为纯内容的格式',
+			fields: [
+				{
 					key: 'chatIndent',
 					name: '正文缩进',
-					desc: '聊天记录正文的缩进方式。',
+					desc: 'Ctrl+V 和右键粘贴共用。',
 					control: {
 						type: 'dropdown',
 						options: {
@@ -85,34 +115,15 @@ export const TEXT_SECTION: FieldSection = {
 					},
 				},
 				{
-					key: 'chatImageOrder',
-					name: '图文消息中图片的位置',
-					desc: '聊天记录中图片与文字的先后。',
-					control: {
-						type: 'dropdown',
-						options: {
-							keep: '保持原顺序',
-							above: '图片在上方',
-							below: '图片在下方',
-						},
-					},
-				},
-				{
 					key: 'chatSortByTime',
 					name: '相邻消息按时间排序',
-					desc: '默认开；只在同一人的相邻消息之间调整顺序。',
+					desc: '只在同一人的相邻消息之间调整。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'chatStripMentions',
 					name: '去掉 @ 提及',
-					desc: '开启后聊天记录中的 @ 提及不写进笔记。',
-					control: { type: 'toggle' },
-				},
-				{
-					key: 'chatBlankLineBetweenMessages',
-					name: '消息之间插入空行',
-					desc: '默认关；只加在纯文字消息之间，带图的消息不加。',
+					desc: '',
 					control: { type: 'toggle' },
 				},
 			],
@@ -201,7 +212,7 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'textMathWrapSymbols',
 					name: '正文数学符号自动加公式',
-					desc: '把正文里的数学符号包成公式。',
+					desc: '把正文里的数学符号写成公式。',
 					control: { type: 'toggle' },
 				},
 				{
@@ -312,7 +323,7 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'spacingSymbolPad',
 					name: '符号自己的空格规则',
-					desc: '按符号规则整理空格。',
+					desc: '',
 					control: { type: 'toggle' },
 				},
 			],
@@ -336,8 +347,8 @@ export const TEXT_SECTION: FieldSection = {
 				},
 				{
 					key: 'blockSort',
-					name: '内容板块排版',
-					desc: '按首字母排序内容块。',
+					name: '内容块排序',
+					desc: '',
 					control: { type: 'toggle' },
 				},
 			],

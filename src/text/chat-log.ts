@@ -37,6 +37,11 @@ export interface ChatLogOptions {
 	sortByTime: boolean;
 	/** 是否去掉正文里的 `@昵称` 提及（见 stripMentions） */
 	stripMentions: boolean;
+	/**
+	 * 同一个人连发多条时合并成一条：只留第一条的头部，后面的正文接在它下面
+	 * （见 `mergeSameUserMessages`）。中间夹着作者正文时不合并。
+	 */
+	mergeSameUser: boolean;
 }
 
 /**
@@ -56,7 +61,27 @@ export const DEFAULT_CHAT_LOG_OPTIONS: ChatLogOptions = {
 	sortByTime: true,
 	// 删正文是不可逆的改动，默认不开；要用的在设置里打开
 	stripMentions: false,
+	// 「同一个人多句话合并」是聊天记录的常见排版：连发多条时只留一个头部
+	mergeSameUser: true,
 };
+
+/**
+ * 「提取为纯内容」用的选项：不显示用户名 / 日期 / 时间，消息之间不留空行，
+ * 图文消息也保持原始顺序（图片顺序只属于聊天记录格式，纯内容不再处理一遍）。
+ *
+ * 其余（正文缩进、按时间排序、去掉 @）沿用传入的选项 —— 两种粘贴共用同一批设置，
+ * 不另开一套，免得两处各改一遍（设置面板「文本排版」页的「提取为纯内容的格式」那一组）。
+ */
+export function plainContentOptions(base: ChatLogOptions): ChatLogOptions {
+	return {
+		...base,
+		showUsername: false,
+		showDate: false,
+		showTime: false,
+		blankLineBetweenMessages: false,
+		imageOrder: 'keep',
+	};
+}
 
 /**
  * 正文里的 @ 提及：`@昵称`（QQ / 微信 复制出来的回复标记）。
@@ -335,6 +360,8 @@ interface OutputBlock {
 	hasDate: boolean;
 	/** 这条消息真的输出了正文（只有头部行时为 false） */
 	hasBody: boolean;
+	/** 这条消息的发送者（识别不出时为空串）；合并同一人的相邻消息时用 */
+	userName?: string;
 }
 
 /**
@@ -475,6 +502,53 @@ function nextNonBlankIsMessage(blocks: OutputBlock[], index: number): boolean {
 }
 
 /**
+ * 同一个人连发的相邻消息合并成一条：只留第一条的头部，后面的正文接在它下面。
+ *
+ * 两条消息之间只有纯空白（空行）时照样合并 —— QQ / 微信 复制出来的记录常常在消息之间带空行；
+ * 中间夹着作者正文（非空白的 text 块）时不合并，那说明两条消息之间隔着笔记内容。
+ * 识别不出用户名（`userName` 为空）的消息不参与合并。
+ */
+function mergeSameUserMessages(blocks: OutputBlock[]): OutputBlock[] {
+	const merged: OutputBlock[] = [];
+	for (const block of blocks) {
+		if (block.kind === 'text') {
+			// 先照原样留着；后面若接上同一人的消息，再把它一起去掉
+			merged.push(block);
+			continue;
+		}
+
+		// 往回跳过纯空白块，找上一条真正的消息
+		let lastIndex = merged.length - 1;
+		while (
+			lastIndex >= 0 &&
+			merged[lastIndex]!.kind === 'text' &&
+			merged[lastIndex]!.text.trim() === ''
+		) {
+			lastIndex--;
+		}
+		const last = merged[lastIndex];
+
+		if (
+			last !== undefined &&
+			last.kind === 'message' &&
+			block.userName !== undefined &&
+			block.userName !== '' &&
+			last.userName === block.userName
+		) {
+			// 同一人：去掉中间那些纯空白，后一条的正文（跳过它的头部行）接上去
+			merged.splice(lastIndex + 1);
+			const body = block.text.split('\n').slice(1).join('\n');
+			last.text = last.text.replace(/\n+$/, '\n') + body;
+			last.hasBody = last.hasBody || block.hasBody;
+			continue;
+		}
+
+		merged.push({ ...block });
+	}
+	return merged;
+}
+
+/**
  * 修复聊天记录排版。
  *
  * @param rawContent 笔记原始内容
@@ -491,6 +565,8 @@ export function formatChatLog(
 
 	const anchors = findTimeAnchors(rawContent);
 
+	// 没有时间戳锚点 = 认不出这是聊天记录（头部信息可能已被隐藏或删掉）：原样返回。
+	// 只有确定是聊天记录时才动手排版 —— 不猜格式，猜错会把用户原文改坏，而且不可逆。
 	if (anchors.length === 0) return rawContent;
 
 	// 仅在隐藏用户名时需要识别"无用户名头部"：显示用户名时头部自带用户名，不存在歧义
@@ -515,6 +591,7 @@ export function formatChatLog(
 	let currentKey: number | null = null;
 	let currentHasDate = false;
 	let currentHasBody = false;
+	let currentUserName = '';
 
 	/** 当前输出的末尾（正在拼装的消息优先） */
 	const tail = (): string =>
@@ -539,12 +616,14 @@ export function formatChatLog(
 				key: currentKey,
 				hasDate: currentHasDate,
 				hasBody: currentHasBody,
+				userName: currentUserName,
 			});
 		}
 		currentMessage = '';
 		currentKey = null;
 		currentHasDate = false;
 		currentHasBody = false;
+		currentUserName = '';
 	};
 
 	let lastProcessedIndex = 0;
@@ -719,6 +798,7 @@ export function formatChatLog(
 		}
 
 		lastProcessedIndex = boundary;
+		currentUserName = userName;
 		flushMessage();
 	}
 
@@ -733,7 +813,10 @@ export function formatChatLog(
 
 	// 相邻消息按时间先后重排：粘贴顺序有时与聊天窗口里的先后不一致，
 	// 后一条（常常是图片）先落地、前一条（文字）落在下面 —— 见 sortAdjacentMessages
-	const ordered = options.sortByTime === false ? blocks : sortAdjacentMessages(blocks);
+	const sorted = options.sortByTime === false ? blocks : sortAdjacentMessages(blocks);
+
+	// 同一个人连发的相邻消息合并成一条（只留第一条的头部）—— 见 mergeSameUserMessages
+	const ordered = options.mergeSameUser === false ? sorted : mergeSameUserMessages(sorted);
 
 	// 拼成最终文本。"消息之间留不留空行"按**重排后**的相邻关系处理，
 	// 否则排序换个顺序就会把分隔空行留错地方。

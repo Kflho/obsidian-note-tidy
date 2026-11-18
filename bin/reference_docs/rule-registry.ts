@@ -861,14 +861,14 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: [
 					'chatShowUsername', 'chatShowDate', 'chatShowTime',
 					'chatIndent', 'chatImageOrder', 'chatBlankLineBetweenMessages', 'chatSortByTime',
-					'chatStripMentions',
+					'chatStripMentions', 'chatMergeSameUser', 'noteMenuPasteChatItem',
 				],
 				impl: {
 					file: 'src/text/chat-log.ts',
-					symbols: ['formatChatLog', 'resolveIndent', 'looksLikeChatLog', 'stripMentions'],
+					symbols: ['formatChatLog', 'resolveIndent', 'looksLikeChatLog', 'stripMentions', 'plainContentOptions', 'mergeSameUserMessages'],
 				},
 				tests: ['test/chat-log.test.ts'],
-				note: '规范里没有对应条目；必须严格幂等（重复执行不能再产生空行或空格变化）。`looksLikeChatLog` 是"这段文本像不像聊天记录"的判定（时间戳锚点与排版共用一份正则），供粘贴自动修复用，见 `cross.auto-fix-paste`：**分两档** —— 带日期的头部一条就够（QQ 复制单条消息就是它），只有时分秒的头部要"独占行尾 + 下面还有正文"才算一条，其余形状两条才动手。「消息之间插入空行」（`chatBlankLineBetweenMessages`，默认关）是**总开关**，与头部信息开不开无关：关掉时相邻消息紧挨着，**源文里消息之间的空行也一并去掉**（QQ / 微信 复制出来的记录常带空行，2026-09 用户报的"还是会产生空行"），打开时恰好留一行；中间夹着作者正文、或两条消息里有一条没有正文时不算"相邻消息"，那一段空白原样保留。「相邻消息按时间排序」（`sortAdjacentMessages`）针对粘贴顺序与时间戳不一致的情况（一次选多条复制时后一条先落地，图片就跑到上一条文字上方）：只在"消息 + 纯空白 + 消息"的连续段内重排，中间夹着作者正文的段一律不动，段里时间戳形状不一致（有的写了日期、有的只有时分秒）也不排。「去掉 @ 提及」（`stripMentions`，默认关）删的是正文里的 `@昵称` —— 昵称在笔记里指不到具体的人；`@` 前面必须是行首或空白/标点（`foo@bar.com` 不动），整行只有提及的连整行去掉。**正文边界只认空行与下一条消息头部**：整篇排版时"这条消息的正文到哪儿结束"没有额外判据，作者自己接在消息下面写的行（`06集` 这类标题、自己插的图）与消息正文之间没有空行时会被算作正文 —— 这是已知取舍（不再加"看缩进猜作者"这类规则：猜错过两次），要精确控制就用 `cross.typeset-selection`（只排版选中的一段）。**末条消息不截断**：正文一直取到文末（遇空行才停），续行跟着一起缩进、也跟着这条消息按时间排序 —— 2026-09 以前只取第一个换行，续行以顶格原文留在消息外面，看着就是"最后一句话没有正确缩进"',
+				note: '规范里没有对应条目；必须严格幂等（重复执行不能再产生空行或空格变化）。`looksLikeChatLog` 是"这段文本像不像聊天记录"的判定（时间戳锚点与排版共用一份正则），供粘贴自动修复用，见 `cross.auto-fix-paste`：**分两档** —— 带日期的头部一条就够（QQ 复制单条消息就是它），只有时分秒的头部要"独占行尾 + 下面还有正文"才算一条，其余形状两条才动手。「消息之间插入空行」（`chatBlankLineBetweenMessages`，默认关）是**总开关**，与头部信息开不开无关：关掉时相邻消息紧挨着，**源文里消息之间的空行也一并去掉**（QQ / 微信 复制出来的记录常带空行，2026-09 用户报的"还是会产生空行"），打开时恰好留一行；中间夹着作者正文、或两条消息里有一条没有正文时不算"相邻消息"，那一段空白原样保留。「相邻消息按时间排序」（`sortAdjacentMessages`）针对粘贴顺序与时间戳不一致的情况（一次选多条复制时后一条先落地，图片就跑到上一条文字上方）：只在"消息 + 纯空白 + 消息"的连续段内重排，中间夹着作者正文的段一律不动，段里时间戳形状不一致（有的写了日期、有的只有时分秒）也不排。「去掉 @ 提及」（`stripMentions`，默认关）删的是正文里的 `@昵称` —— 昵称在笔记里指不到具体的人；`@` 前面必须是行首或空白/标点（`foo@bar.com` 不动），整行只有提及的连整行去掉。**正文边界只认空行与下一条消息头部**：整篇排版时"这条消息的正文到哪儿结束"没有额外判据，作者自己接在消息下面写的行（`06集` 这类标题、自己插的图）与消息正文之间没有空行时会被算作正文 —— 这是已知取舍（不再加"看缩进猜作者"这类规则：猜错过两次），要精确控制就用 `cross.typeset-selection`（只排版选中的一段）。**末条消息不截断**：正文一直取到文末（遇空行才停），续行跟着一起缩进、也跟着这条消息按时间排序 —— 2026-09 以前只取第一个换行，续行以顶格原文留在消息外面，看着就是"最后一句话没有正确缩进"。**两个粘贴入口共用这一套选项**：右键「粘贴为聊天记录」（命令 `paste-as-chat-log` → `ImageTasks.pasteAsChatLog`）用完整格式（头部按 `chatShowUsername` / `chatShowDate` / `chatShowTime` 显示）；Ctrl+V 粘进来的那一段走 `plainContentOptions` —— 不显示用户名 / 日期 / 时间、消息之间不留空行、图文消息保持原顺序（图片顺序只属于聊天记录格式），缩进、按时间排序、去 @ 仍按这批设置，两处只有一份选项（设置面板「聊天记录格式」与「提取为纯内容的格式」两组分别管这两部分）',
 			},
 			{
 				id: 'structure.bangumi-log',

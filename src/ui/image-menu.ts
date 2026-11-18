@@ -48,6 +48,9 @@ export const QUICK_FIX_MENU_TITLE = '快速修复聊天记录（Note Tidy）';
 /** 只排版选中内容那一项（转换选区里的外部图片 + 修复排版，笔记其余部分不动） */
 export const TYPESET_SELECTION_MENU_TITLE = '排版选中内容（Note Tidy）';
 
+/** 右键「粘贴为聊天记录」那一项（剪贴板里的文字按完整聊天记录格式粘进来） */
+export const PASTE_CHAT_MENU_TITLE = '粘贴为聊天记录（Note Tidy）';
+
 /** 我们自己往菜单里加的一项 */
 export interface OwnMenuEntry {
 	title: string;
@@ -56,7 +59,7 @@ export interface OwnMenuEntry {
 }
 
 /** 本插件菜单项的键（设置里的开关、管理面板、命令审计都按它对齐） */
-export type OwnItemKey = 'copy' | 'quickSize' | 'quickFix' | 'typesetSelection' | 'manage' | 'imageSubmenu' | 'textSubmenu';
+export type OwnItemKey = 'copy' | 'quickSize' | 'quickFix' | 'typesetSelection' | 'pasteChat' | 'manage' | 'imageSubmenu' | 'textSubmenu';
 
 /** 文件菜单里那两个二级栏的标题（`menus.ts` 用它加菜单，面板用它显示） */
 export const IMAGE_SUBMENU_TITLE = '图片功能';
@@ -80,6 +83,7 @@ export const OWN_ITEMS: Record<OwnItemKey, { title: string; icon: string; desc: 
 	quickSize: { title: QUICK_SIZE_MENU_TITLE, icon: 'image', desc: '用默认尺寸修改图片大小' },
 	quickFix: { title: QUICK_FIX_MENU_TITLE, icon: 'zap', desc: '转换外部图片并修复整篇排版' },
 	typesetSelection: { title: TYPESET_SELECTION_MENU_TITLE, icon: 'wand-2', desc: '只排版选中内容，并转换选区里的外部图片' },
+	pasteChat: { title: PASTE_CHAT_MENU_TITLE, icon: 'clipboard-paste', desc: '把剪贴板内容按完整聊天记录格式粘贴' },
 	manage: { title: MANAGE_MENU_TITLE, icon: 'settings-2', desc: '打开右键菜单管理面板' },
 	imageSubmenu: { title: IMAGE_SUBMENU_TITLE, icon: 'image', desc: '转换图片、重命名、整理位置、整理图片、设置大小' },
 	textSubmenu: { title: TEXT_SUBMENU_TITLE, icon: 'message-square', desc: '修复笔记排版' },
@@ -95,6 +99,8 @@ export const OWN_ITEM_SCOPES: Record<OwnItemKey, MenuScope[]> = {
 	quickFix: ['image', 'note'],
 	// 「排版选中内容」只在笔记正文菜单里：没有选区就没什么可排的
 	typesetSelection: ['note'],
+	// 「粘贴为聊天记录」只在笔记正文菜单里：剪贴板内容要粘进编辑器
+	pasteChat: ['note'],
 	manage: ['image', 'note', 'folder'],
 	imageSubmenu: ['folder'],
 	textSubmenu: ['folder'],
@@ -115,6 +121,7 @@ export const OWN_ITEM_COMMANDS: Record<OwnItemKey, string | null> = {
 	quickSize: 'quick-set-image-size-current-note',
 	quickFix: 'quick-fix-chat-log-current-note',
 	typesetSelection: 'typeset-selection',
+	pasteChat: 'paste-as-chat-log',
 	manage: 'manage-image-menu',
 	imageSubmenu: null,
 	textSubmenu: null,
@@ -163,6 +170,8 @@ export function ownMenuEntries(options: {
 	quickFix: () => void;
 	/** 「排版选中内容」的动作（只在笔记正文菜单里用到；省略 = 不插这一项） */
 	typesetSelection?: () => void;
+	/** 「粘贴为聊天记录」的动作（只在笔记正文菜单里用到；省略 = 不插这一项） */
+	pasteChat?: () => void;
 	manage: () => void;
 }): OwnMenuEntry[] {
 	const entries: OwnMenuEntry[] = [];
@@ -183,6 +192,14 @@ export function ownMenuEntries(options: {
 			title: TYPESET_SELECTION_MENU_TITLE,
 			icon: OWN_ITEMS.typesetSelection.icon,
 			action: options.typesetSelection,
+		});
+	}
+	if (options.scope === 'note' && options.settings.noteMenuPasteChatItem !== false &&
+		options.hasFile && options.pasteChat) {
+		entries.push({
+			title: PASTE_CHAT_MENU_TITLE,
+			icon: OWN_ITEMS.pasteChat.icon,
+			action: options.pasteChat,
 		});
 	}
 	if (options.settings.imageMenuManageItem !== false) {
@@ -319,6 +336,7 @@ export function registerImageMenu(
 				quickSize: () => { if (file) void actions.quickSetImageSize(file); },
 				quickFix: () => { if (file) void actions.quickFixChatLog(file); },
 				typesetSelection: () => { if (file) void actions.typesetSelection(file, editor); },
+				pasteChat: () => { if (file) void actions.pasteAsChatLog(file, editor); },
 				manage: () => actions.openMenuManager(),
 			}));
 		})

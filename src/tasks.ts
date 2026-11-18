@@ -33,7 +33,7 @@ import {
 	transferImagesInText,
 	transferRemoteImagesInText,
 } from './image/transfer';
-import { looksLikeChatLog, resolveIndent } from './text/chat-log';
+import { formatChatLog, looksLikeChatLog, plainContentOptions, resolveIndent } from './text/chat-log';
 import type { ChatLogOptions } from './text/chat-log';
 import { formatBangumiPosts, looksLikeBangumiLog, titleAsFileName } from './text/bangumi';
 import type { BangumiPost } from './text/bangumi';
@@ -103,6 +103,8 @@ export interface TaskActions {	/** 转换外部绝对路径图片（逐篇，单
 	quickFixChatLog(file: TFile | null): Promise<void>;
 	/** 只排版**选中的那段内容**（转换选区里的外部图片 + 修复排版），笔记其余部分不动 */
 	typesetSelection(file: TFile, editor: Editor): Promise<void>;
+	/** 粘贴为聊天记录：读剪贴板，按完整聊天记录格式粘到光标处 */
+	pasteAsChatLog(file: TFile, editor: Editor): Promise<void>;
 	/** 从 Bangumi 讨论页网址导入：抓网页、排版、插到当前光标（命令面板入口） */
 	importBangumiTopic(): Promise<void>;
 	/** 粘贴自动修复：收拾刚粘进来的那一段 `[start, 光标处)`（收图 / 排版 / 套尺寸各认开关） */
@@ -135,7 +137,7 @@ export interface TaskActions {	/** 转换外部绝对路径图片（逐篇，单
 }
 
 /** 转换前确认弹窗里那句警告（当前笔记 / 全库共用） */
-const CONVERT_WARNING = '转换会重写图片文件并改扩展名，动图与已是目标格式的图片不动。';
+const CONVERT_WARNING = '转换会重写图片文件并改扩展名；动图和已是目标格式的图片保持原样。';
 
 /** 目标格式选了 pngquant、系统里又找不到它时说的话（怎么装、怎么指路都写清楚） */
 const PNGQUANT_MISSING_MESSAGE = '未找到 pngquant。请安装它，或在设置中填写路径。';
@@ -507,7 +509,7 @@ export class ImageTasks implements TaskActions {
 				if (converted > 0) {
 					ctx.progress.finish(' 转换完成');
 					let message = ` 已把 ${converted} 张图片转换为 ${label}。`;
-					if (skipped > 0) message += `另有 ${skipped} 张没转（已是 ${label}、动图，或这张解不开 / 名字被占着），按原样留着。`;
+						if (skipped > 0) message += `另有 ${skipped} 张未转换（已是 ${label}、动图，或无法解码、文件名重复），保留原样。`;
 					if (failed > 0) message += ` 有 ${failed} 张出错，详情见控制台。`;
 					return message;
 				}
@@ -515,7 +517,7 @@ export class ImageTasks implements TaskActions {
 				if (failed > 0) {
 					return `没有图片转换成功，有 ${failed} 张出错，详情见控制台。`;
 				}
-				return `没有图片需要转换（可能都已经是 ${label}，或这些图解不开 / 名字被占着）。`;
+					return `没有图片需要转换（可能都已是 ${label}，或无法解码、文件名重复）。`;
 			}
 		);
 	}
@@ -687,7 +689,7 @@ export class ImageTasks implements TaskActions {
 					if (parts.length === 0) {
 						ctx.progress.clear();
 						if (convertSkipped > 0) {
-							return `没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但这些图解不开 / 名字被占着，按原样留着）。`;
+								return `没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但无法解码或文件名重复，保留原样）。`;
 						}
 						return `没有需要整理的图片（没有内容相同的重复副本，也没有需要转换格式的图片${convertHint ? `；${convertHint}` : ''}）。`;
 					}
@@ -697,7 +699,7 @@ export class ImageTasks implements TaskActions {
 
 					let message = ` 已整理：${parts.join('，')}。`;
 					if (convertSkipped > 0) {
-						message += `另有 ${convertSkipped} 张没转（已经是 ${ready?.label ?? ''}、动图，或这张解不开 / 名字被占着），按原样留着。`;
+							message += `另有 ${convertSkipped} 张未转换（已是 ${ready?.label ?? ''}、动图，或无法解码、文件名重复），保留原样。`;
 					}
 					if (convertFailed > 0) message += ` 有 ${convertFailed} 张转换出错，详情见控制台。`;
 					if (convertHint) message += `（${convertHint}）`;
@@ -823,7 +825,7 @@ export class ImageTasks implements TaskActions {
 						return '没有清理任何图片。';
 					}
 					ctx.progress.finish(' 清理完成');
-					return `已把 ${removed} 张没人引用的图片送进回收站（只清图片、只认笔记与 canvas 里的引用）。`;
+						return `已把 ${removed} 张没有被引用的图片移到回收站（只清图片，只认笔记与 canvas 里的引用）。`;
 				}
 			);
 		}, {
@@ -1069,6 +1071,7 @@ export class ImageTasks implements TaskActions {
 				quickSize: settings.imageMenuQuickSizeItem !== false,
 				quickFix: settings.imageMenuQuickFixItem !== false,
 				typesetSelection: settings.imageMenuTypesetItem !== false,
+				pasteChat: settings.noteMenuPasteChatItem !== false,
 				manage: settings.imageMenuManageItem !== false,
 				imageSubmenu: settings.fileMenuImageSubmenu !== false,
 				textSubmenu: settings.fileMenuTextSubmenu !== false,
@@ -1077,6 +1080,8 @@ export class ImageTasks implements TaskActions {
 				settings.imageMenuCopyItem = ownItems.copy;
 				settings.imageMenuQuickSizeItem = ownItems.quickSize;
 				settings.imageMenuQuickFixItem = ownItems.quickFix;
+				settings.imageMenuTypesetItem = ownItems.typesetSelection;
+				settings.noteMenuPasteChatItem = ownItems.pasteChat;
 				settings.imageMenuManageItem = ownItems.manage;
 				settings.fileMenuImageSubmenu = ownItems.imageSubmenu;
 				settings.fileMenuTextSubmenu = ownItems.textSubmenu;
@@ -1342,6 +1347,36 @@ export class ImageTasks implements TaskActions {
 	}
 
 	/**
+	 * 粘贴为聊天记录：把剪贴板里的文字按**完整聊天记录格式**粘到光标处。
+	 *
+	 * 与 Ctrl+V 的区别只在头部：Ctrl+V 走「提取为纯内容」（`fixPastedRange` → 纯内容选项，
+	 * 不带用户名 / 日期 / 时间、消息之间不留空行、图片保持原顺序），这一项要的是带头部的完整格式。
+	 * 排版选项两边共用同一批设置，只是头部开不开不同（见 `plainContentOptions`）。
+	 *
+	 * 剪贴板里不像聊天记录（没有时间戳头部）时按原样粘贴 —— 不猜、也不改写用户粘的内容。
+	 */
+	async pasteAsChatLog(file: TFile, editor: Editor): Promise<void> {
+		const text = await readClipboardText();
+		if (!text.trim()) {
+			new Notice('剪贴板里没有可粘贴的文字。');
+			return;
+		}
+
+		await this.runner.run(
+			{
+				label: '粘贴为聊天记录',
+				files: [file],
+				failureMessage: '粘贴失败，请打开开发者控制台查看原因。',
+			},
+			async (ctx) => {
+				editor.replaceSelection(formatChatLog(text, this.getChatLogOptions()));
+				ctx.progress.finish(' 已粘贴');
+				return '已按聊天记录格式粘贴。';
+			}
+		);
+	}
+
+	/**
 	 * 粘贴自动修复：只收拾**刚粘进来的那一段** `[start, 光标处)`。
 	 *
 	 * 那一段的范围是确定的（粘贴前的光标位置 → 粘贴后的光标位置），所以不需要猜
@@ -1359,7 +1394,9 @@ export class ImageTasks implements TaskActions {
 		if (!plan) return false;
 
 		const end = editor.posToOffset(editor.getCursor('to'));
-		const result = await this.typesetEditorRange(file, editor, start, end, plan);
+		// Ctrl+V 粘进来的是「纯内容」：不带用户名 / 日期 / 时间，消息之间不留空行，
+		// 图片保持原顺序（要带头部的完整格式走右键「粘贴为聊天记录」，见 pasteAsChatLog）
+		const result = await this.typesetEditorRange(file, editor, start, end, plan, true);
 		return result.status === 'fixed';
 	}
 
@@ -1496,7 +1533,8 @@ export class ImageTasks implements TaskActions {
 		editor: Editor,
 		from: number,
 		to: number,
-		plan: RangeFixPlan
+		plan: RangeFixPlan,
+		plainContent = false
 	): Promise<RangeFixResult> {
 		if (to <= from) return { status: 'skipped', chatLog: false, imported: 0 };
 
@@ -1532,7 +1570,12 @@ export class ImageTasks implements TaskActions {
 		const chatLog = plan.typeset && (looksLikeChatLog(core) || looksLikeBangumiLog(core));
 		let typed = plan.typeset && chatLog ? dedentBy(core, indent.baseIndent) : core;
 		if (chatLog) {
-			typed = placeBlockAt(formatNoteText(typed, this.getTextPipelineOptions()), indent.prefix);
+			// Ctrl+V 粘进来的这段走「提取为纯内容」（头部与消息间空行都关掉、图片保持原顺序），
+			// 「排版选中内容」与整篇排版用完整的聊天记录格式 —— 两种只用同一套选项，见 plainContentOptions
+			const pipelineOptions = this.getTextPipelineOptions(
+				plainContent ? this.getPlainChatOptions() : undefined
+			);
+			typed = placeBlockAt(formatNoteText(typed, pipelineOptions), indent.prefix);
 		} else if (plan.typeset) {
 			// 缩进对齐要连**起点那一行的行首缩进**一起看（`shiftBlockTo` 剥的正是那一截，
 			// 剥掉再按光标那一层加上，重复跑才不会越缩越深）；正文用收图之后的那一份
@@ -1588,12 +1631,12 @@ export class ImageTasks implements TaskActions {
 		return changed;
 	}
 
-	/** 把插件设置转换为排版流水线选项 */
-	private getTextPipelineOptions(): TextPipelineOptions {
+	/** 把插件设置转换为排版流水线选项（`chatOptions` 用于替换聊天记录那一组，其余沿用设置） */
+	private getTextPipelineOptions(chatOptions: ChatLogOptions = this.getChatLogOptions()): TextPipelineOptions {
 		const settings = this.getSettings();
 		return {
 			leadingIndent: resolveLeadingIndentMode(settings.textLeadingIndentFix),
-			chat: this.getChatLogOptions(),
+			chat: chatOptions,
 			bangumi: getBangumiOptions(settings),
 			// 序号与标题级别：只修不齐的地方（首项编号不是 1、父子标题差不止一级）
 			listRenumber: settings.listRenumber,
@@ -1623,7 +1666,18 @@ export class ImageTasks implements TaskActions {
 			sortByTime: settings.chatSortByTime !== false,
 			// 删正文的功能，只有明确打开才生效
 			stripMentions: settings.chatStripMentions === true,
+			// 老 data.json 里没有这个字段 —— 当成开（默认值），新粘贴的记录才看得出差别
+			mergeSameUser: settings.chatMergeSameUser !== false,
 		};
+	}
+
+	/**
+	 * 纯内容用的聊天记录选项：不显示用户名 / 日期 / 时间，消息之间不留空行，
+	 * 图文消息保持原始顺序 —— 其余（缩进、排序、去 @）两种粘贴共用同一批设置
+	 * （见 `plainContentOptions`）。
+	 */
+	private getPlainChatOptions(): ChatLogOptions {
+		return plainContentOptions(this.getChatLogOptions());
 	}
 
 	/**
@@ -1702,5 +1756,19 @@ export class ImageTasks implements TaskActions {
 				return finalMsg;
 			}
 		);
+	}
+}
+
+/**
+ * 读剪贴板里的纯文本（右键「粘贴为聊天记录」用）。
+ *
+ * 浏览器 / Electron 的 `readText` 在窗口失焦、剪贴板里只有图片时会 reject，
+ * 直接把异常抛出去只会变成一条没头没脑的报错 —— 统一返回空字符串，由调用方提示"没有可粘贴的文字"。
+ */
+async function readClipboardText(): Promise<string> {
+	try {
+		return await navigator.clipboard.readText();
+	} catch {
+		return '';
 	}
 }

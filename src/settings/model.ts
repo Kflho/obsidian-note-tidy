@@ -99,6 +99,8 @@ export interface ImageTransferSettings {
 	chatSortByTime: boolean;
 	/** 是否去掉消息正文里的 `@昵称` 提及 */
 	chatStripMentions: boolean;
+	/** 同一个人连发多条时合并成一条（只留第一条的头部） */
+	chatMergeSameUser: boolean;
 	// ---- Bangumi 讨论排版 ----
 	/** 用户名后是否显示楼层号（`#3` / `#3-1`） */
 	bangumiShowFloor: boolean;
@@ -188,6 +190,8 @@ export interface ImageTransferSettings {
 	imageMenuQuickFixItem: boolean;
 	/** 在笔记右键菜单里显示「排版选中内容（Note Tidy）」 */
 	imageMenuTypesetItem: boolean;
+	/** 在笔记右键菜单里显示「粘贴为聊天记录（Note Tidy）」 */
+	noteMenuPasteChatItem: boolean;
 	/** 在图片菜单里显示「管理右键菜单…（Note Tidy）」 */
 	imageMenuManageItem: boolean;
 	/** 在文件 / 文件夹的右键菜单里显示「图片功能」二级栏 */
@@ -243,8 +247,10 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	// 粘贴顺序有时与聊天窗口里的先后不一致（一次选多条时后一条先落地），
 	// 时间戳就在手边，默认按时间摆正 —— 只在相邻消息之间做，见 text/chat-log.ts
 	chatSortByTime: true,
-	// 去掉 @ 提及会删正文，默认关：要用的自己打开（设置 → 聊天记录排版）
+	// 去掉 @ 提及会删正文，默认关：要用的自己打开（设置 → 文本排版 → 提取为纯内容的格式）
 	chatStripMentions: false,
+	// 同一个人的相邻消息合并成一条（只留第一条的头部）—— 见 text/chat-log.ts
+	chatMergeSameUser: true,
 	// Bangumi 讨论页：楼层号与时间默认不显示（手写笔记的样式就是只有名字与正文），
 	// 贴贴与页面控件默认去掉（那是网页的装饰，不是讨论内容）
 	bangumiShowFloor: DEFAULT_BANGUMI_OPTIONS.showFloor,
@@ -301,6 +307,7 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	imageMenuQuickSizeItem: true,
 	imageMenuQuickFixItem: true,
 	imageMenuTypesetItem: true,
+	noteMenuPasteChatItem: true,
 	imageMenuManageItem: true,
 	fileMenuImageSubmenu: true,
 	fileMenuTextSubmenu: true,
