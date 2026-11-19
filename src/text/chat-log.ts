@@ -354,6 +354,14 @@ function reorderImages(lines: string[], order: 'above' | 'below'): string[] {
 interface OutputBlock {
 	kind: 'text' | 'message';
 	text: string;
+	/**
+	 * 这条消息的**正文部分**（含缩进与结尾换行，不含头部行）；只有头部时为 0 长串。
+	 *
+	 * 合并同一人的相邻消息时靠它接续正文 —— 不能拿 `text` 切第一行来当"去掉头部"：
+	 * 头部三关全关时（`plainContentOptions`，Ctrl+V 走的就是它）消息块根本没有头部行，
+	 * 切掉第一行等于吃掉正文第一行（2026-11 报的"粘贴只剩一条"）。
+	 */
+	body: string;
 	/** 这条消息的时间排序键；null = 时间戳不完整，不参与排序 */
 	key: number | null;
 	/** 时间戳里写了日期（键是"年月日时分秒"），false 表示只有"时分秒" */
@@ -507,6 +515,9 @@ function nextNonBlankIsMessage(blocks: OutputBlock[], index: number): boolean {
  * 两条消息之间只有纯空白（空行）时照样合并 —— QQ / 微信 复制出来的记录常常在消息之间带空行；
  * 中间夹着作者正文（非空白的 text 块）时不合并，那说明两条消息之间隔着笔记内容。
  * 识别不出用户名（`userName` 为空）的消息不参与合并。
+ *
+ * 接续的是 `block.body`（记录下来的正文），**不是** `text` 去掉第一行：头部三关全关时
+ * （Ctrl+V 的纯内容格式）消息块没有头部行，按"切掉第一行"处理会把正文吃光。
  */
 function mergeSameUserMessages(blocks: OutputBlock[]): OutputBlock[] {
 	const merged: OutputBlock[] = [];
@@ -535,10 +546,10 @@ function mergeSameUserMessages(blocks: OutputBlock[]): OutputBlock[] {
 			block.userName !== '' &&
 			last.userName === block.userName
 		) {
-			// 同一人：去掉中间那些纯空白，后一条的正文（跳过它的头部行）接上去
+			// 同一人：去掉中间那些纯空白，后一条的正文接上去
 			merged.splice(lastIndex + 1);
-			const body = block.text.split('\n').slice(1).join('\n');
-			last.text = last.text.replace(/\n+$/, '\n') + body;
+			last.text = last.text.replace(/\n+$/, '\n') + block.body;
+			last.body = last.body + block.body;
 			last.hasBody = last.hasBody || block.hasBody;
 			continue;
 		}
@@ -588,6 +599,8 @@ export function formatChatLog(
 	const blocks: OutputBlock[] = [];
 	/** 正在拼装的消息块（头部 + 正文）；拼完由 flushMessage 收进 blocks */
 	let currentMessage = '';
+	/** 上面那块消息的正文部分（`currentMessage` 去掉头部行），合并同一人的消息时用 */
+	let currentBody = '';
 	let currentKey: number | null = null;
 	let currentHasDate = false;
 	let currentHasBody = false;
@@ -597,7 +610,7 @@ export function formatChatLog(
 	const tail = (): string =>
 		currentMessage || (blocks.length > 0 ? blocks[blocks.length - 1]!.text : '');
 	const pushText = (text: string): void => {
-		if (text) blocks.push({ kind: 'text', text, key: null, hasDate: false, hasBody: false });
+		if (text) blocks.push({ kind: 'text', text, body: '', key: null, hasDate: false, hasBody: false });
 	};
 	const ensureTrailingNewline = (): void => {
 		if (currentMessage) {
@@ -613,6 +626,7 @@ export function formatChatLog(
 			blocks.push({
 				kind: 'message',
 				text: currentMessage,
+				body: currentBody,
 				key: currentKey,
 				hasDate: currentHasDate,
 				hasBody: currentHasBody,
@@ -620,6 +634,7 @@ export function formatChatLog(
 			});
 		}
 		currentMessage = '';
+		currentBody = '';
 		currentKey = null;
 		currentHasDate = false;
 		currentHasBody = false;
@@ -791,7 +806,11 @@ export function formatChatLog(
 			if (imageOrder !== 'keep') {
 				lines = reorderImages(lines, imageOrder);
 			}
-			currentMessage += lines.map(line => `${options.indent}${line}`).join('\n') + '\n';
+			// 正文单独留一份（带缩进、带结尾换行）：合并同一人的消息时直接接这一段，
+			// 不靠"切掉 text 的第一行"去猜头部（头部可能被关掉，见 OutputBlock.body）
+			const bodyText = lines.map(line => `${options.indent}${line}`).join('\n') + '\n';
+			currentBody += bodyText;
+			currentMessage += bodyText;
 			currentHasBody = true;
 		} else if (!tail().endsWith('\n')) {
 			ensureTrailingNewline();
