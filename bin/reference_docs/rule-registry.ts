@@ -281,10 +281,10 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: ['autoClearUnusedImages'],
 				impl: {
 					file: 'src/image/unused.ts',
-					symbols: ['selectUnusedImages', 'isImageFileName'],
+					symbols: ['selectUnusedImages', 'collectImageReferences', 'isImageFileName'],
 				},
 				tests: ['test/image-unused.test.ts', 'test/image-tidy.test.ts', 'test/commands.test.ts'],
-				note: '**自己实现，不依赖 Clear Unused Images**（`oz-clear-unused-images`）：判定只有一条 —— **文件名没在任何一篇笔记或 canvas 里出现过**。扫描复用 `dedupe.ts` 的 `collectImageTargets`（与合并重复副本同一份判定）：`![[图.png]]`、`[[图.png]]`、`![](路径/图.png)`、canvas 的 `"file": "路径/图.png"` 都算，带 `#片段` 与 `|尺寸` 也认（**表格里写成 `![[图.png\\|100]]` 的也算** —— 2026-09 的误删事故就是漏了这一种，见 `image.table-escape`），**按文件名比、不区分大小写**（链接写全路径也算同一张）。三条刻意的保守：① **只清图片**（png/jpg/gif/bmp/webp/heic/avif/svg，见 `isImageFileName`）—— pdf、音频、其它附件一个都不碰，它们的引用写法五花八门，误判的代价比"少清几个"大得多；② **只认笔记与 canvas 里的引用**（`.md` / `.canvas` 之外的文件一概不看，这也是 Clear Unused Images 的口径）；③ 删除走 `fileManager.trashFile`（用户设的回收站），误伤了还能捞回来。**有一个文档读不出来就整步不做**（`clearUnusedImages` 直接返回 0）—— 读不到就不能断言"没人引用"，宁可这一次不清。两个入口：① 「整理图片」的第 ④ 步（`autoClearUnusedImages`，默认开，排在最后 —— 前面刚把多余的副本删掉，这时清一遍最干净）；② 命令 `clear-unused-images`（「清理没人引用的图片」，先弹确认框，与第 ④ 步同一个实现）',
+				note: '**自己实现，不依赖 Clear Unused Images**（`oz-clear-unused-images`）。判定分两种引用：**只写文件名**（`![[图.png]]`）时同名文件全部算"有人用"—— 链接指向哪一张由 Obsidian 现算，本模块不猜；**带路径**（`![[附件/图.png]]`、`![](../附件/图.png)`）时交给解析器（`tasks.ts` 传入 `resolveImageLink`，与改名、整理图片位置同一套）算成具体文件，**只保护那一个文件**。路径解析不出来（写错了、文件不在了）退回按文件名保护。2026-11 用户报"这张图没人引用却没清掉"，原因是一律按文件名比较：别的文件夹里有一个同名图被引用，这张没人用的也跟着免于清理。认的写法：`![[图.png]]`、`[[图.png]]`、`![](路径/图.png)`、canvas 的 `"file": "路径/图.png"`；带 `#片段` 与 `|尺寸` 也认，表格里写成 `![[图.png\|100]]` 的也算（2026-09 的误删事故就是漏了这一种，见 `image.table-escape`）；文件名不区分大小写。三条刻意的保守：① **只清图片**（png/jpg/gif/bmp/webp/heic/avif/svg，见 `isImageFileName`）—— pdf、音频、其它附件一个都不碰，它们的引用写法五花八门，误判的代价比"少清几个"大得多；② **只认笔记与 canvas 里的引用**（`.md` / `.canvas` 之外的文件一概不看，这也是 Clear Unused Images 的口径）；③ 删除走 `fileManager.trashFile`（用户设的回收站），误删了可以恢复。**有一个文档读不出来就整步不做**（`clearUnusedImages` 直接返回 0）—— 读不到就不能断言"没人引用"，宁可这一次不清。两个入口：① 「整理图片」的第 ④ 步（`autoClearUnusedImages`，默认开，排在最后 —— 前面刚把多余的副本删掉，这时清一遍最干净）；② 命令 `clear-unused-images`（「清理没人引用的图片」，先弹确认框，与第 ④ 步同一个实现）',
 			},
 			{
 				id: 'image.size',

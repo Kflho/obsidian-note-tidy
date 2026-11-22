@@ -6,7 +6,7 @@ import { describeCopyResult, resolveImagePlan } from './image/copy';
 import { buildRichContent } from './image/rich-copy';
 import type { CopySelection } from './image/rich-copy';
 import type { ImageRef } from './image/scan';
-import { buildBasenameIndex, collectLinkedImageFiles } from './image/links';
+import { buildBasenameIndex, collectLinkedImageFiles, resolveImageLink } from './image/links';
 import { buildVaultBasenameMap } from './image/naming';
 import { getTargetAttachmentFolder } from './image/attachment-folder';
 import { convertVaultImage, formatLabel, selectConvertibleImages } from './image/convert';
@@ -25,6 +25,7 @@ import {
 	rewriteImageReferences,
 } from './image/dedupe';
 import { isImageFileName, selectUnusedImages } from './image/unused';
+import type { ImageLinkResolver, ReferenceDocument } from './image/unused';
 import type { ImageEntry } from './image/dedupe';
 import {
 	discardImportedFiles,
@@ -735,32 +736,48 @@ export class ImageTasks implements TaskActions {
 	}
 
 	/**
+	 * 清理判定要用的材料：每篇笔记 / canvas 的正文，以及把"带路径的引用"解析成仓库文件的函数。
+	 *
+	 * 有一篇读不出来就返回 null：那一篇可能引用了一切，宁可整步不做。
+	 * 解析走 `resolveImageLink`（与改名、整理图片位置同一套），结果与 Obsidian 显示的一致。
+	 */
+	private async collectReferenceDocuments(): Promise<{
+		documents: ReferenceDocument[];
+		resolve: ImageLinkResolver;
+	} | null> {
+		const notes = this.app.vault.getFiles().filter(file => file.extension === 'md' || file.extension === 'canvas');
+		const documents: ReferenceDocument[] = [];
+		for (const doc of notes) {
+			try {
+				documents.push({ path: doc.path, text: await this.app.vault.read(doc) });
+			} catch (err) {
+				console.error(` 读不出 ${doc.path}，这一次不清理没人引用的附件`, err);
+				return null;
+			}
+		}
+		const index = buildBasenameIndex(this.app);
+		return {
+			documents,
+			resolve: (link, sourcePath) => resolveImageLink(this.app, sourcePath, link, index).file?.path ?? null,
+		};
+	}
+
+	/**
 	 * 清理**没人引用的图片附件**（自己实现，不依赖 Clear Unused Images）。
 	 *
 	 * 判定与保守之处见 `image/unused.ts` 的文件头：只清图片、只认笔记与 canvas 里的引用、
-	 * 走回收站。单张删不掉只记日志，不拖垮整批。
+	 * 带路径的引用只保护它指的那一个文件、走回收站。单张删不掉只记日志，不拖垮整批。
 	 *
 	 * @returns 送进回收站的张数
 	 */
 	async clearUnusedImages(): Promise<number> {
-		const all = this.app.vault.getFiles();
-		const images = all.filter(file => isImageFileName(file.name));
+		const images = this.app.vault.getFiles().filter(file => isImageFileName(file.name));
 		if (images.length === 0) return 0;
 
-		// 引用只可能出现在笔记与 canvas 里（其它附件、pdf 里的引用一律不看：误判的代价比少清几个大）
-		const documents = all.filter(file => file.extension === 'md' || file.extension === 'canvas');
-		const texts: string[] = [];
-		for (const doc of documents) {
-			try {
-				texts.push(await this.app.vault.read(doc));
-			} catch (err) {
-				// 读不出来的那一篇当作"可能引用了一切"：宁可少清，也不能把有人用的图删了
-				console.error(` 读不出 ${doc.path}，这一次不清理没人引用的附件`, err);
-				return 0;
-			}
-		}
+		const references = await this.collectReferenceDocuments();
+		if (!references) return 0;
 
-		const unused = selectUnusedImages(images, texts);
+		const unused = selectUnusedImages(images, references.documents, references.resolve);
 		let removed = 0;
 		for (const file of unused) {
 			try {
@@ -779,21 +796,14 @@ export class ImageTasks implements TaskActions {
 	 * 与「整理图片」里那一步是同一个实现（`clearUnusedImages`），只是多一道确认。
 	 */
 	async clearUnusedImagesWithConfirm(): Promise<void> {
-		const all = this.app.vault.getFiles();
-		const images = all.filter(file => isImageFileName(file.name));
-		const documents = all.filter(file => file.extension === 'md' || file.extension === 'canvas');
-		const texts: string[] = [];
-		for (const doc of documents) {
-			try {
-				texts.push(await this.app.vault.read(doc));
-			} catch (err) {
-				console.error(` 读不出 ${doc.path}，中止清理`, err);
-				new Notice('有笔记读取失败，本次未清理。');
-				return;
-			}
+		const images = this.app.vault.getFiles().filter(file => isImageFileName(file.name));
+		const references = await this.collectReferenceDocuments();
+		if (!references) {
+			new Notice('有笔记读取失败，本次未清理。');
+			return;
 		}
 
-		const unused = selectUnusedImages(images, texts);
+		const unused = selectUnusedImages(images, references.documents, references.resolve);
 		if (unused.length === 0) {
 			new Notice('没有可清理的图片。');
 			return;

@@ -110,7 +110,7 @@ export function vaultPathFor(folder: string, fileName: string): string {
  * 文件名唯一不能只靠调用方传入的两张预留表。粘贴图片与整理选中内容这两条调用路径
  * 每次都新建空表，表里既没有仓库已有的名字，也不跨批次保留：同一秒保存的两张图
  * 落在不同文件夹时都会通过检查，结果同名不同内容（2026-11 用户库中出现 615 组）。
- * 这里按仓库记录已经发出的名字，后续请求遇到同名就推后一秒。
+ * 本模块按仓库记录已经发出的名字，后续请求遇到同名就推后一秒。
  * 用 WeakMap 按 App 分开存，是为了测试里每个假仓库各自独立，互不影响。
  */
 const nameRegistries = new WeakMap<App, { names: Set<string>; fileCount: number }>();
