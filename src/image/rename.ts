@@ -1,4 +1,4 @@
-﻿import { App, TFile, normalizePath } from 'obsidian';
+import { App, TFile, normalizePath } from 'obsidian';
 import { getTargetAttachmentFolder } from './attachment-folder';
 import type { AttachmentLocationSettings } from './attachment-folder';
 import { MANAGED_IMAGE_EXT_RE, unescapeTableTarget, wikiEmbedRe } from './constants';
