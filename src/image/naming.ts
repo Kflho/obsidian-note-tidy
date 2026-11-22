@@ -7,7 +7,7 @@ import { MANAGED_IMAGE_EXT_RE } from './constants';
  * 三件事：按预设生成文件名、判断文件名是否符合预设、保证同一个仓库里
  * 「文件名 → 路径」不冲突。**文件名在全库唯一**是这个插件的硬约束 ——
  * 裸文件名链接 `![[图.png]]` 一旦撞名，笔记就可能显示成另一张图，
- * 所以这里用四层检查把重名挡在写盘之前。
+ * 所以这里用五层检查把重名挡在写盘之前。
  */
 
 /** 命名只依赖这一个设置项，避免与 settings/ 循环依赖 */
@@ -105,9 +105,41 @@ export function vaultPathFor(folder: string, fileName: string): string {
 }
 
 /**
- * 生成唯一的目标路径。四层检查确保仓库内所有图片 basename 唯一：
+ * 每个仓库（App）这一次运行期间已经发出的图片名，按小写比较。
+ *
+ * 文件名唯一不能只靠调用方传入的两张预留表。粘贴图片与整理选中内容这两条调用路径
+ * 每次都新建空表，表里既没有仓库已有的名字，也不跨批次保留：同一秒保存的两张图
+ * 落在不同文件夹时都会通过检查，结果同名不同内容（2026-11 用户库中出现 615 组）。
+ * 这里按仓库记录已经发出的名字，后续请求遇到同名就推后一秒。
+ * 用 WeakMap 按 App 分开存，是为了测试里每个假仓库各自独立，互不影响。
+ */
+const nameRegistries = new WeakMap<App, { names: Set<string>; fileCount: number }>();
+
+/**
+ * 取这个仓库的名字登记表，仓库文件数量变化时把现有文件名补登记一遍。
+ *
+ * 只在文件数量变化时登记：整库改名时每张图片都会走到这里，
+ * 每次重新扫描仓库会让批量任务变慢（一万张图片就是一万次全表扫描）。
+ */
+function nameRegistry(app: App): Set<string> {
+	let state = nameRegistries.get(app);
+	if (!state) {
+		state = { names: new Set<string>(), fileCount: -1 };
+		nameRegistries.set(app, state);
+	}
+	const files = app.vault.getFiles();
+	if (files.length !== state.fileCount) {
+		for (const file of files) state.names.add(file.name.toLowerCase());
+		state.fileCount = files.length;
+	}
+	return state.names;
+}
+
+/**
+ * 生成唯一的目标路径。五层检查确保仓库内所有图片 basename 唯一：
  * ①目标路径是否已有文件  ②批次内是否已预留完整路径
  * ③批次内是否已预留 basename  ④pre-scan 得到的仓库 basename 映射（由调用方传入）
+ * ⑤本次会话里已经发出去的名字（与调用方传没传表无关）
  *
  * 撞名时把时间戳往后推一秒重试，直到找到空位。
  *
@@ -124,12 +156,14 @@ export async function generateUniqueTargetPath(
 	reservedPaths: Map<string, string>,
 	reservedBasenames: Map<string, string>
 ): Promise<{ newFileName: string; targetVaultPath: string }> {
+	const issuedNames = nameRegistry(app);
 	const currentTime = startTime.clone();
 	const MAX_ATTEMPTS = 100000;
 	let attempts = 0;
 	while (attempts < MAX_ATTEMPTS) {
 		const newFileName = formatImageName(preset, ext, currentTime);
 		const targetVaultPath = vaultPathFor(currentAttachFolder, newFileName);
+		const nameKey = newFileName.toLowerCase();
 		// ①目标路径是否已有文件
 		if (app.vault.getAbstractFileByPath(targetVaultPath)) {
 			currentTime.add(1, 'seconds'); attempts++; continue;
@@ -142,6 +176,11 @@ export async function generateUniqueTargetPath(
 		if (reservedBasenames.has(newFileName)) {
 			currentTime.add(1, 'seconds'); attempts++; continue;
 		}
+		// ⑤本次运行已经发出的名字（调用方传入空表时，这一条仍然生效）
+		if (issuedNames.has(nameKey)) {
+			currentTime.add(1, 'seconds'); attempts++; continue;
+		}
+		issuedNames.add(nameKey);
 		reservedPaths.set(targetVaultPath, '');
 		reservedBasenames.set(newFileName, '');  // '' = auto-generated name
 		return { newFileName, targetVaultPath };

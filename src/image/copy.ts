@@ -116,18 +116,30 @@ async function resolveOne(
 	return absolute ? { name: file.name, path: absolute, from: ref.from, to: ref.to } : null;
 }
 
+/** 解析一批引用的结果 */
+export interface ImageResolvePlan {
+	/** 去重后能复制的文件（按出现顺序） */
+	images: CopyableImage[];
+	/** 解析不到任何文件的引用数（同名歧义 / 文件不在了 / 仓库外找不到） */
+	unresolved: number;
+}
+
 /**
- * 解析一批图片引用，返回去重后的文件清单（按出现顺序）。
- * 解析不到的静默跳过 —— 调用方拿到的就是"这次能复制哪几张"。
+ * 解析一批图片引用，返回去重后的文件清单与解析失败的引用数。
+ * 解析不到的静默跳过 —— 调用方拿到的就是"这次能复制哪几张"，另外单独报出失败数。
  */
-export async function resolveImageFiles(app: App, sourcePath: string, refs: ImageRef[]): Promise<CopyableImage[]> {
+export async function resolveImagePlan(app: App, sourcePath: string, refs: ImageRef[]): Promise<ImageResolvePlan> {
 	const index = buildBasenameIndex(app);
 	const found: CopyableImage[] = [];
 	const seen = new Set<string>();
+	let unresolved = 0;
 
 	for (const ref of refs) {
 		const resolved = await resolveOne(app, sourcePath, ref, index);
-		if (!resolved) continue;
+		if (!resolved) {
+			unresolved++;
+			continue;
+		}
 		// Windows 上大小写不敏感，去重也跟着不敏感
 		const key = resolved.path.toLowerCase();
 		if (seen.has(key)) continue;
@@ -135,5 +147,26 @@ export async function resolveImageFiles(app: App, sourcePath: string, refs: Imag
 		found.push(resolved);
 	}
 
-	return found;
+	return { images: found, unresolved };
+}
+
+/**
+ * 解析一批图片引用，返回去重后的文件清单（按出现顺序）。
+ * 解析不到的静默跳过 —— 调用方拿到的就是"这次能复制哪几张"。
+ */
+export async function resolveImageFiles(app: App, sourcePath: string, refs: ImageRef[]): Promise<CopyableImage[]> {
+	return (await resolveImagePlan(app, sourcePath, refs)).images;
+}
+
+/**
+ * 复制结果的一句话（纯函数，便于单测）。
+ *
+ * 报的是**实际进剪贴板的张数**；有解析不到的引用时补一句，说明数字为什么比选中的少。
+ */
+export function describeCopyResult(plan: ImageResolvePlan, withText: boolean): string {
+	const count = plan.images.length;
+	const what = withText ? '已复制文字和 ' : '已复制 ';
+	const main = `${what}${count} 张图片。`;
+	if (plan.unresolved === 0) return main;
+	return `${main}另有 ${plan.unresolved} 处引用的图片文件没有找到，未复制。`;
 }

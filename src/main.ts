@@ -3,6 +3,7 @@ import { BatchRunner } from './batch';
 import { registerCommands } from './commands';
 import { DEFAULT_SETTINGS, ImageTransferSettingTab } from './settings';
 import type { ImageTransferSettings } from './settings';
+import { prewarmClipboard } from './image/clipboard';
 import { ImageTasks } from './tasks';
 import { registerFileMenu } from './ui/menus';
 import { registerImageMenu, TIDY_IMAGES_LABEL } from './ui/image-menu';
@@ -67,6 +68,9 @@ export default class ImageTransferPlugin extends Plugin {
 		this.refreshRibbonIcon();
 
 		this.addSettingTab(new ImageTransferSettingTab(this.app, this));
+		// 剪贴板脚本先在后台空跑一次：系统判一份**没见过的脚本内容**要 10 秒（见
+		// image/clipboard.ts 文件头），这笔账放在加载时扛掉，别让用户第一次点「复制图片」等
+		void prewarmClipboard();
 	}
 
 	async loadSettings() {

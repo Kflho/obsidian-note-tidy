@@ -2,7 +2,7 @@ import { MarkdownView, Menu, TFile } from 'obsidian';
 import type { App, Editor, MenuItem, Plugin } from 'obsidian';
 import { basePathOf, vaultPathFromResourceUrl } from '../image/copy';
 import type { CopySelection } from '../image/rich-copy';
-import { pickImageRefs } from '../image/scan';
+import { distinctImageRefs, pickImageRefs } from '../image/scan';
 import type { ImageRef } from '../image/scan';
 import type { ImageTransferSettings } from '../settings';
 import type { TaskActions } from '../tasks';
@@ -178,7 +178,8 @@ export function ownMenuEntries(options: {
 	const insideNote = options.scope !== 'folder';
 
 	if (insideNote && options.settings.imageMenuCopyItem !== false && options.refs.length > 0) {
-		entries.push({ title: copyMenuTitle(options.refs.length), icon: OWN_ITEMS.copy.icon, action: options.copy });
+		// 张数按去重后的算：同一张图在选区里出现两次，剪贴板里也只放一份
+		entries.push({ title: copyMenuTitle(distinctImageRefs(options.refs).length), icon: OWN_ITEMS.copy.icon, action: options.copy });
 	}
 	if (insideNote && options.settings.imageMenuQuickSizeItem !== false && options.hasFile) {
 		entries.push({ title: QUICK_SIZE_MENU_TITLE, icon: OWN_ITEMS.quickSize.icon, action: options.quickSize });
@@ -395,15 +396,50 @@ export function markdownViewFor(app: App, element: HTMLElement): MarkdownView | 
 	return null;
 }
 
-/** 这次要复制的图片：DOM 选区跨过的那些，没选就只复制点中的这张 */
+/**
+ * 图片菜单这次复制哪些图。
+ *
+ * 编辑视图（源码 / 实时预览）以**编辑器选区**为准：与状态栏、笔记菜单、Ctrl+C 同一份来源，
+ * 选了多少张就复制多少张。实时预览只把视口内的图片渲染成 DOM，按渲染出来的图片取会少一大截
+ * （2026-11 用户报的"全选后只复制了一两百张，库里是六百多张"）。
+ * 阅读视图没有编辑器选区，只能看 DOM 选区跨过的图片。
+ *
+ * @param sourceMode 是不是编辑视图（`MarkdownView.getMode() !== 'preview'`）
+ * @param editorRefs 编辑器选区里的图片
+ * @param domRefs 阅读视图里 DOM 选区跨过的图片
+ * @param clicked 点中的那一张
+ */
+export function pickImageScopeRefs(options: {
+	sourceMode: boolean;
+	editorRefs: ImageRef[];
+	domRefs: ImageRef[];
+	clicked: ImageRef | null;
+}): ImageRef[] {
+	const selected = options.sourceMode ? options.editorRefs : options.domRefs;
+	if (selected.length > 0) return selected;
+	return options.clicked ? [options.clicked] : [];
+}
+
+/** 这次要复制的图片：编辑视图看编辑器选区，阅读视图看 DOM 选区，没选就只复制点中的这张 */
 function renderedImageRefs(app: App, view: MarkdownView, image: HTMLImageElement): ImageRef[] {
-	const selected = imagesInSelection(image, view);
-	const refs: ImageRef[] = [];
-	for (const element of selected.length > 0 ? selected : [image]) {
-		const ref = imageRefOf(app, view, element);
-		if (ref) refs.push(ref);
+	const sourceMode = view.getMode() !== 'preview';
+	const editor = view.editor;
+	const editorRefs = sourceMode && editor ? editorImagePicks(editor).refs : [];
+
+	const domRefs: ImageRef[] = [];
+	if (!sourceMode) {
+		for (const element of imagesInSelection(image, view)) {
+			const ref = imageRefOf(app, view, element);
+			if (ref) domRefs.push(ref);
+		}
 	}
-	return refs;
+
+	return pickImageScopeRefs({
+		sourceMode,
+		editorRefs,
+		domRefs,
+		clicked: imageRefOf(app, view, image),
+	});
 }
 
 /** DOM 选区跨过了视图里的哪几张图（没选中 / 选区里没有图时返回空数组） */

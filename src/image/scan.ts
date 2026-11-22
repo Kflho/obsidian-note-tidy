@@ -112,9 +112,44 @@ export function collectImageRefs(text: string, baseOffset = 0): ImageRef[] {
 	return refs;
 }
 
-/** 数一段文本里有几张图片（状态栏用；同一张图被嵌两次算两张） */
+/** 数一段文本里有几张图片（状态栏与菜单用；同一张图被嵌两次算一张，与复制的去重一致） */
 export function countImageRefs(text: string): number {
 	return collectImageRefs(text).length;
+}
+
+/**
+ * 去重键：文件名（小写，去掉 `#片段`）。
+ *
+ * 用文件名而不是完整路径，是因为仓库约定文件名全库唯一（见 `image/naming.ts`）：
+ * `![[附件/图.png]]` 与 `![[图.png]]` 指同一张图，两处不能各算一次。
+ */
+export function imageRefKey(ref: ImageRef): string {
+	const target = ref.target.split('#')[0] ?? ref.target;
+	const cleaned = target.trim().replace(/\\/g, '/');
+	return (cleaned.split('/').pop() ?? cleaned).toLowerCase();
+}
+
+/** 去掉重复引用的图片清单（保持出现顺序）：复制时同一张图只放一份 */
+export function distinctImageRefs(refs: ImageRef[]): ImageRef[] {
+	const seen = new Set<string>();
+	const unique: ImageRef[] = [];
+	for (const ref of refs) {
+		const key = imageRefKey(ref);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		unique.push(ref);
+	}
+	return unique;
+}
+
+/**
+ * 一段文本会被复制成几张图片（去重后）。
+ *
+ * 状态栏、菜单标题与复制结果都用这个数：同一张图在选区里出现两次时，
+ * 剪贴板里也只有一份，三处的数字才是同一个。
+ */
+export function countDistinctImageRefs(text: string): number {
+	return distinctImageRefs(collectImageRefs(text)).length;
 }
 
 /** 光标 / 鼠标位置落在哪条图片嵌入里（右键点在图片上时就是它） */

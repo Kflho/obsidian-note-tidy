@@ -1,4 +1,4 @@
-import { countImageRefs } from '../image/scan';
+import { countDistinctImageRefs } from '../image/scan';
 
 /**
  * 状态栏里的「选中内容有几张图片」。
@@ -8,7 +8,8 @@ import { countImageRefs } from '../image/scan';
  * 编辑器那边的接线在 `ui/selection-status.ts`（CodeMirror 扩展），main.ts 把两者接起来。
  *
  * "什么算一张图片"（嵌入 / 代码块里的不算 / 哪些扩展名算）全在 `image/scan.ts`，
- * 与"复制图片"共用同一份扫描 —— 这里只负责把它变成一个数字和一句文案。
+ * 与"复制图片"共用同一份扫描；**同一张图在选区里出现两次只算一张** ——
+ * 剪贴板里也只放一份，两处数字保持一致。
  */
 
 /**
@@ -36,7 +37,7 @@ export class SelectionImageCount {
 
 	/** 选区变了（或设置刚改完）就重算：开关关着、没选中、选中内容里没图片都清空这一格 */
 	update(selectionText: string): void {
-		this.write(this.isEnabled() ? formatSelectionImageCount(countImageRefs(selectionText)) : '');
+		this.write(this.isEnabled() ? formatSelectionImageCount(countDistinctImageRefs(selectionText)) : '');
 	}
 
 	/**

@@ -7,7 +7,7 @@ import { externalImageRe } from './constants';
 import { convertImageBytes, convertPlanFrom, plannedExtension } from './convert';
 import type { ConvertPlan } from './convert';
 import { resolvePhysicalPath } from './external-path';
-import { formatImageName, generateUniqueTargetPath, vaultPathFor } from './naming';
+import { buildVaultBasenameMap, formatImageName, generateUniqueTargetPath, vaultPathFor } from './naming';
 import type { ImageNamingSettings } from './naming';
 
 /**
@@ -125,7 +125,8 @@ export async function transferImagesInText(
 
 	const currentAttachFolder = await getTargetAttachmentFolder(app, settings, file);
 	const rp = reservedPaths ?? new Map<string, string>();
-	const rbn = reservedBasenames ?? new Map<string, string>();
+	// 调用方没有传入仓库级名字表时，从仓库现取一份：空表会让不同文件夹里的图片同名
+	const rbn = reservedBasenames ?? buildVaultBasenameMap(app);
 	// 转换计划在整批里只算一次：目标格式认不出来（手改坏了 data.json）就是"不转"
 	const plan = settings.convertImportedImages === false
 		? null
@@ -223,7 +224,7 @@ export async function transferRemoteImagesInText(
 
 	const currentAttachFolder = await getTargetAttachmentFolder(app, settings, file);
 	const reservedPaths = new Map<string, string>();
-	const reservedBasenames = new Map<string, string>();
+	const reservedBasenames = buildVaultBasenameMap(app);
 	const plan = settings.convertImportedImages === false
 		? null
 		: convertPlanFrom(

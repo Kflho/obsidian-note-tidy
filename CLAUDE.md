@@ -1,4 +1,4 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -72,7 +72,7 @@ The esbuild config (`src/scripts/esbuild.config.mjs`) bundles `src/main.ts` into
 | `styles.css` | `src/styles.css`（构建 / 部署时复制成这个名字） |
 | `data.json` | **Obsidian 自己写**（用户设置），仓库里没有、永远别删 |
 
-所以：**别在插件目录里改代码、跑 npm**（那边没有 `package.json`，也没有 `src/`）。改完源码跑 `npm run build`（或开着 `npm run dev`），产物会自动落到插件目录，回 Obsidian 里重新加载插件即可。
+所以：**别在插件目录里改代码、跑 npm**（那边没有 `package.json`，也没有 `src/`）。改完源码跑 `npm run build`（或开着 `npm run dev`），产物会自动复制到插件目录，回 Obsidian 里重新加载插件即可。
 
 同步逻辑就一个文件 `src/scripts/deploy.mjs`：目标目录先取 `OBSIDIAN_PLUGIN_DIR` 环境变量，没设就读仓库根的 `deploy.local.json`（gitignore，只存本机路径）；目录不存在（CI 上跑 build）就打印一行提示跳过，**不会让构建失败**。`src/scripts/esbuild.config.mjs` 挂了个 `onEnd` 插件调它，所以 `dev` 的 watch 与 `build` 都自动同步。换 vault / 换机器时改环境变量或本地配置即可，不用改代码。
 
@@ -90,8 +90,8 @@ The esbuild config (`src/scripts/esbuild.config.mjs`) bundles `src/main.ts` into
 src/
   main.ts               # 插件入口：只做生命周期与装配（读设置、把各部件接起来、注册命令与菜单）
   commands.ts           # 18 条命令的注册（命令 ID 是稳定接口，test/commands.test.ts 逐条比对菜单）
-  tasks.ts              # 任务编排：每种操作一份实现，命令面板 / 右键菜单 / 弹窗三条路都落到这里
-  batch.ts              # 批量外壳：互斥锁 + 通知屏蔽 + 状态栏进度 + 出错兜底 + 结果通知
+  tasks.ts              # 任务编排：每种操作一份实现，命令面板 / 右键菜单 / 弹窗三条路都调用这里
+  batch.ts              # 批量外壳：互斥锁 + 通知屏蔽 + 状态栏进度 + 出错处理 + 结果通知
   scripts/              # 构建 / 部署 / 发版脚本（esbuild、deploy、version-bump、eslint 配置）
   settings/
     model.ts            # ImageTransferSettings + DEFAULT_SETTINGS + 设置 → 各功能选项的转换
@@ -195,7 +195,7 @@ Returns the first physical file path found, or `null`.
 
 设置分三层：`settings/model.ts`（字段与默认值）、`settings/fields/`（面板的字段表，单一数据源）、`settings/tab.ts`（渲染：Obsidian 1.13+ 走声明式定义，1.13 以下走手写 DOM，两条路由同一张表生成）。加设置项只改字段表一处；`test/settings.test.ts` 会核对"每个字段都有且只有一条定义"。
 
-**面板结构守着三条规矩**（2026-09 用户报"功能加多了，设置面板已经乱了"后重排过一次，加设置项前先读 `fields/index.ts` 头部）：**按"用户要干什么"分页**（顶层只有三个 `page`：图片 / 文本排版 / 菜单与交互，不再平铺一堆 `group`）、**同页里同类的事挨着并用组标题说清**（图片页按"附件与命名 → 格式转换 → 粘贴 → 图片大小 → 一键整理"，文本排版页按流水线顺序）、**每个设置项只属于一处**。`test/settings.test.ts` 第 6 节守住这三条（顶层全是页面、每页都有说明与分组、同页不出现重名分组）。
+**面板结构有三条规矩**（2026-09 用户报"功能加多了，设置面板已经乱了"后重排过一次，加设置项前先读 `fields/index.ts` 头部）：**按"用户要干什么"分页**（顶层只有三个 `page`：图片 / 文本排版 / 菜单与交互，不再平铺一堆 `group`）、**同页里同类的事挨着并用组标题说清**（图片页按"附件与命名 → 格式转换 → 粘贴 → 图片大小 → 一键整理"，文本排版页按流水线顺序）、**每个设置项只属于一处**。`test/settings.test.ts` 第 6 节核对这三条（顶层全是页面、每页都有说明与分组、同页不出现重名分组）。
 
 附件夹定位（`image/attachment-folder.ts`）只看 `attachmentLocation`（`"system"` | `"root"` | `"current"` | `"subfolder"` | `"custom"`）与 `customAttachmentFolder` 两个字段：`resolveAttachmentFolder` 纯算路径，`getTargetAttachmentFolder` 才按需创建；`"system"` 模式读 vault 的系统级 `attachmentFolderPath` 配置。
 
@@ -214,9 +214,9 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 - `powershell.exe -NoProfile -NonInteractive -File`（固定脚本）跑起来是 **STA**，`Clipboard.SetDataObject` 才不报错；**别用 `pwsh`**（PowerShell 7 是 MTA，且 `Set-Clipboard` 已移除 `-Path`）；
 - 自己拼 `DataObject` 一次写入，**FileDrop 与 Bitmap 能同时存在**（`Set-Clipboard -Path` 做不到：它会把位图那份挤掉）；只有一张图时才放位图，多张没法只放一张；
 - **不要写文本格式**：CF_UNICODETEXT 与 CF_HDROP 同时存在时有些程序会粘两遍（Windows Terminal 修过这个 bug）；
-- 路径一律 base64 进脚本；脚本写到固定路径、用 `-File` 执行：命令行上不出现任何用户内容，文件名里的引号 / 反引号 / 换行都伤不到 PowerShell；命令行固定还有个好处，见下面 238 行。
+- 路径一律 base64 进数据文件（不是脚本正文，见下面「脚本内容必须一个字节都不变」）；脚本固定路径、固定内容，用户内容全靠参数文件：文件名里的引号 / 反引号 / 换行都伤不到 PowerShell，命令行上也干干净净。
 
-### 图文混排：粘贴到 QQ / 微信 要"文字 + 图片"（`image/rich-copy.ts` + `clipboard.ts` 的 `buildRichScript`）
+### 图文混排：粘贴到 QQ / 微信 要"文字 + 图片"（`image/rich-copy.ts` + `clipboard.ts` 的 `clipboardWorkerScript`）
 
 选区里**既有文字又有图片**时，只放文件列表的话聊天窗口贴出来只有图片，正文那句文字没了。要让 QQ / 微信 贴出**图文混排**，得写 **HTML Format（CF_HTML）**。四条规矩，每条都是实测踩出来的：
 
@@ -229,21 +229,26 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 **写剪贴板别用 .NET 的 `DataObject`**（本机实测，2026-09）：
 
-- `SetData('HTML Format', $false, [byte[]]…)` 落到剪贴板上的值其实是字符串 `"System.Byte[]"` —— .NET 把"HTML Format"当文本格式，会自己转换；中文更是直接丢；
+- `SetData('HTML Format', $false, [byte[]]…)` 写进剪贴板的值其实是字符串 `"System.Byte[]"` —— .NET 把"HTML Format"当文本格式，会自己转换；中文更是直接丢；
 - 格式的**先后顺序不听我们的**：先 `SetData` 的 HTML，`EnumClipboardFormats` 读出来却是 `CF_HDROP` 打头。而社区实测的结论是"顺序会决定 QQ / 微信 挑哪一份解析"。
 
-所以混排走 **Win32 原生 `SetClipboardData`**（`buildRichScript`）：`OpenClipboard` → `EmptyClipboard` → 只写两样，`HTML Format`（UTF-8 字节 + NUL）→ `CF_UNICODETEXT`(13)。实测读回来正是这个顺序、HTML 字节与偏移都对得上、剪贴板里**没有** FileDrop（`EnumClipboardFormats` 只多出系统自动加的 CF_LOCALE / CF_TEXT / CF_OEMTEXT）。
+所以混排走 **Win32 原生 `SetClipboardData`**（`clipboardWorkerScript` 里那段 C#）：`OpenClipboard` → `EmptyClipboard` → 只写两样，`HTML Format`（UTF-8 字节 + NUL）→ `CF_UNICODETEXT`(13)。实测读回来正是这个顺序、HTML 字节与偏移都对得上、剪贴板里**没有** FileDrop（`EnumClipboardFormats` 只多出系统自动加的 CF_LOCALE / CF_TEXT / CF_OEMTEXT）。整段"打开 → 清空 → 写入"要**重试**：本机实测 `OpenClipboard` 成功、`EmptyClipboard` 照样报 1418（剪贴板被 QQ / 浏览器瞬时占着），只重试打开是不够的。
 
 ⚠️ 这两条只有在 Windows 上成立：macOS 的 `osascript` 一次只能 `set the clipboard to` 一样东西，混排在那边退化成"只放文件"（`clipboardCommandFor` 里明说）。
 
-⚠️ **脚本一律走固定的 `-File`**：Windows 会对**新的命令行**做一次扫描，每换一个图片路径就是一条新命令（实测 10 秒才复制成功）；固定 `-File <临时文件>` 后命令行不随图片变化，每次约 0.3 秒。脚本写到系统临时目录的固定名，`copyImageFiles` 负责写与删；**落盘文件必须带 BOM**，否则 Windows PowerShell 5.1 按 ANSI 读，中文注释会变乱码。复制请求排队（固定路径同一时刻只能有一个写入者）。
+⚠️ **脚本内容必须一个字节都不变**（2026-11 用户报"复制图片又卡十几秒"的根因）：Windows 把"脚本里写剪贴板"当可疑行为，**一份没见过的脚本内容**要送云端判一次，判不出来就等满 10 秒；判过的按**内容**缓存，0.28 秒（本机实测：同一份内容第 2 次起 0.28 秒、字节相同但换个文件名照样 0.28 秒、把 `SetDataObject` 那行删掉第一次就 0.28 秒 —— 触发点是剪贴板调用，不是命令行，也不是 `-File`）。此前把命令行固定了，可图片路径还写在脚本正文里，于是每复制一张图就是一份新内容、每次 10 秒。现在的做法：
+
+- **脚本是常量**（`clipboardWorkerScript()`，不接任何参数），写到系统临时目录的固定名，内容没变就不重写，不含用户内容所以写完不删；**落盘必须带 BOM**，否则 Windows PowerShell 5.1 按 ANSI 读，中文注释变乱码；
+- **用户内容全走旁边的数据文件**：这次复制哪些图（base64）、HTML、纯文本写进 `note-tidy-clipboard.json/.html/.txt` 三个固定名文件，脚本按 `-PayloadPath` 参数读，跑完即删；
+- **插件加载时空跑一次**（`prewarmClipboard`，`main.ts` 里 fire and forget）：万一定论被作废（换病毒库），那 10 秒也发生在后台；
+- 复制请求排队（固定路径同一时刻只能有一个写入者）。
 
 ### 为什么还要"接管 Ctrl+C"（`ui/copy-shortcut.ts`，默认关）
 
 正文里的 `![[图.png]]` 是**文本**：不接管时按 Ctrl+C 复制的是那串链接，粘到文件夹里得到一个文件名的字符串。开关打开后，编辑器里的 Ctrl+C（macOS 是 ⌘C）改走「复制图片」那条路 —— 选中的图片优先，选区里没图就看光标下那一张（复用 `image-menu.ts` 的 `editorImagePicks`，判定与右键菜单完全一致）。
 
 - **只在编辑器里抢**：事件源要有 `.cm-editor` 祖先。输入框、设置面板、其它插件的按钮一律放行 —— 抢错了用户会以为键盘坏了；
-- **判定集中在 `isCopyShortcut`**（`test/copy-shortcut.test.ts` 守着）：带 Shift / Alt 的不抢（Ctrl+Shift+C 在 Obsidian 里另有命令）、输入法组词中不抢；
+- **判定集中在 `isCopyShortcut`**（由 `test/copy-shortcut.test.ts` 验证）：带 Shift / Alt 的不抢（Ctrl+Shift+C 在 Obsidian 里另有命令）、输入法组词中不抢；
 - **抢到就 `preventDefault` + `stopPropagation`**，否则 Obsidian 自己还会复制一遍，把刚写进去的文件挤掉；
 - **选区里还有文字时连文字一起复制**（用户按 Ctrl+C 就是"选了什么复制什么"）：走图文混排那条路 —— 聊天窗口里贴出"文字 + 图片"。只有纯图片选区才走"只放文件列表"那条老路，所以**要往文件夹里粘文件，就选纯图片**（或右键用「复制图片」菜单项）。
 
@@ -277,7 +282,7 @@ Electron / 网页剪贴板只能写**位图**（CF_DIB）：QQ、Word 贴得到�
 
 - **什么时候动手**：**我们自己的粘贴**由 `fixPastedRange` 里顺手做掉（③ 那一步，与收图 / 排版**共用一次写回**）；**别人家的粘贴**（Obsidian 自己存下的截图、别的插件插进来的图）由 `ImageTasks.sizePastedRange` 单独做 —— 那一段不归我们处理，就只补尺寸。尺寸只改链接里的别名（`![[图.png|100]]` / `![100](图.png)`），排在流水线之后，与排版互不干扰；
 - **本插件接管的粘贴也走它**：图片由我们自己一张一张存、存完整批一次写回，随后同一趟里把这一段的三件事（收图 / 排版 / 套尺寸）做掉；观望表留给**别人家的粘贴**（别的插件把图片存进仓库、把链接插进正文，那正是要套尺寸的图片，我们不动它的正文）；
-- **要盯着看一会儿**（`PasteSizeWatcher`）：一次粘贴可能分几次落进编辑器（粘贴多张图逐张存盘 / 转码，每存好一张才插一条链接），所以粘贴后每变一次就把 `[起点, 光标处)` 再看一眼 —— 幂等（已有尺寸的不再动），安静 5 秒（`PASTE_SIZE_IDLE_MS`）丢掉、总寿命 20 秒（`PASTE_SIZE_MAX_MS`）封顶，免得用户随手打字把它一直续下去；
+- **要盯着看一会儿**（`PasteSizeWatcher`）：一次粘贴可能分几次写入编辑器（粘贴多张图逐张存盘 / 转码，每存好一张才插一条链接），所以粘贴后每变一次就把 `[起点, 光标处)` 再看一眼 —— 幂等（已有尺寸的不再动），安静 5 秒（`PASTE_SIZE_IDLE_MS`）丢掉、总寿命 20 秒（`PASTE_SIZE_MAX_MS`）封顶，免得用户随手打字把它一直续下去；
 - **三档不动手**（都收在 `image/size.ts` 的 `pastedImageSizeOptions` 里）：开关关着、**宽度留空**（那一档在「设置图片大小」里是"移除已有尺寸"，粘贴时自动删尺寸不是这个功能该干的事）、尺寸填错（与「快速设置图片大小」共用 `validateImageSize`）。「排版选中内容」那条路**不套尺寸** —— 手动改尺寸有专门的命令与菜单项。
 
 ### 图片转换 / 粘贴图片 / 清理附件：2026-09 起都不依赖别的插件
@@ -308,14 +313,14 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 
 几个踩过的坑，改这块前先看：
 
-- **隐藏要两道**：`addItem` 那一刻过滤只对"我们接得到的那条路"有效，而菜单里的项有的是**在我们拿到它之前**就加好的（编辑器菜单尤其如此：新增链接 / 新增外部链接 / 文本格式 / 段落设置那一批）—— 那些只能在**显示之后按标题把 DOM 摘掉**（`removeHiddenItems`）。两道都在 `test/image-menu.test.ts` 里守着；
+- **隐藏要两道**：`addItem` 那一刻过滤只对"我们接得到的那条路"有效，而菜单里的项有的是**在我们拿到它之前**就加好的（编辑器菜单尤其如此：新增链接 / 新增外部链接 / 文本格式 / 段落设置那一批）—— 那些只能在**显示之后按标题把 DOM 摘掉**（`removeHiddenItems`）。两道都由 `test/image-menu.test.ts` 验证；
 - **作用域要"粘住"**：二级菜单是**之后**才弹出来的，那时早就下膛了 —— 所以最近一次右键的作用域会留 30 秒（`STICKY_SCOPE_MS`），在这期间弹出的菜单都按它过滤，用户在二级菜单里关掉的项也生效；
 - **不能认"第一份菜单"**：Obsidian 的编辑器菜单带二级菜单（格式 / 块类型那一套：正文、1 级标题…、引用、任务列表、表格、脚注、标注），而二级菜单可能比主菜单**先**建 —— 认错了就会把二级菜单的项当成"笔记菜单里有什么"（2026-09 的 bug）。现在按菜单各记各的，`show*` 时才决定谁算数；
 - **菜单对象会被复用**：记号（Symbol）存的是"这次上膛的编号"而不是布尔，编号对不上就说明是上一次右键留下的记号；
 - **我们自己的项要在构建函数上打 `OWN_MENU_ITEM` 记号**（`addOwnMenuItems` 与 `menus.ts` 的 `addSubmenuEntry` 负责打）：我们的项同样走 `menu.addItem`，**任何加法路径**都得豁免过滤与摘除，否则会被隐藏名单误伤（"管理右键菜单"被自己藏掉 / 「图片功能」被摘掉 —— 2026-09 的 bug）、还会混进"检测到的项"里；
 - **本插件自己的项只认自己的开关**（`imageMenuCopyItem` / `imageMenuQuickSizeItem` / `imageMenuQuickFixItem` / `imageMenuManageItem` / `fileMenuImageSubmenu` / `fileMenuTextSubmenu`，单一数据源见 `image-menu.ts` 的 `OWN_ITEMS` / `OWN_ITEM_SCOPES` / `OWN_ITEM_COMMANDS`）；
 - **面板上的开关一律"开着 = 显示"**（别做成"勾上 = 隐藏"，用户会把"开启"理解成勾上，然后把自己的入口关掉）；
-- **插项要在 `show*` 时做**：在第一个 `addItem` 时插会插进菜单中间；顺序同样只能在显示后用 `moveOwnItemsFirst` 重排（另有一次微任务兜底，认最后建的那份菜单）。
+- **插项要在 `show*` 时做**：在第一个 `addItem` 时插会插进菜单中间；顺序同样只能在显示后用 `moveOwnItemsFirst` 重排（另有一次微任务处理，认最后建的那份菜单）。
 
 ⚠️ 这一套成立的前提是"Obsidian 内部建菜单用的就是 `obsidian` 模块导出的那个 `Menu` 类"。真失效时的表现很好认：**右键看不到本插件的项，管理面板里也检测不到任何项**。那时要么只保留 `editor-menu` + 命令面板入口，要么退回"自己弹一份菜单"（会丢原生项，用户明确否过这条路）。
 
@@ -344,6 +349,7 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
 - **保护区统一走 `text/line-scan.ts` 与 `text/inline-scan.ts`**：frontmatter、围栏 / 缩进代码块、GFM 表格、行内代码与已有 `$…$` 一律不碰；**公式的识别与配对也只有一份**（inline-scan 的 `readInlineMath` / `dollarPositions` / `mathRanges` / `mathOpaqueLines`），别在模块里另写扫描 —— 行级消费者问"这行能不能碰"一律用 `mathOpaqueLines`。
 - **不替作者补，也不替作者删**：排版只做规则明说的事（`~`、`-` 两边不加空格靠"不进符号表"实现，已有的空格不动；微分算子前的薄空格不自动补）。想加"补全式"规则先问清楚。
 - **没有改动就返回原内容**：`tasks.ts` 据此跳过写盘（各排版函数都遵守这条）。
+- **图片文件名在全库唯一**：新名字一律由 `image/naming.ts` 的 `generateUniqueTargetPath` 生成，别处不许自己拼时间戳。这个函数做五层检查（目标路径 → 批次预留路径 → 批次预留文件名 → 调用方传入的全库文件名表 → 这次运行已经发出的名字），撞名时把时间戳往后推一秒；**调用方没传预留表时同样不许重名** —— 2026-11 用户库里出现 615 组同名不同内容的图片，原因是粘贴图片与整理选中内容每次都新建空表，同一秒写进两个文件夹的两张图各自通过检查。回归测试 `test/image-naming.test.ts`。
 - **单一数据源**：设置面板 = `settings/fields/`；规则出处 = `rule-registry.ts`；受管图片格式 = `image/constants.ts`（另一张更宽的表在 `image/links.ts`，刻意不合并）。
 - **`src/text/` 不 import obsidian**：测试用 `test/obsidian-stub.mjs` 替身跑，这样才能脱离 Obsidian 验证幂等。
 - **导出符号、命令 ID、设置字段名都是稳定接口**：改名要同步 `rule-registry.ts` 与测试。
@@ -413,6 +419,6 @@ Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件
    gh run watch          # 看工作流跑完
    gh release view x.y.z --json assets
    ```
-   手动 `gh release create` 只在工作流不可用时兜底 —— 这样发出来的资产没有 attestation。
+   手动 `gh release create` 只在工作流不可用时手动执行 —— 这样发出来的资产没有 attestation。
 
 版本号应保持一致：`manifest.json` 的 version、`package.json` 的 version、以及 `versions.json` 中最新的 key 三者必须一致。

@@ -1,9 +1,9 @@
-import { App, TFile, normalizePath } from 'obsidian';
+﻿import { App, TFile, normalizePath } from 'obsidian';
 import { getTargetAttachmentFolder } from './attachment-folder';
 import type { AttachmentLocationSettings } from './attachment-folder';
 import { MANAGED_IMAGE_EXT_RE, unescapeTableTarget, wikiEmbedRe } from './constants';
 import { buildBasenameIndex, chooseLinkTarget, isImagePath, resolveImageLink } from './links';
-import { generateUniqueTargetPath, matchesNamePreset } from './naming';
+import { buildVaultBasenameMap, generateUniqueTargetPath, matchesNamePreset } from './naming';
 import type { ImageNamingSettings } from './naming';
 
 /**
@@ -110,7 +110,7 @@ export async function renameGarbledImages(
 	const processedFilePaths = new Set<string>();
 	const currentAttachFolder = await getTargetAttachmentFolder(app, settings, file);
 	const rp = reservedPaths ?? new Map<string, string>();
-	const rbn = reservedBasenames ?? new Map<string, string>();
+	const rbn = reservedBasenames ?? buildVaultBasenameMap(app);
 
 	for (const match of imageMatches) {
 		const rawLink = unescapeTableTarget(match[1]!).trim();
@@ -195,7 +195,7 @@ export async function renameImagesToPreset(
 	const processedFilePaths = processedFiles ?? new Set<string>();
 	const currentAttachFolder = await getTargetAttachmentFolder(app, settings, file);
 	const rp = reservedPaths ?? new Map<string, string>();
-	const rbn = reservedBasenames ?? new Map<string, string>();
+	const rbn = reservedBasenames ?? buildVaultBasenameMap(app);
 
 	for (const match of imageMatches) {
 		const rawLink = unescapeTableTarget(match[1]!).trim();

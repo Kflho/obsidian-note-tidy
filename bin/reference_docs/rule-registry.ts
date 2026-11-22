@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 规则登记表：**一条规则一条记录**，把「规范出处 ↔ 设置开关 ↔ 实现 ↔ 测试」串起来。
  *
  * ## 为什么要有这张表
@@ -202,7 +202,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 			},
 			{
 				id: 'image.unique-name',
-				name: '文件名在仓库里唯一（四层检查，重名往后推一秒）',
+				name: '文件名在仓库里唯一（五层检查，重名往后推一秒）',
 				spec: null,
 				status: 'done',
 				switchKeys: [],
@@ -210,8 +210,8 @@ export const RULE_SECTIONS: RuleSection[] = [
 					file: 'src/image/naming.ts',
 					symbols: ['generateUniqueTargetPath', 'buildVaultBasenameMap'],
 				},
-				tests: ['test/image-transfer.test.ts'],
-				note: '裸文件名链接一旦撞名，笔记可能显示成另一张图，所以这条是图片功能的硬约束。四层检查全在 `generateUniqueTargetPath` 里（目标路径 → 批次预留路径 → 批次预留 basename → 调用方传入的全库 basename 表），撞名把时间戳往后推一秒重试 —— 批量重命名里"同一秒处理一批图也各得一个名字"靠的就是它。**调用方传的扩展名必须是文件最终会有的那个**：批量重命名传它自己的扩展名；导入交接转格式时传目标格式（先用 `handOffExtension` 问一句，转码没成再换回原扩展名要个空位）。按源扩展名传会让同一秒里的 png 与 jpg 各占一个名字，而两张最终都叫 `xxx.webp` —— 第二张撞名即放弃转换（2026-09 用户报的"粘贴多张图只有第一张转了 webp"，回归测试在 test/image-transfer.test.ts 第 3 节）',
+				tests: ['test/image-transfer.test.ts', 'test/image-naming.test.ts'],
+				note: '裸文件名链接一旦撞名，笔记可能显示成另一张图，这条规则是图片功能的硬约束。五层检查全在 `generateUniqueTargetPath` 里（目标路径 → 批次预留路径 → 批次预留 basename → 调用方传入的全库 basename 表 → 这次运行已经发出的名字），撞名时把时间戳往后推一秒重试 —— 批量重命名里"同一秒处理一批图也各得一个名字"靠的就是它。**调用方传的扩展名必须是文件最终会有的那个**：批量重命名传它自己的扩展名；导入交接转格式时传目标格式（先用 `handOffExtension` 问一句，转码没成再换回原扩展名要个空位）。按源扩展名传会让同一秒里的 png 与 jpg 各占一个名字，而两张最终都叫 `xxx.webp`，第二张撞名即放弃转换（2026-09 用户报的"粘贴多张图只有第一张转了 webp"，回归测试在 test/image-transfer.test.ts 第 3 节）。**第五层是 2026-11 补的**：粘贴图片与整理选中内容这两条调用路径每次都新建空的预留表，表里既没有仓库已有的名字，也不跨批次保留；同一秒写进不同文件夹的两张图各自通过检查，结果同名不同内容（用户库里出现 615 组）。现在按仓库记录这次运行已经发出的名字，仓库文件数量变化时补登记现有文件名，调用方传入空表也拦得住；回归测试 test/image-naming.test.ts',
 			},
 			{
 				id: 'image.same-name',
@@ -309,7 +309,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 					symbols: ['applyImageSize', 'pastedImageSizeOptions', 'validateImageSize', 'toSizeString'],
 				},
 				tests: ['test/image-size.test.ts', 'test/paste-watch.test.ts', 'test/context-indent.test.ts'],
-				note: '粘进来的多半是聊天截图，尺寸该与笔记里其它图一致 —— 2026-09 用户要的"开启后粘贴的图片自动变成预设大小"。范围与文本修复**完全同一套**（`[粘贴起点, 光标处)`，见 `cross.auto-fix-paste`），只改这一段、不写盘、撤销一次回退；三种粘贴都算：Obsidian 自己存下的截图、Image Converter 转完插进来的图、粘贴文本里带的图片链接（`![[图.png]]` 与 `![](图.png)` 都认，后者尺寸写在 alt 槽位）。**与文本修复共用一次写回**：那一段像聊天记录时由 `ImageTasks.fixPastedRange` 内部顺手套上（`typesetEditorRange` 的 `sizeOptions` 参数），不像时由 `ImageTasks.sizePastedRange` 单独做 —— 两条路都在 `text/pipeline` 之后再动链接，尺寸只改别名，与排版互不干扰；「排版选中内容」那条路**不套尺寸**（手动改尺寸有专门的命令与菜单项，见 `image.size`）。两条与文本修复不同的规矩：① **别的插件接管了这次粘贴也要跟**（Image Converter 处理图片文件时会 `preventDefault`，但图片是它存进仓库、链接是它插进正文的 —— 那正是要套尺寸的图片；文本修复那边则不凑热闹）；② **要盯着看一会儿**：一次粘贴可能分几次落进编辑器（粘贴多张图时逐张存盘 / 转码，每存好一张才插一条链接），所以用 `PasteSizeWatcher` 观望 5 秒（每次变化重新计时）+ 总寿命 20 秒，每变一次就再看一眼 —— 幂等（已有尺寸的不再动）所以重复跑没有副作用，`sizePastedRange` 还会先看这一段里有没有 `![` 再决定要不要扫正则。三档不动手，都收在 `pastedImageSizeOptions` 里：开关关着、**宽度留空**（那一档在 `image.size` 里是"移除已有尺寸"，粘贴时自动删尺寸不是这个功能该干的事）、尺寸填错（与「快速设置图片大小」共用 `validateImageSize`）',
+				note: '粘进来的多半是聊天截图，尺寸该与笔记里其它图一致 —— 2026-09 用户要的"开启后粘贴的图片自动变成预设大小"。范围与文本修复**完全同一套**（`[粘贴起点, 光标处)`，见 `cross.auto-fix-paste`），只改这一段、不写盘、撤销一次回退；三种粘贴都算：Obsidian 自己存下的截图、Image Converter 转完插进来的图、粘贴文本里带的图片链接（`![[图.png]]` 与 `![](图.png)` 都认，后者尺寸写在 alt 槽位）。**与文本修复共用一次写回**：那一段像聊天记录时由 `ImageTasks.fixPastedRange` 内部顺手套上（`typesetEditorRange` 的 `sizeOptions` 参数），不像时由 `ImageTasks.sizePastedRange` 单独做 —— 两条路都在 `text/pipeline` 之后再动链接，尺寸只改别名，与排版互不干扰；「排版选中内容」那条路**不套尺寸**（手动改尺寸有专门的命令与菜单项，见 `image.size`）。两条与文本修复不同的规矩：① **别的插件接管了这次粘贴也要跟**（Image Converter 处理图片文件时会 `preventDefault`，但图片是它存进仓库、链接是它插进正文的 —— 那正是要套尺寸的图片；文本修复那边则不凑热闹）；② **要盯着看一会儿**：一次粘贴可能分几次写入编辑器（粘贴多张图时逐张存盘 / 转码，每存好一张才插一条链接），所以用 `PasteSizeWatcher` 观望 5 秒（每次变化重新计时）+ 总寿命 20 秒，每变一次就再看一眼 —— 幂等（已有尺寸的不再动）所以重复跑没有副作用，`sizePastedRange` 还会先看这一段里有没有 `![` 再决定要不要扫正则。三档不动手，都收在 `pastedImageSizeOptions` 里：开关关着、**宽度留空**（那一档在 `image.size` 里是"移除已有尺寸"，粘贴时自动删尺寸不是这个功能该干的事）、尺寸填错（与「快速设置图片大小」共用 `validateImageSize`）',
 			},
 			{
 				id: 'image.external-path',
@@ -361,7 +361,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 					symbols: ['formatSelectionImageCount', 'SelectionImageCount'],
 				},
 				tests: ['test/selection-count.test.ts'],
-				note: '不是排版规则，是状态栏那一格的显示。"什么算一张图片"在 image.link-scan 那一条（与本条共用同一份扫描）；选区变化靠 CodeMirror 扩展（src/ui/selection-status.ts）：Obsidian 公开事件里只有 editor-change，拖选不触发',
+				note: '不是排版规则，是状态栏那一格的显示。"什么算一张图片"在 image.link-scan 那一条（与本条共用同一份扫描）；选区变化靠 CodeMirror 扩展（src/ui/selection-status.ts）：Obsidian 公开事件里只有 editor-change，拖选不触。数字是**按文件去重后的张数**：同一张图在选区里出现两次只算一张，与菜单标题、复制结果一致',
 			},
 			{
 				id: 'image.link-scan',
@@ -371,10 +371,10 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: [],
 				impl: {
 					file: 'src/image/scan.ts',
-					symbols: ['collectImageRefs', 'countImageRefs', 'findImageRefAt', 'pickImageRefs'],
+					symbols: ['collectImageRefs', 'countImageRefs', 'countDistinctImageRefs', 'distinctImageRefs', 'findImageRefAt', 'pickImageRefs'],
 				},
 				tests: ['test/image-scan.test.ts'],
-				note: '状态栏计数与"复制图片"共用这一份扫描（前者要张数，后者要目标与位置）。只数嵌入，普通链接不算；"算不算图片"沿用 image/links 的 isImagePath；表格里的 `![[图.png\\|100]]` 也算（转义还原见 `image.table-escape`）。围栏代码块走 text/line-scan 的 markFenceLines —— 拿到的是片段，开头的 `---` 多半是分隔线，不能按 frontmatter 判',
+				note: '状态栏计数与"复制图片"共用这一份扫描（前者要张数，后者要目标与位置）。只数嵌入，普通链接不算；"算不算图片"沿用 image/links 的 isImagePath；表格里的 `![[图.png\\|100]]` 也算（转义还原见 `image.table-escape`）。围栏代码块走 text/line-scan 的 markFenceLines —— 拿到的是片段，开头的 `---` 多半是分隔线，不能按 frontmatter 。**张数按文件去重**（`countDistinctImageRefs` / `distinctImageRefs`）：文件名在全库唯一（见 image.unique-name），所以 `![[附件/图.png]]` 与 `![[图.png]]` 算同一张，同一张图嵌两次只算一张 —— 状态栏、菜单标题与复制结果报的是同一个数（2026-11 用户报这三处对不上）',
 			},
 			{
 				id: 'image.copy-resolve',
@@ -384,10 +384,10 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: [],
 				impl: {
 					file: 'src/image/copy.ts',
-					symbols: ['resolveImageFiles', 'absolutePathOf', 'basePathOf', 'isExternalTarget', 'baseNameOf', 'vaultPathFromResourceUrl'],
+					symbols: ['resolveImageFiles', 'resolveImagePlan', 'describeCopyResult', 'absolutePathOf', 'basePathOf', 'isExternalTarget', 'baseNameOf', 'vaultPathFromResourceUrl'],
 				},
 				tests: ['test/image-copy.test.ts'],
-				note: '解析规则沿用图片功能的老两条：同名歧义宁可跳过（links.ts 的 resolveImageLink）、同一张图只放一份（否则粘到文件夹里会多出「图 2.png」）。外部绝对路径（`D:\\图.png`）交给 external-path 去磁盘上找；`/开头` 是"仓库根目录"而不是磁盘根，不当外部路径处理。阅读模式里只有 `<img>`，拿 `internal-embed` 的 src，拿不到就把 `app://local/…` 的资源 URL 按适配器 basePath 还原成仓库路径',
+				note: '解析规则沿用图片功能的老两条：同名歧义宁可跳过（links.ts 的 resolveImageLink）、同一张图只放一份（否则粘到文件夹里会多出「图 2.png」）。外部绝对路径（`D:\\图.png`）交给 external-path 去磁盘上找；`/开头` 是"仓库根目录"而不是磁盘根，不当外部路径处理。阅读模式里只有 `<img>`，拿 `internal-embed` 的 src，拿不到就把 `app://local/…` 的资源 URL 按适配器 basePath 还原成仓库路。**解析结果分两项**：能复制的文件（按路径去重）与找不到文件的引用数（`resolveImagePlan`）—— 复制完成后的提示报实际进剪贴板的张数，找不到文件时补一句"另有 N 处引用的图片文件没有找到"，数字与选中数量对不上时用户能看出原因（2026-11 用户报"选中的张数与复制的不一样"）',
 			},
 			{
 				id: 'image.copy-to-clipboard',
@@ -397,10 +397,10 @@ export const RULE_SECTIONS: RuleSection[] = [
 				switchKeys: [],
 				impl: {
 					file: 'src/image/clipboard.ts',
-					symbols: ['copyImageFiles', 'clipboardCommandFor', 'buildPowerShellScript', 'buildFileScript', 'buildRichScript', 'encodePowerShellCommand', 'buildAppleScript', 'RichClipboardContent'],
+					symbols: ['copyImageFiles', 'prewarmClipboard', 'clipboardCommandFor', 'clipboardWorkerScript', 'buildClipboardPayload', 'buildAppleScript', 'RichClipboardContent'],
 				},
 				tests: ['test/image-clipboard.test.ts'],
-				note: 'Electron / 网页剪贴板只能写位图（CF_DIB），资源管理器不认（Image Toolkit 的复制图片就是这个毛病，粘进文件夹什么都没有），所以写**文件拖放列表**（CF_HDROP）得请系统工具代劳：Windows 用 powershell.exe（纯图片走 WinForms 的 `DataObject`，图文混排走 Win32 原生接口，见 `buildRichScript`），macOS 用 osascript 的 POSIX file。**纯图片那条路不写文本格式**：CF_UNICODETEXT 与 CF_HDROP 同时存在时有些程序会粘两遍（Windows Terminal 修过这个 bug）。**图文混排那条路反过来**：只写 HTML + 纯文本，**不放文件列表也不放位图**（有文件 QQ 就只贴图片、有位图微信就不解析 HTML），见 `image.copy-rich`。路径一律 base64 进脚本；脚本始终写到固定路径的临时文件、用 -File 执行（写完即删；落盘文件带 BOM，否则 Windows PowerShell 5.1 按 ANSI 读，脚本里的中文注释变乱码）。**为什么不用 -EncodedCommand**：Windows 会对新命令行做一次扫描，每换一个图片路径就是一条新命令，实测要 10 秒才复制成功；固定 -File 命令行后每次约 0.3 秒（2026-11 实测）。⚠️ `.NET` 的 `DataObject` **不能**用来写 CF_HTML：`SetData` 一个 byte[] 进去，落到剪贴板上的是字符串 `"System.Byte[]"`（本机实测），而且格式顺序也不听我们的（实测 `CF_HDROP` 打头）',
+				note: 'Electron / 网页剪贴板只能写位图（CF_DIB），资源管理器不认（Image Toolkit 的复制图片就是这个毛病，粘进文件夹什么都没有），所以写**文件拖放列表**（CF_HDROP）得请系统工具代劳：Windows 用 powershell.exe（纯图片走 WinForms 的 `DataObject`，图文混排走 Win32 原生接口，见 `clipboardWorkerScript` 里的 C# 段），macOS 用 osascript 的 POSIX file。**纯图片那条路不写文本格式**：CF_UNICODETEXT 与 CF_HDROP 同时存在时有些程序会粘两遍（Windows Terminal 修过这个 bug）。**图文混排那条路反过来**：只写 HTML + 纯文本，**不放文件列表也不放位图**（有文件 QQ 就只贴图片、有位图微信就不解析 HTML），见 `image.copy-rich`。⚠️**脚本内容必须一个字节都不变**（2026-11 用户报"复制图片又卡十几秒"的根因）：Windows Defender 把"脚本里写剪贴板"当可疑行为，**每一份没见过的脚本内容**都要送云端判一次，判不出就等满 10 秒；判过的内容 0.28 秒（本机实测：同一份内容第 2 次起 0.28 秒、换路径字节相同照样 0.28 秒、把 `SetDataObject` 那行删掉第一次就 0.28 秒，可见触发点是剪贴板调用而不是 `-File`/命令行）。所以用户内容一律不进脚本：脚本恒定、写到固定路径（内容没变不重写、不含用户内容、写完不删，落盘带 BOM），这次的图片路径（base64）、HTML、纯文本走 `note-tidy-clipboard.json/.html/.txt` 三个固定名文件、由脚本按 `-PayloadPath` 参数读，跑完即删；插件加载时 `prewarmClipboard` 空跑一次，把系统判定的那 10 秒放到后台执行。`.NET` 的 `DataObject` **不能**用来写 CF_HTML：`SetData` 一个 byte[] 进去，写进剪贴板的是字符串 `"System.Byte[]"`（本机实测），而且格式顺序也不听我们的（实测 `CF_HDROP` 打头）',
 			},
 			{
 				id: 'image.copy-shortcut',
@@ -451,6 +451,19 @@ export const RULE_SECTIONS: RuleSection[] = [
 				},
 				tests: ['test/image-menu.test.ts'],
 				note: '**不接管菜单**：Obsidian 没有"往原生菜单追加一项"的接口，社区里的图片插件基本都自己弹一份（`preventDefault` 掉原生的），代价是原生项与其它插件的项全没了 —— 这里只往里插自己的项。两个加法：笔记正文走官方的 `editor-menu`（只追加）；图片 / 文件夹菜单靠 menu-injector 在菜单显示时插，显示之后把我们自己的项**重排到最前面**（`moveOwnItemsFirst`，同一个任务里做完、浏览器还没绘制，用户看不到跳动）。菜单项一律带"（Note Tidy）"：原生菜单里本来就有"复制图片"，且那个是位图版。**本插件自己的项只认自己的开关，绝不走"按标题隐藏"那条路** —— 否则标题一旦进了隐藏名单，"管理右键菜单"就再也点不开、「图片功能」二级栏也会被摘掉（2026-09 踩过这个坑）。`OWN_ITEMS` / `OWN_ITEM_SCOPES` / `OWN_ITEM_COMMANDS` 是这六项的单一数据源（图标与说明 / 出现在哪几层 / 对应哪条命令，二级栏是容器所以命令为 null），管理面板与 `test/commands.test.ts` 都按它核。**「快速修复聊天记录」是两步连做**：转换本文件内的外部图片（`image.transfer-*`）+ 修一遍排版（`text.*`），只给单篇笔记（笔记 / 图片菜单里是 `QUICK_FIX_MENU_TITLE`，文件菜单的「文本排版」二级栏里单文件时也有一条），两步在同一个批量壳里跑 —— 壳里有互斥锁，分两次调用第二次会被挡掉',
+			},
+			{
+				id: 'image.copy-menu-source',
+				name: '图片右键菜单取哪几张：编辑视图按编辑器选区，阅读视图按 DOM 选区',
+				spec: null,
+				status: 'done',
+				switchKeys: [],
+				impl: {
+					file: 'src/ui/image-menu.ts',
+					symbols: ['pickImageScopeRefs', 'editorImagePicks'],
+				},
+				tests: ['test/image-menu.test.ts'],
+				note: '2026-11 用户报"全选之后右键复制图片，只得到一两百张，笔记里是六百多张"：图片菜单原来从渲染出来的 `<img>` 取图，而实时预览只把视口内的行渲染成 DOM，张数随滚动位置与点击位置变化，复制进剪贴板的确实只有这些。现在编辑视图（源码 / 实时预览）改用编辑器选区，与状态栏、笔记菜单、Ctrl+C 同一份来源；阅读视图没有编辑器选区，只能看 DOM 选区跨过的图片；两种情况下没有选区都只复制点中的那一张。判定收在纯函数 `pickImageScopeRefs` 里，`test/image-menu.test.ts` 的"图片菜单取图"一节验证',
 			},
 			{
 				id: 'image.menu-injector',
@@ -1097,7 +1110,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 					],
 				},
 				tests: ['test/paste-watch.test.ts', 'test/paste-fix.test.ts', 'test/chat-log.test.ts', 'test/context-indent.test.ts'],
-				note: '挂在官方的 `editor-paste` 上：只看一眼"粘在哪儿"，**不阻止这次粘贴**（不像「接管 Ctrl+C」那样抢按键）。`editor-paste` 派发时粘贴的内容还没落进文档（Obsidian 的剪贴板管理器只发这个事件，插入是 CodeMirror 内置处理器随后做的），所以那时只登记 `{编辑器, 笔记, 粘贴起点}`；内容一落进编辑器（`editor-change`）就把"粘贴起点 → 光标处"这一段整个交给 `ImageTasks.fixPastedRange`，由它按 `pasteFixPlanFrom` 做**三件各自认开关**的事，合并在**同一次写回**里（不写盘、撤销一次一起回退、笔记其余部分一个字符都不动）：① **收图**（`autoTransferImagesOnPaste`）：这一段里的 `![说明](file:///D:\\图.png)` 这类外部路径图片复制进附件夹、换成 `![[新名字]]`（按「格式转换」的目标格式转码），**与像不像聊天记录无关** —— 单条 QQ 消息（"两张图 + 一段话"）本来就没有时间戳头部，图片照样得进库（2026-09 用户："本来就应该放进仓库，转换图片本来就是智能排版的功能"，于是把智能排版与智能转换图片**解耦**成两个开关）；② **排版**（`autoFixChatLogOnPaste`）：`looksLikeChatLog` 认得出就整段排（流水线 + 缩进跟随光标），认不出就**一个字的正文都不改**、只把整块缩进对齐到光标那一层（`shiftBlockTo`：编辑器粘贴只把第一行放在光标那一列、其余行从第 0 列开始 —— 2026-09 用户报的"最后一句话没有正确缩进"就是这一段没对齐）；③ **套尺寸**（`autoSetImageSizeOnPaste` → `pastedImageSizeOptions`，见 `image.paste-size`）。判定 `looksLikeChatLog` 现在**分两档**：带日期的"用户名 + 时间戳"头部**一条就够**（QQ 复制单条消息就是这种头部，2026-09 用户要的"单条消息也算聊天记录"），只有时分秒的头部要"独占行尾 + 下面还有正文"才算一条（`会议 14:30:25 开始` 这种正文里提一句时间的仍然不算），其余形状还是两条才动手。首尾换行数保持粘贴前的样子、缩进按光标那一层算，见 `cross.range-indent`；这样就不必猜"一条消息的正文到哪儿结束"（见 `structure.chat-log` 的取舍说明）。等待表见 `PasteFixScheduler`：按笔记路径记、一篇只留最后一笔、取出之后才回调（我们自己的 `replaceRange` 也会触发 `editor-change`，不摘就会自己触发自己），编辑器迟迟没变化时由 `PASTE_FALLBACK_MS` 把那笔等待丢掉（宁可不动手，也绝不去动整篇），插件卸载时清空。**同一条 `editor-paste` / `editor-change` 线上还挂着别人家粘贴的套尺寸那一笔**（`PasteSizeWatcher`，见 `image.paste-size`）：两笔共用"从粘贴起点到光标"这个范围判定，我们自己的粘贴一笔做一次（三件事都在那一趟里），别人接管的粘贴（`defaultPrevented`）我们不动正文、只让尺寸那一笔观望式地跟',
+				note: '跟随官方的 `editor-paste` 事件：只看一眼"粘在哪儿"，**不阻止这次粘贴**（不像「接管 Ctrl+C」那样抢按键）。`editor-paste` 派发时粘贴的内容还没写入文档（Obsidian 的剪贴板管理器只发这个事件，插入是 CodeMirror 内置处理器随后做的），所以那时只登记 `{编辑器, 笔记, 粘贴起点}`；内容一写入编辑器（`editor-change`）就把"粘贴起点 → 光标处"这一段整个交给 `ImageTasks.fixPastedRange`，由它按 `pasteFixPlanFrom` 做**三件各自认开关**的事，合并在**同一次写回**里（不写盘、撤销一次一起回退、笔记其余部分一个字符都不动）：① **收图**（`autoTransferImagesOnPaste`）：这一段里的 `![说明](file:///D:\\图.png)` 这类外部路径图片复制进附件夹、换成 `![[新名字]]`（按「格式转换」的目标格式转码），**与像不像聊天记录无关** —— 单条 QQ 消息（"两张图 + 一段话"）本来就没有时间戳头部，图片照样得进库（2026-09 用户："本来就应该放进仓库，转换图片本来就是智能排版的功能"，于是把智能排版与智能转换图片**解耦**成两个开关）；② **排版**（`autoFixChatLogOnPaste`）：`looksLikeChatLog` 认得出就整段排（流水线 + 缩进跟随光标），认不出就**一个字的正文都不改**、只把整块缩进对齐到光标那一层（`shiftBlockTo`：编辑器粘贴只把第一行放在光标那一列、其余行从第 0 列开始 —— 2026-09 用户报的"最后一句话没有正确缩进"就是这一段没对齐）；③ **套尺寸**（`autoSetImageSizeOnPaste` → `pastedImageSizeOptions`，见 `image.paste-size`）。判定 `looksLikeChatLog` 现在**分两档**：带日期的"用户名 + 时间戳"头部**一条就够**（QQ 复制单条消息就是这种头部，2026-09 用户要的"单条消息也算聊天记录"），只有时分秒的头部要"独占行尾 + 下面还有正文"才算一条（`会议 14:30:25 开始` 这种正文里提一句时间的仍然不算），其余形状还是两条才动手。首尾换行数保持粘贴前的样子、缩进按光标那一层算，见 `cross.range-indent`；这样就不必猜"一条消息的正文到哪儿结束"（见 `structure.chat-log` 的取舍说明）。等待表见 `PasteFixScheduler`：按笔记路径记、一篇只留最后一笔、取出之后才回调（我们自己的 `replaceRange` 也会触发 `editor-change`，不摘就会自己触发自己），编辑器迟迟没变化时由 `PASTE_FALLBACK_MS` 把那笔等待丢掉（宁可不动手，也绝不去动整篇），插件卸载时清空。**同一条 `editor-paste` / `editor-change` 线上还挂着别人家粘贴的套尺寸那一笔**（`PasteSizeWatcher`，见 `image.paste-size`）：两笔共用"从粘贴起点到光标"这个范围判定，我们自己的粘贴一笔做一次（三件事都在那一趟里），别人接管的粘贴（`defaultPrevented`）我们不动正文、只让尺寸那一笔观望式地跟',
 			},
 		],
 	},

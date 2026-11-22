@@ -2,7 +2,7 @@ import { App, MarkdownView, Notice, TFile, requestUrl } from 'obsidian';
 import type { Editor } from 'obsidian';
 import type { BatchContext, BatchRunner } from './batch';
 import { copyImageFiles } from './image/clipboard';
-import { resolveImageFiles } from './image/copy';
+import { describeCopyResult, resolveImagePlan } from './image/copy';
 import { buildRichContent } from './image/rich-copy';
 import type { CopySelection } from './image/rich-copy';
 import type { ImageRef } from './image/scan';
@@ -1026,9 +1026,10 @@ export class ImageTasks implements TaskActions {
 			return;
 		}
 
-		const images = await resolveImageFiles(this.app, file.path, refs);
+		const plan = await resolveImagePlan(this.app, file.path, refs);
+		const images = plan.images;
 		if (images.length === 0) {
-			new Notice('没有找到图片文件。');
+			new Notice(plan.unresolved > 0 ? `引用的 ${plan.unresolved} 张图片都没有找到文件。` : '没有找到图片文件。');
 			return;
 		}
 
@@ -1039,12 +1040,7 @@ export class ImageTasks implements TaskActions {
 			const bitmapPath = rich === null && images.length === 1 ? images[0]?.path ?? null : null;
 			await copyImageFiles(images.map(image => image.path), bitmapPath, process.platform, rich);
 
-			new Notice(
-				rich === null
-					? `已复制 ${images.length} 张图片。`
-					: `已复制文字和 ${images.length} 张图片。`,
-				3000
-			);
+			new Notice(describeCopyResult(plan, rich !== null), 3000);
 		} catch (e) {
 			console.error(' [Note Tidy] 复制图片失败：', e);
 			new Notice('复制图片失败，请打开开发者控制台查看原因。');
