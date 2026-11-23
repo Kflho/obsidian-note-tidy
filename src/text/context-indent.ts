@@ -58,6 +58,23 @@ export function continuationPrefix(linePrefix: string): string | null {
 	return out;
 }
 
+/**
+ * 一行**行首**那一截"续行前缀"（原样，不做归一）：从行首读到第一个既不是空白、也不是 `>` 的字符。
+ *
+ * 与 `continuationPrefix` 的区别：那个吃的是"光标之前那一段"，要求整段都是前缀；这个吃的是
+ * **一整行**（后面还跟着正文），只读行首那一截。`shiftBlockTo` 剥首行用的就是它 ——
+ * 引用里的首行前面那截是 `> `，只剥空白的话 `>` 会留下、前缀又加一层（见 `shiftBlockTo`）。
+ */
+function leadingContinuationPrefix(line: string): string {
+	let index = 0;
+	while (index < line.length) {
+		const char = line.charAt(index);
+		if (char !== ' ' && char !== '\t' && char !== '>') break;
+		index++;
+	}
+	return line.substring(0, index);
+}
+
 /** 两段文本的共同开头 */
 function sharedPrefix(a: string, b: string): string {
 	let i = 0;
@@ -163,24 +180,26 @@ export function placeBlockAt(text: string, prefix: string): string {
 }
 
 /**
- * 整块**平移到** `prefix` 这一层：先剥掉**首行**那一层缩进，再给每一行加前缀。
+ * 整块**平移到** `prefix` 这一层：先剥掉**首行行首那一整截前缀**（空白 + `>` 链），再给每一行加前缀。
  *
- * 与 `placeBlockAt` 只差一处：剥的是**首行**的缩进，不是"各行共有的那一层"。
- * 粘贴进来的那一段正好是"首行在光标那一列、其余行顶格"：它前面那截缩进在段外，
+ * 与 `placeBlockAt` 只差一处：剥的是**首行**的前缀，不是"各行共有的那一层"。
+ * 粘贴进来的那一段正好是"首行在光标那一列、其余行顶格"：它前面那截前缀在段外，
  * 段内各行共有的缩进是空串 —— 用 `placeBlockAt` 的话一个字符都不会剥，首行会被加出两层。
  * 而首行那一截就是"这一段现在落在哪一层"，按它剥再按光标那一层加，正好放到该在的地方。
  *
- * 整段本来就齐整（聊天记录排版的结果就是这样）时两者一致：`commonIndent` 的结果就是首行那一截，
- * 于是"剥一层再加一层"= 原样。
+ * ⚠️ 剥的必须是**整截**前缀，不能只剥空白：在 `> ` 引用里粘贴时，首行前面那截是 `> `、不是空白，
+ * 只剥空白的话 `>` 留在首行、外面又加一层 `> `，就成了 `> > `；多段粘贴时只有首行翻倍
+ * （续行本来顶格，加一层正好），看着像"第一段多一层"（2026-11 用户报的）。
+ * 两级引用同理，会翻成 `> > > > `。
  *
- * **幂等**：重复执行结果一样（第二次的首行缩进就是 `prefix`，剥掉再加回来还是它）。
+ * **幂等**：重复执行结果一样（第二次的首行前缀就是 `prefix`，剥掉再加回来还是它）。
  *
  * @param prefix 目标那一层的前缀；空串 = 这一段不动
  */
 export function shiftBlockTo(text: string, prefix: string): string {
 	if (prefix === '' || text === '') return text;
-	const firstIndent = /^[ \t]*/.exec(text)?.[0] ?? '';
-	return applyIndentPrefix(dedentBy(text, firstIndent), prefix);
+	const firstLine = text.split('\n')[0] ?? '';
+	return applyIndentPrefix(dedentBy(text, leadingContinuationPrefix(firstLine)), prefix);
 }
 
 /**
