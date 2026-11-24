@@ -2,7 +2,7 @@ import { MarkdownView, Menu, TFile } from 'obsidian';
 import type { App, Editor, MenuItem, Plugin } from 'obsidian';
 import { basePathOf, vaultPathFromResourceUrl } from '../image/copy';
 import type { CopySelection } from '../image/rich-copy';
-import { distinctImageRefs, pickImageRefs } from '../image/scan';
+import { collectImageRefs, distinctImageRefs, pickImageRefs } from '../image/scan';
 import type { ImageRef } from '../image/scan';
 import type { ImageTransferSettings } from '../settings';
 import type { TaskActions } from '../tasks';
@@ -249,6 +249,22 @@ export function editorImageRefs(editor: Editor): ImageRef[] {
 	return editorImagePicks(editor).refs;
 }
 
+/**
+ * 编辑器里**真正选中**的图片；没有选区时返回空数组。
+ *
+ * 不能把 `editorImagePicks` 当作"选区"：没有选区时，它返回光标所在的那一条图片引用。
+ * 在实时预览里点击图片、滚动滚轮都不会移动编辑器光标；光标停在上一次点击的图片上时，
+ * 右键另一张图片，菜单会复制上一次那张图片（2026-11 用户报告：复制一张图片后，右键另一张
+ * 图片，粘贴出来仍是第一张）。图片右键菜单需要用户实际选中的内容，因此本函数只认
+ * `getCursor('from')` 到 `('to')` 之间的正文；光标位置不参与判断。
+ */
+export function selectedImageRefs(editor: Editor): ImageRef[] {
+	const from = editor.posToOffset(editor.getCursor('from'));
+	const to = editor.posToOffset(editor.getCursor('to'));
+	if (to <= from) return [];
+	return collectImageRefs(editor.getValue().slice(from, to), from);
+}
+
 // ------------------------------------------------------------------ 上膛
 
 /** 这次右键的上下文；null = 没上膛（注入器一律原样放行） */
@@ -401,11 +417,13 @@ export function markdownViewFor(app: App, element: HTMLElement): MarkdownView | 
  *
  * 编辑视图（源码 / 实时预览）以**编辑器选区**为准：与状态栏、笔记菜单、Ctrl+C 同一份来源，
  * 选区里有几张就复制几张。实时预览只把视口内的图片渲染成 DOM，按渲染结果取会明显偏少
- * （2026-11 用户报"全选后只复制了一两百张，笔记里是六百多张"）。
- * 阅读视图没有编辑器选区，只能看 DOM 选区跨过的图片。
+ * （2026-11 用户报"全选后只复制了一两百张，笔记里是六百多张"）。**光标停在哪张图片上不构成选区**：
+ * 实时预览里点击图片、滚动滚轮都不会移动光标，按光标取图会复制上一次点击的图片（见 `selectedImageRefs`）。
+ *
+ * 阅读视图没有编辑器选区，只能看 DOM 选区跨过的图片。没有选区时一律只复制点中的那一张。
  *
  * @param sourceMode 是不是编辑视图（`MarkdownView.getMode() !== 'preview'`）
- * @param editorRefs 编辑器选区里的图片
+ * @param editorRefs 编辑器**选区**里的图片（不是光标处的图片）
  * @param domRefs 阅读视图里 DOM 选区跨过的图片
  * @param clicked 点中的那一张
  */
@@ -420,11 +438,13 @@ export function pickImageScopeRefs(options: {
 	return options.clicked ? [options.clicked] : [];
 }
 
-/** 这次要复制的图片：编辑视图看编辑器选区，阅读视图看 DOM 选区，没选就只复制点中的这张 */
+/** 这次要复制的图片：编辑视图看**真正的编辑器选区**，阅读视图看 DOM 选区，没选就只复制点中的这张 */
 function renderedImageRefs(app: App, view: MarkdownView, image: HTMLImageElement): ImageRef[] {
 	const sourceMode = view.getMode() !== 'preview';
 	const editor = view.editor;
-	const editorRefs = sourceMode && editor ? editorImagePicks(editor).refs : [];
+	// 光标停在哪张图片上不构成选区：实时预览里点击图片 / 滚动滚轮不会移动光标，
+	// 按 `editorImagePicks` 取图会复制上一次点击的图片（见 selectedImageRefs）
+	const editorRefs = sourceMode && editor ? selectedImageRefs(editor) : [];
 
 	const domRefs: ImageRef[] = [];
 	if (!sourceMode) {

@@ -454,16 +454,16 @@ export const RULE_SECTIONS: RuleSection[] = [
 			},
 			{
 				id: 'image.copy-menu-source',
-				name: '图片右键菜单取哪几张：编辑视图按编辑器选区，阅读视图按 DOM 选区',
+				name: '图片右键菜单取哪几张：有选区按选区，没有选区按点中的图片',
 				spec: null,
 				status: 'done',
 				switchKeys: [],
 				impl: {
 					file: 'src/ui/image-menu.ts',
-					symbols: ['pickImageScopeRefs', 'editorImagePicks'],
+					symbols: ['pickImageScopeRefs', 'selectedImageRefs', 'editorImagePicks'],
 				},
 				tests: ['test/image-menu.test.ts'],
-				note: '2026-11 用户报"全选之后右键复制图片，只得到一两百张，笔记里是六百多张"：图片菜单原来从渲染出来的 `<img>` 取图，而实时预览只把视口内的行渲染成 DOM，张数随滚动位置与点击位置变化，复制进剪贴板的确实只有这些。现在编辑视图（源码 / 实时预览）改用编辑器选区，与状态栏、笔记菜单、Ctrl+C 同一份来源；阅读视图没有编辑器选区，只能看 DOM 选区跨过的图片；两种情况下没有选区都只复制点中的那一张。判定收在纯函数 `pickImageScopeRefs` 里，`test/image-menu.test.ts` 的"图片菜单取图"一节验证',
+				note: '2026-11 用户报"全选之后右键复制图片，只得到一两百张，笔记里是六百多张"：图片菜单原来从渲染出来的 `<img>` 取图，而实时预览只把视口内的行渲染成 DOM，张数随滚动位置与点击位置变化，复制进剪贴板的确实只有这些。现在编辑视图（源码 / 实时预览）改用编辑器**选区**，与状态栏、笔记菜单、Ctrl+C 同一份来源；阅读视图没有编辑器选区，只能看 DOM 选区跨过的图片；两种情况下没有选区都只复制点中的图片。**随后又收到反馈"复制一张后，右键另一张缩略图，粘出来还是第一张"**：没有选区时 `editorImagePicks` 会退回光标所在的那一条图片引用，而实时预览里点击图片、滚动滚轮都不会移动光标，光标停在上一次点击的图片上时，菜单会复制该图片。现在菜单只取**真正的选区**（`selectedImageRefs`：只认 `getCursor("from")` 到 `("to")` 之间的正文，光标位置不算），选区里没有图片也回退到点中的图片。判定逻辑收在纯函数 `pickImageScopeRefs` 里，`test/image-menu.test.ts` 的"图片菜单取图"一节验证',
 			},
 			{
 				id: 'image.menu-injector',
