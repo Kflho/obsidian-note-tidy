@@ -165,8 +165,7 @@ export async function resolveImageFiles(app: App, sourcePath: string, refs: Imag
  */
 export function describeCopyResult(plan: ImageResolvePlan, withText: boolean): string {
 	const count = plan.images.length;
-	const what = withText ? '已复制文字和 ' : '已复制 ';
-	const main = `${what}${count} 张图片。`;
-	if (plan.unresolved === 0) return main;
-	return `${main}另有 ${plan.unresolved} 处引用的图片文件没有找到，未复制。`;
+	const what = withText ? `已复制 ${count} 张图片与文字。` : `已复制 ${count} 张图片。`;
+	if (plan.unresolved === 0) return what;
+	return `${what}另有 ${plan.unresolved} 处引用的图片文件未找到，未复制。`;
 }

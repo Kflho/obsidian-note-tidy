@@ -10,7 +10,7 @@ import type { PngquantRunner, PngquantSettings } from './pngquant';
  * ## 为什么要自己写
  *
  * 以前这一层是借 Image Converter 的转码器（`imageProcessor.processImage`）：
- * 解码、缩放、编码都由它做。但它那边的粘贴处理是**并发**跑的（`handlePaste` 里
+ * 解码、缩放、编码都由它做。但它那边的粘贴处理是**并发**执行的（`handlePaste` 里
  * `files.map(async …)`，一批图各算各的输出名，同一秒算出来的名字撞在一起），
  * 2026-09 用户实测"粘两张图只剩第一张 / `File already exists`"；它的转码器也经不起
  * 两次调用叠在一起。与其隔着插件边界求它别并发，不如自己来：
@@ -70,7 +70,7 @@ const MIME_FOR_FORMAT: Record<ConvertFormat, string> = {
 	WEBP: 'image/webp',
 	JPEG: 'image/jpeg',
 	PNG: 'image/png',
-	// pngquant 那条路不走 canvas；这一项只是让类型完整（真跑时不会读到它）
+	// pngquant 那条路不走 canvas；这一项只是让类型完整（真执行时不会读到它）
 	PNGQUANT: 'image/png',
 };
 
@@ -93,7 +93,7 @@ export function targetExtension(format: string): string | null {
  * 也不猜一个格式下手。四个调用方（导入 / 粘贴 / 两条命令 / 整理图片）共用这一份收敛。
  *
  * `pngquant` 这一档**路径可以留空**：留空＝用系统里装的那份（`PATH` 里的 `pngquant`，
- * 或几个常见安装位置，见 `pngquantCandidates`）。真跑之前由调用方先探一次
+ * 或几个常见安装位置，见 `pngquantCandidates`）。真执行之前由调用方先探一次
  * （`probePngquant`），没探到就整步不做并提示用户 —— 这里不拦，免得"设置里空着、
  * 但系统里明明装了"这种最常见的用法被挡在门外。
  */
@@ -119,7 +119,7 @@ export function convertPlanFrom(
 	};
 	if (format === 'PNGQUANT') {
 		plan.pngquant = {
-			// 留空是合法的：真跑时 `runPngquant` 去系统里找（探测结果优先，其次裸命令名交给 PATH）
+			// 留空是合法的：真执行时 `runPngquant` 去系统里找（探测结果优先，其次裸命令名交给 PATH）
 			path: (pngquantPath ?? '').trim(),
 			quality: (pngquantQuality ?? '').trim() === '' ? DEFAULT_PNGQUANT_QUALITY : pngquantQuality.trim(),
 		};
@@ -318,7 +318,7 @@ export const encodeWithCanvas: EncodeImage = async (request: EncodeRequest) => {
  * @param input 原文件名（含扩展名，用来判格式）、原始字节，以及要放到哪个附件夹
  * @param plan `null` = 不转换（调用方没开这一步）
  * @param encode 编码器（默认 canvas；测试里换成替身）
- * @param pngquant 目标格式是 `PNGQUANT` 时用的执行器（默认真跑 pngquant；测试里换成替身）
+ * @param pngquant 目标格式是 `PNGQUANT` 时用的执行器（默认真执行 pngquant；测试里换成替身）
  * @returns 转换后的文件名 + 字节；没转（不接的格式 / 动图 / 已是目标格式 / 撞名 / 解不开）时 `null`
  */
 export async function convertImageBytes(
@@ -365,7 +365,7 @@ export async function convertImageBytes(
  * （wikilink、Markdown 链接、canvas），比我们自己写正则替换靠谱得多。
  * 目标格式与源格式相同时（pngquant 压 PNG：`a.png` → `a.png`）没有改名这一步，直接写回内容。
  *
- * @param pngquant 目标格式是 `PNGQUANT` 时用的执行器（默认真跑 pngquant；测试里换成替身）
+ * @param pngquant 目标格式是 `PNGQUANT` 时用的执行器（默认真执行 pngquant；测试里换成替身）
  * @returns 转换后的文件名；没转 / 转不动时 `null`
  */
 export async function convertVaultImage(

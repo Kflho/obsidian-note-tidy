@@ -279,7 +279,7 @@ function convertHalfPunct(pieces: Piece[], languages: Array<'zh' | 'en' | null>)
 		piece.text = full;
 		// 换成全角后按**新字符**的规则走（`：` 有自己的规则；`，` 不在表里 → 交给全角标点规则）。
 		// 不能留旧规则、也不能清空不管：留下的旧规则会多给一格，清空则下一轮拿到的又是
-		// `：` 自己的规则 —— 两条路必须得出同一个结果，否则一跑一次就变样。
+		// `：` 自己的规则 —— 两条路必须得出同一个结果，否则一执行一次就变样。
 		piece.rule = SYMBOL_TABLE[full];
 	}
 }

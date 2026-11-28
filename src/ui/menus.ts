@@ -114,7 +114,7 @@ function addImageSubmenu(
 	addSubmenuEntry(parent, IMAGE_SUBMENU_TITLE, 'image', (menu) => {
 		menu.addItem((item) => {
 			item
-				.setTitle(`转换${where}的外部图片`)
+				.setTitle(`导入${where}的外部图片`)
 				.setIcon('image-plus')
 				.onClick(async () => {
 					await actions.transferExternal(files, where);
@@ -132,7 +132,7 @@ function addImageSubmenu(
 
 		menu.addItem((item) => {
 			item
-				.setTitle(`将${where}的所有图片重命名为预设格式`)
+				.setTitle(`按预设格式重命名${where}的全部图片`)
 				.setIcon('image')
 				.onClick(async () => {
 					await actions.renameToPreset(files, where, false);
@@ -141,7 +141,7 @@ function addImageSubmenu(
 
 		menu.addItem((item) => {
 			item
-				.setTitle(`强制将${where}的所有图片重命名为预设格式`)
+				.setTitle(`强制按预设格式重命名${where}的全部图片`)
 				.setIcon('image')
 				.onClick(async () => {
 					await actions.renameToPreset(files, where, true);
@@ -150,7 +150,7 @@ function addImageSubmenu(
 
 		menu.addItem((item) => {
 			item
-				.setTitle(`整理${where}图片位置`)
+				.setTitle(`整理${where}的图片位置`)
 				.setIcon('folder')
 				.onClick(async () => {
 					await actions.organizeImages(files, where);
@@ -171,7 +171,7 @@ function addImageSubmenu(
 
 		menu.addItem((item) => {
 			item
-				.setTitle(`设置${where}图片的大小`)
+				.setTitle(`设置${where}的图片大小`)
 				.setIcon('image')
 				.onClick(() => {
 					actions.openImageSize(files, label);
@@ -183,7 +183,7 @@ function addImageSubmenu(
 		if (files.length === 1) {
 			menu.addItem((item) => {
 				item
-					.setTitle(`快速设置${where}图片的大小`)
+					.setTitle(`快速设置${where}的图片大小`)
 					.setIcon('image')
 					.onClick(async () => {
 						const target = files[0];

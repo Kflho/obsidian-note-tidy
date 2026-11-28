@@ -35,7 +35,7 @@ import { isCopyingImages } from '../image/clipboard';
  * ## 还有一笔：粘贴进来的图片套尺寸（`autoSetImageSizeOnPaste`）
  *
  * 同一段范围里的第三件事：把里面的图片按「图片大小」那套预设加上 `|宽x高`。
- * **我们自己的粘贴**由 `fixPastedRange` 顺手做掉（同一次写回）；**别人家的粘贴**
+ * **我们自己的粘贴**由 `fixPastedRange` 同时做掉（同一次写回）；**别人家的粘贴**
  * （Obsidian 自己存下的截图、别的插件插进来的图）由 `sizePastedRange` 单独做 ——
  * 那一段不归我们处理，就只补尺寸。
  *
@@ -192,7 +192,7 @@ export interface PasteSizeWatcherOptions {
  * 粘贴多张图时 Obsidian（或 Image Converter）逐张存盘 / 转码，每存好一张才插一条链接。
  * 第一笔 `editor-change` 只看得到第一张，一笔即摘的话后面几张就漏了。
  *
- * 所以改成"观望"：粘贴后每变一次就把 `[起点, 光标处)` 交出去一次（重复跑是幂等的 ——
+ * 所以改成"观望"：粘贴后每变一次就把 `[起点, 光标处)` 交出去一次（重复执行是幂等的 ——
  * 已经有尺寸的图片不会再动），编辑器安静 `idleMs` 才丢掉；总寿命不超过 `maxMs`，
  * 免得用户随手打字把这笔观望一直续下去。**摘掉之后才回调**这件事在这里同样成立：
  * 调用方要拿它返回的 target 去异步改正文，而改正文又会触发 `editor-change`。
@@ -310,10 +310,10 @@ export function registerPasteAutoFix(
 		const takeover = getSettings().takeOverImagePaste !== false;
 		const clipboardImages = takeover ? imageFilesFromClipboard(evt.clipboardData) : [];
 
-		// 复制还在进行：剪贴板里可能还是上一张图，这次粘贴先挡住，别把旧图存进来。
+		// 复制仍在进行：剪贴板里可能还是上一张图片，本次粘贴先拦截，避免存入旧图片。
 		if (takeover && clipboardImages.length > 0 && isCopyingImages()) {
 			evt.preventDefault();
-			new Notice('图片还在复制，请稍候再粘贴。');
+			new Notice('图片正在复制，请稍候再粘贴。');
 			return;
 		}
 
@@ -325,7 +325,7 @@ export function registerPasteAutoFix(
 		}
 
 		// 粘贴图片：剪贴板里带图片文件时我们自己来（`takeOverImagePaste`，默认开）。
-		// 别的插件的自动粘贴是并发跑的，一次粘多张会算出同一个输出名、后写的直接丢图
+		// 其他插件的自动粘贴会并发执行，一次粘多张会算出同一个输出名、后写的直接丢图
 		// （2026-09 用户实测"粘两张只剩第一张"），所以这件事得由一张一张来的我们做。
 		// 前提：这次粘贴**没人管**、开关开着。接下来尺寸与排版都在 `pasteImages` 里
 		// 顺着做掉，不再走下面那两笔。
@@ -364,7 +364,7 @@ export function registerPasteAutoFix(
 		const sizeTarget = sizeWatcher.onEditorChange(editor, file);
 
 		// 我们自己的粘贴：整段交给任务层（收图 / 排版 / 套尺寸各认开关，一次写回）。
-		// 尺寸那一笔也归它 —— 它已经看过这一段的图片，不必再单独跑一遍
+		// 尺寸那一笔也归它 —— 它已经看过这一段的图片，不必再单独执行一次
 		if (textHit && fixTarget) {
 			void actions.fixPastedRange(fixTarget.file, fixTarget.editor, fixTarget.start);
 			return;

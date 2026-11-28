@@ -9,7 +9,7 @@ import { editorImagePicks, TIDY_IMAGES_LABEL } from './ui/image-menu';
  * 命令与右键菜单里的操作一一对应：**命令 ID 是已发布版本的稳定接口，不能改名**
  * （test/commands.test.ts 会逐条比对菜单与命令表，漏注册就失败）。
  *
- * 「当前笔记」类命令在没打开笔记时立刻提示；「整个仓库」类命令直接铺开跑。
+ * 「当前笔记」类命令在没打开笔记时立刻提示；「整个仓库」类命令直接铺开执行。
  * 唯一的例外是「复制图片」：它放在**编辑器 / 图片的右键菜单**上（不是文件菜单），
  * 所以审计表里单独列在 EDITOR_OPERATIONS。
  */
@@ -24,7 +24,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 	// ---------------------------------------------------------- 外部图片转换
 	plugin.addCommand({
 		id: 'transfer-images-current-note',
-		name: '转换当前笔记中的外部图片',
+		name: '导入当前笔记的外部图片',
 		editorCallback: async (_editor: Editor, ctx: MarkdownView | MarkdownFileInfo) => {
 			await tasks.transferCurrentNote(currentFile(ctx));
 		}
@@ -32,7 +32,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'transfer-images-entire-vault',
-		name: '转换整个仓库中的外部图片',
+		name: '导入整个仓库的外部图片',
 		callback: async () => {
 			await tasks.transferEntireVault();
 		}
@@ -64,7 +64,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'clear-unused-images',
-		name: '清理没人引用的图片',
+		name: '清理未引用的图片',
 		callback: async () => {
 			await tasks.clearUnusedImagesWithConfirm();
 		}
@@ -73,7 +73,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 	// ---------------------------------------------------------- 图片重命名
 	plugin.addCommand({
 		id: 'rename-all-images-entire-vault',
-		name: '将整个仓库中的所有图片重命名为预设格式',
+		name: '按预设格式重命名整个仓库的图片',
 		callback: async () => {
 			await tasks.renameEntireVaultToPreset(false);
 		}
@@ -81,7 +81,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'force-rename-all-images-entire-vault',
-		name: '强制重命名仓库图片',
+		name: '强制按预设格式重命名整个仓库的图片',
 		callback: async () => {
 			await tasks.renameEntireVaultToPreset(true);
 		}
@@ -215,7 +215,7 @@ export function registerCommands(plugin: Plugin, tasks: ImageTasks): void {
 
 	plugin.addCommand({
 		id: 'typeset-selection',
-		name: '排版选中的内容',
+		name: '排版选中内容',
 		// 不用 editorCallback：那个在阅读模式下会让命令从面板里消失；这里本来也要求有选区
 		checkCallback: (checking: boolean) => {
 			const view = app.workspace.getActiveViewOfType(MarkdownView);

@@ -80,7 +80,7 @@ interface RangeFixResult {
 	status: 'fixed' | 'unchanged' | 'skipped';
 	/** 这一段被当成聊天记录排版了吗（决定提示语） */
 	chatLog: boolean;
-	/** 这一趟收进仓库的图片数 */
+	/** 这一趟导入仓库的图片数 */
 	imported: number;
 }
 
@@ -131,17 +131,17 @@ export interface TaskActions {	/** 转换外部绝对路径图片（逐篇，单
 	convertEntireVault(): Promise<void>;
 	/** 转换当前笔记里引用的图片（命令面板入口）：想先在一篇笔记上试就用它 */
 	convertNoteImages(file: TFile | null): Promise<void>;
-	/** 整理图片：转换图片格式 + 合并内容相同的重复副本 + 清理没人引用的附件（命令 / 右键菜单 / 左侧栏图标共用） */
+	/** 整理图片：转换图片格式 + 合并内容相同的重复图片 + 清理未引用的图片（命令 / 右键菜单 / 左侧栏图标共用） */
 	tidyImages(confirm?: boolean): Promise<void>;
-	/** 清理没人引用的图片附件（先弹确认框再动手）：扫描全库笔记与 canvas 里的引用 */
+	/** 清理未引用的图片（先弹确认框，再执行）：扫描整个仓库的笔记与 canvas 中的引用 */
 	clearUnusedImagesWithConfirm(): Promise<void>;
 }
 
-/** 转换前确认弹窗里那句警告（当前笔记 / 全库共用） */
-const CONVERT_WARNING = '转换会重写图片文件并改扩展名；动图和已是目标格式的图片保持原样。';
+/** 转换前确认弹窗里那句警告（当前笔记 / 整个仓库共用） */
+const CONVERT_WARNING = '转换会重写图片文件并修改扩展名；动图与已是目标格式的图片保持原样。';
 
-/** 目标格式选了 pngquant、系统里又找不到它时说的话（怎么装、怎么指路都写清楚） */
-const PNGQUANT_MISSING_MESSAGE = '未找到 pngquant。请安装它，或在设置中填写路径。';
+/** 目标格式选了 pngquant、系统里又找不到它时说的话（安装方式与路径设置都写清楚） */
+const PNGQUANT_MISSING_MESSAGE = '未找到 pngquant。请安装 pngquant，或在设置中填写其路径。';
 
 /** 转换一次要用的东西：目标格式 + 质量 + 格式标签（两条转换命令与「整理图片」共用） */
 interface ConversionReady {
@@ -161,7 +161,7 @@ interface DocumentUsage {
  * 统计"每个图片文件名被几篇文档（笔记 + canvas）引用"。
  *
  * 「整理图片位置」用它判断一张图**除了本笔记还有没有别人在用**：有别人用就复制一份给本笔记
- * （源文件留在原地），只有本笔记用就直接搬过来（不留孤儿副本）。
+ * （源文件留在原地），只有本笔记用就直接移入（不留无人管理的重复图片）。
  *
  * 与「整理图片」那一步的引用计数**故意不同**：那边数的是"被引用了几次"（同目录查重时决定留哪张），
  * 这里数的是"有几篇文档在引用"，所以按**文档**去重 —— 一篇笔记里引同一张图三次仍然只算一篇。
@@ -214,19 +214,19 @@ export class ImageTasks implements TaskActions {
 	async transferCurrentNote(file: TFile | null): Promise<void> {
 		await this.runner.run(
 			{
-				label: '外部图片转换',
+				label: '导入外部图片',
 				files: file ? [file] : [],
-				failureMessage: '处理失败，请打开开发者控制台查看原因。',
+				failureMessage: '处理失败，请打开开发者控制台查看错误信息。',
 			},
 			async (ctx) => {
 				if (!file) return '请先打开一篇笔记。';
 				const updated = await transferExternalImages(this.app, this.getSettings(), file);
 				if (updated) {
-					ctx.progress.finish(' 转换完成');
-					return '转换完成。';
+					ctx.progress.finish('导入完成');
+					return '外部图片已导入。';
 				}
 				ctx.progress.clear();
-				return '没有需要转换的图片。';
+				return '没有需要导入的外部图片。';
 			}
 		);
 	}
@@ -239,9 +239,9 @@ export class ImageTasks implements TaskActions {
 
 		await this.runner.run(
 			{
-				label: '外部图片转换',
+				label: '导入外部图片',
 				files,
-				failureMessage: '处理失败，请打开开发者控制台查看原因。',
+				failureMessage: '处理失败，请打开开发者控制台查看错误信息。',
 			},
 			async (ctx) => {
 				const settings = this.getSettings();
@@ -253,22 +253,22 @@ export class ImageTasks implements TaskActions {
 					if (updated) processedCount++;
 					ctx.progress.step(i + 1);
 				}
-				ctx.progress.finish(' 转换完成');
-				return `全局处理完毕！共更新了 ${processedCount} 篇笔记。`;
+				ctx.progress.finish('导入完成');
+				return `整个仓库共更新 ${processedCount} 篇笔记。`;
 			}
 		);
 	}
 
-	/** 转换外部图片（右键菜单入口） */
+	/** 导入外部图片（右键菜单入口） */
 	async transferExternal(files: TFile[], where: string): Promise<void> {
 		const settings = this.getSettings();
 		const reservedPaths = new Map<string, string>();
 		const reservedBasenames = buildVaultBasenameMap(this.app);
 		await this.runPerFile(
-			' 外部图片转换',
+			'导入外部图片',
 			files,
 			async (file) => (await transferExternalImages(this.app, settings, file, reservedPaths, reservedBasenames)) ? 1 : 0,
-			(count) => ` ${where}共更新了 ${count} 篇笔记。`
+			(count) => `${where}共更新 ${count} 篇笔记。`
 		);
 	}
 
@@ -285,10 +285,10 @@ export class ImageTasks implements TaskActions {
 		const reservedPaths = new Map<string, string>();
 		const reservedBasenames = buildVaultBasenameMap(this.app);
 		await this.runPerFile(
-			' 乱码图片扫描',
+			'乱码图片扫描',
 			files,
 			(file, ctx) => renameGarbledImages(this.app, settings, file, ctx.index, reservedPaths, reservedBasenames),
-			(count) => ` ${where}共重命名了 ${count} 张乱码图片。`,
+			(count) => `${where}共重命名 ${count} 张乱码图片。`,
 			async () => { await fixImageLinkFormats(this.app, settings); }
 		);
 	}
@@ -314,20 +314,20 @@ export class ImageTasks implements TaskActions {
 				const reservedBasenames = buildVaultBasenameMap(this.app);
 				const processedFiles = new Set<string>();
 				await this.runPerFile(
-					force ? ' 图片重命名（强制）' : ' 图片重命名',
+					force ? '图片重命名（强制）' : '图片重命名',
 					files,
 					(file, ctx) => renameImagesToPreset(
 						this.app, settings, file, ctx.index,
 						reservedPaths, reservedBasenames, force, undefined, processedFiles
 					),
-					(count) => ` 全局处理完毕！共重命名了 ${count} 张图片。`,
+					(count) => `整个仓库共重命名 ${count} 张图片。`,
 					async () => { await fixImageLinkFormats(this.app, settings); }
 				);
 			}).open();
 		} catch (e) {
 			this.progress.clear();
 			console.error(e);
-			new Notice('处理失败，请打开开发者控制台查看原因。');
+			new Notice('处理失败，请打开开发者控制台查看错误信息。');
 		}
 	}
 
@@ -347,13 +347,13 @@ export class ImageTasks implements TaskActions {
 			const reservedBasenames = buildVaultBasenameMap(this.app);
 			const processedFiles = new Set<string>();
 			await this.runPerFile(
-				force ? ' 图片重命名（强制）' : ' 图片重命名',
+				force ? '图片重命名（强制）' : '图片重命名',
 				files,
 				(file, ctx) => renameImagesToPreset(
 					this.app, settings, file, ctx.index,
 					reservedPaths, reservedBasenames, force, undefined, processedFiles
 				),
-				(count) => ` ${where}共重命名了 ${count} 张图片。`,
+				(count) => `${where}共重命名 ${count} 张图片。`,
 				async () => { await fixImageLinkFormats(this.app, settings); }
 			);
 		}).open();
@@ -386,7 +386,7 @@ export class ImageTasks implements TaskActions {
 
 		const targets = selectConvertibleImages(this.app.vault.getFiles(), ready.plan);
 		if (targets.length === 0) {
-			new Notice(`图片都已经是 ${ready.label}。`);
+			new Notice(`所有图片都已是 ${ready.label} 格式。`);
 			return;
 		}
 
@@ -394,7 +394,7 @@ export class ImageTasks implements TaskActions {
 			await this.runConversion(targets, ready);
 		}, {
 			title: '确认转换图片格式',
-			message: `发现 ${targets.length} 张图片不是 ${ready.label}，确认转换？`,
+			message: `发现 ${targets.length} 张图片不是 ${ready.label} 格式，确认转换？`,
 			warning: CONVERT_WARNING,
 			confirmLabel: '确认转换',
 		}).open();
@@ -419,7 +419,7 @@ export class ImageTasks implements TaskActions {
 		const linked = await collectLinkedImageFiles(this.app, file, index);
 		const targets = selectConvertibleImages(linked, ready.plan);
 		if (targets.length === 0) {
-			new Notice('没有需要转换的图片。');
+			new Notice('没有需要转换格式的图片。');
 			return;
 		}
 
@@ -427,7 +427,7 @@ export class ImageTasks implements TaskActions {
 			await this.runConversion(targets, ready);
 		}, {
 			title: '确认转换图片格式',
-			message: `这篇笔记里有 ${targets.length} 张图片不是 ${ready.label}，确认转换？`,
+			message: `这篇笔记里有 ${targets.length} 张图片不是 ${ready.label} 格式，确认转换？`,
 			warning: CONVERT_WARNING,
 			confirmLabel: '确认转换',
 		}).open();
@@ -445,7 +445,7 @@ export class ImageTasks implements TaskActions {
 	private async prepareConversion(): Promise<ConversionReady | null> {
 		const ready = this.readConversion();
 		if (!ready) {
-			new Notice('请先在设置里选择图片目标格式。');
+			new Notice('请先在设置中选择图片目标格式。');
 			return null;
 		}
 		if (!(await this.pngquantReady(ready.plan))) {
@@ -456,7 +456,7 @@ export class ImageTasks implements TaskActions {
 	}
 
 	/**
-	 * pngquant 那一档能不能跑：探测一次（`--version` 有回话就算找到）。
+	 * pngquant 那一档能不能执行：探测一次（`--version` 有回话就算找到）。
 	 *
 	 * 别的目标格式直接算通过 —— 只有这一档要靠外部程序。
 	 */
@@ -482,9 +482,9 @@ export class ImageTasks implements TaskActions {
 		const { plan, label } = ready;
 		await this.runner.run(
 			{
-				label: ` 转换为 ${label}`,
+				label: `转换为 ${label}`,
 				files: targets,
-				failureMessage: '处理失败，请打开开发者控制台查看原因。',
+				failureMessage: '处理失败，请打开开发者控制台查看错误信息。',
 			},
 			async (ctx) => {
 				let converted = 0;
@@ -499,7 +499,7 @@ export class ImageTasks implements TaskActions {
 							if (name) converted++;
 							else skipped++;
 						} catch (e) {
-							// 单张出错不拖垮整批：继续跑，最后一起汇报
+							// 单张出错不拖垮整批：继续执行，最后一起汇报
 							failed++;
 							console.error(` [ImageTransfer] 转换失败：${file.path}`, e);
 						}
@@ -508,17 +508,17 @@ export class ImageTasks implements TaskActions {
 				}
 
 				if (converted > 0) {
-					ctx.progress.finish(' 转换完成');
-					let message = ` 已把 ${converted} 张图片转换为 ${label}。`;
-						if (skipped > 0) message += `另有 ${skipped} 张未转换（已是 ${label}、动图，或无法解码、文件名重复），保留原样。`;
-					if (failed > 0) message += ` 有 ${failed} 张出错，详情见控制台。`;
+					ctx.progress.finish('转换完成');
+					let message = `已把 ${converted} 张图片转换为 ${label} 格式。`;
+					if (skipped > 0) message += `另有 ${skipped} 张图片未转换（已是目标格式、动图、无法解码或文件名重复），保留原样。`;
+					if (failed > 0) message += ` 有 ${failed} 张图片转换失败，详情见开发者控制台。`;
 					return message;
 				}
 				ctx.progress.clear();
 				if (failed > 0) {
-					return `没有图片转换成功，有 ${failed} 张出错，详情见控制台。`;
+					return `没有图片转换成功，有 ${failed} 张图片转换失败，详情见开发者控制台。`;
 				}
-					return `没有图片需要转换（可能都已是 ${label}，或无法解码、文件名重复）。`;
+				return `没有需要转换格式的图片（可能已是目标格式、动图、无法解码或文件名重复）。`;
 			}
 		);
 	}
@@ -526,20 +526,20 @@ export class ImageTasks implements TaskActions {
 	// ------------------------------------------------------------------ 整理图片（转换 + 合并 + 清理）
 
 	/**
-	 * 整理图片：**转换图片格式** + **合并重复副本**（内容完全相同、又在同一个文件夹里）
-	 * + **清理没人引用的附件**。
+	 * 整理图片：**转换图片格式** + **合并重复图片**（内容完全相同、又在同一个文件夹里）
+	 * + **清理未引用的图片**。
 	 *
-	 * 三件事都是"把仓库里的图片收拾干净"，所以合成一个任务，三个入口共用：
+	 * 三件事都属于整理仓库中的图片，所以合成一个任务，三个入口共用：
 	 * 命令面板（`tidy-images`）、文件 / 文件夹右键的「图片功能」二级栏、左侧栏的一键图标。
 	 *
-	 * 为什么合并限定"同一个文件夹"：同目录里的孪生文件是"同一张图粘了两次"，纯浪费；
-	 * 而跨目录的同图是本插件「整理图片位置」**特意**给每篇笔记拷的副本
-	 * （笔记走到哪儿都自带图片）—— 删了反而破坏设计。详见 `image/dedupe.ts`。
+	 * 为什么合并限定在同一个文件夹：同目录中的重复文件通常是同一张图片被保存了两次；
+	 * 跨目录的相同图片是本插件「整理图片位置」有意为每篇笔记复制的副本
+	 * （笔记移动后仍自带图片），删除会破坏这一设计。详见 `image/dedupe.ts`。
 	 *
-	 * 四步的顺序都不能动，理由逐条写在下面 ① ② ③ ④ 里。
+	 * 四步的顺序不能调整，理由逐条写在下面 ① ② ③ ④ 中。
 	 *
-	 * @param confirm 是否先弹确认框。命令面板与右键菜单那两条要（`true`，默认）；
-	 *   左侧栏图标是"一键整理"，直接跑（`false`）
+	 * @param confirm 是否先弹确认框。命令面板与右键菜单入口需要（`true`，默认）；
+	 *   左侧栏图标是一键整理，直接执行（`false`）
 	 */
 	async tidyImages(confirm = true): Promise<void> {
 		const settings = this.getSettings();
@@ -587,24 +587,24 @@ export class ImageTasks implements TaskActions {
 		}
 
 		const drops = plans.flatMap(plan => plan.drops);
-		// 真正要删的文件（顺手把 TFile 拿在手上：批量壳要它、删除也要它）
+		// 真正要删除的文件（同时取得 TFile：批量外壳与删除都需要它）
 		const dropFiles: TFile[] = drops
 			.map(entry => this.app.vault.getAbstractFileByPath(entry.path))
 			.filter((file): file is TFile => file instanceof TFile);
 		const megabytes = dropFiles.reduce((sum, file) => sum + file.stat.size, 0) / (1024 * 1024);
 
-		// 格式转换那一段的准备：开关关着 / 目标格式读不出来 / pngquant 找不到 → 整步跳过，
+		// 格式转换那一段的准备：开关关闭、目标格式读不出来、pngquant 找不到时整步跳过，
 		// 其余两步照常（整理图片不能因为一个设置或一个外部程序就什么都不做）。
-		// 待转清单要先排掉"马上会被合并掉的副本"—— 那几张第 ② 步就进回收站了，
-		// 再拿去读盘只会得到一次"失败"，把结果提示里的数字弄脏。
+		// 待转清单要先排除马上会被合并掉的重复图片：它们在第 ② 步就移入回收站，
+		// 再读取只会得到一次失败，影响结果中的数字。
 		const dropPaths = new Set(dropFiles.map(file => file.path));
 		let ready = settings.tidyConvertFormat === false ? null : this.readConversion();
 		let convertHint = '';
 		if (!ready) {
-			if (settings.tidyConvertFormat !== false) convertHint = '读不出「转换图片格式」的目标格式，跳过格式转换';
+			if (settings.tidyConvertFormat !== false) convertHint = '读不出图片格式转换的目标格式，跳过格式转换';
 		} else if (!(await this.pngquantReady(ready.plan))) {
 			ready = null;
-			convertHint = '系统里没找到 pngquant，跳过格式转换（装一个，或在设置里填它的路径）';
+			convertHint = '未找到 pngquant，跳过格式转换（请安装 pngquant，或在设置中填写路径）';
 		}
 		const convertTargets = ready
 			? selectConvertibleImages(images, ready.plan).filter(file => !dropPaths.has(file.path))
@@ -614,9 +614,9 @@ export class ImageTasks implements TaskActions {
 			await this.runner.run(
 				{
 					label: '整理图片',
-					// 进度总量 = 要合并的 + 要转换的（两件事都是实打实要跑的动作）
+					// 进度总量 = 要合并的 + 要转换的（两件事都是实打实要执行的动作）
 					files: [...dropFiles, ...convertTargets],
-					failureMessage: '处理失败，请打开开发者控制台查看原因。',
+					failureMessage: '处理失败，请打开开发者控制台查看错误信息。',
 				},
 				async (ctx) => {
 					// ① 先把引用改写到留下的那张 —— 顺序反了就会留下断链
@@ -633,7 +633,7 @@ export class ImageTasks implements TaskActions {
 						touchedNotes++;
 					}
 
-					// ② 多余的副本进回收站（走用户设置的删除方式）
+					// ② 多余的重复图片移入回收站（使用用户设置的删除方式）
 					let removed = 0;
 					for (let i = 0; i < dropFiles.length; i++) {
 						const file = dropFiles[i];
@@ -649,10 +649,10 @@ export class ImageTasks implements TaskActions {
 					}
 					let step = dropFiles.length;
 
-					// ③ 格式转换：还不是目标格式的那些转成目标格式（插件自带的编码器，一张一张来）。
-					// 排在 ② 之后 —— 已经被合并掉的副本不必白转一趟；
-					// 改名走 Obsidian 原生的 fileManager.renameFile，全库链接（wikilink /
-					// Markdown / canvas）自动跟着更新，与那两条转换命令是同一套做法。
+					// ③ 格式转换：还不是目标格式的图片转换成目标格式（插件自带的编码器，逐张处理）。
+					// 排在 ② 之后：已被合并掉的重复图片不必再转换；
+					// 改名走 Obsidian 原生的 fileManager.renameFile，整个仓库的链接（wikilink /
+					// Markdown / canvas）自动更新，与两条转换命令使用同一套做法。
 					let converted = 0;
 					let convertSkipped = 0;
 					let convertFailed = 0;
@@ -663,7 +663,7 @@ export class ImageTasks implements TaskActions {
 								if (name) converted++;
 								else convertSkipped++;
 							} catch (err) {
-								// 单张出错不拖垮整批：继续跑，最后一起汇报
+								// 单张出错不拖垮整批：继续执行，最后一起汇报
 								convertFailed++;
 								console.error(` [ImageTransfer] 转换失败：${file.path}`, err);
 							}
@@ -671,38 +671,38 @@ export class ImageTasks implements TaskActions {
 						}
 					}
 
-					// ④ 清理"没人引用的图片附件"（自己实现，不依赖 Clear Unused Images）。
-					// 排最后：前面两步才刚把多余的副本删掉，这时清一遍最干净
+					// ④ 清理未引用的图片（自行实现，不依赖 Clear Unused Images）。
+					// 排在最后：前面两步刚删除多余的重复图片，此时清理最彻底
 					const cleared = settings.autoClearUnusedImages === false
 						? 0
 						: await this.clearUnusedImages();
 
-					// 结果按实际发生了什么汇报
+					// 结果按实际发生的操作汇报
 					const parts: string[] = [];
 					if (removed > 0) {
-						let merged = `合并掉 ${removed} 张重复图片（${plans.length} 组`;
-						if (touchedNotes > 0) merged += `，改写了 ${touchedNotes} 篇笔记的引用`;
+						let merged = `合并 ${removed} 张重复图片（${plans.length} 组`;
+						if (touchedNotes > 0) merged += `，改写 ${touchedNotes} 篇笔记的引用`;
 						parts.push(`${merged}）`);
 					}
-					if (converted > 0) parts.push(`把 ${converted} 张图片转换为 ${ready?.label ?? ''}`);
-					if (cleared > 0) parts.push(`清理掉 ${cleared} 张没人引用的图片`);
+					if (converted > 0) parts.push(`把 ${converted} 张图片转换为 ${ready?.label ?? ''} 格式`);
+					if (cleared > 0) parts.push(`清理 ${cleared} 张未引用的图片`);
 
 					if (parts.length === 0) {
 						ctx.progress.clear();
 						if (convertSkipped > 0) {
-								return `没有需要整理的图片（有 ${convertSkipped} 张不是 ${ready?.label ?? ''}，但无法解码或文件名重复，保留原样）。`;
+							return `没有需要整理的图片（有 ${convertSkipped} 张图片不是 ${ready?.label ?? ''} 格式，但无法解码或文件名重复，保留原样）。`;
 						}
-						return `没有需要整理的图片（没有内容相同的重复副本，也没有需要转换格式的图片${convertHint ? `；${convertHint}` : ''}）。`;
+						return `没有需要整理的图片（没有内容相同的重复图片，也没有需要转换格式的图片${convertHint ? `；${convertHint}` : ''}）。`;
 					}
 
-					if (removed > 0 || converted > 0) ctx.progress.finish(' 整理完成');
+					if (removed > 0 || converted > 0) ctx.progress.finish('整理完成');
 					else ctx.progress.clear();
 
-					let message = ` 已整理：${parts.join('，')}。`;
+					let message = `已整理：${parts.join('；')}。`;
 					if (convertSkipped > 0) {
-							message += `另有 ${convertSkipped} 张未转换（已是 ${ready?.label ?? ''}、动图，或无法解码、文件名重复），保留原样。`;
+						message += `另有 ${convertSkipped} 张图片未转换（已是 ${ready?.label ?? ''} 格式、动图、无法解码或文件名重复），保留原样。`;
 					}
-					if (convertFailed > 0) message += ` 有 ${convertFailed} 张转换出错，详情见控制台。`;
+					if (convertFailed > 0) message += ` 有 ${convertFailed} 张图片转换失败，详情见开发者控制台。`;
 					if (convertHint) message += `（${convertHint}）`;
 					return message;
 				}
@@ -716,21 +716,21 @@ export class ImageTasks implements TaskActions {
 
 		const planLines: string[] = [];
 		if (dropFiles.length > 0) {
-			planLines.push(`发现 ${plans.length} 组内容完全相同的图片（同一文件夹内），将合并掉 ${dropFiles.length} 张、回收约 ${megabytes.toFixed(1)} MB。`);
+			planLines.push(`发现 ${plans.length} 组内容相同的图片（同一文件夹内），将合并 ${dropFiles.length} 张，预计释放约 ${megabytes.toFixed(1)} MB。`);
 		} else {
-			planLines.push('没有发现内容相同的重复副本。');
+			planLines.push('没有发现内容相同的重复图片。');
 		}
 		if (convertTargets.length > 0) {
-			planLines.push(`另有 ${convertTargets.length} 张图片不是 ${ready?.label ?? ''}，将一并转换。`);
+			planLines.push(`另有 ${convertTargets.length} 张图片不是 ${ready?.label ?? ''} 格式，将一并转换。`);
 		}
 		if (dropFiles.length === 0 && convertTargets.length === 0) {
-			planLines.push('整理仍会执行一次"清理没人引用的附件"。');
+			planLines.push('整理仍会执行一次「清理未引用的图片」。');
 		}
 
 		new ConfirmRenameModal(this.app, dropFiles.length + convertTargets.length, run, {
 			title: '确认整理图片',
 			message: planLines.join(''),
-			warning: '合并掉的是内容相同的副本（进回收站），链接会改写到留下的那张。',
+			warning: '合并的是内容相同的重复图片（移入回收站），链接会改写到保留的图片。',
 			confirmLabel: '确认整理',
 		}).open();
 	}
@@ -751,7 +751,7 @@ export class ImageTasks implements TaskActions {
 			try {
 				documents.push({ path: doc.path, text: await this.app.vault.read(doc) });
 			} catch (err) {
-				console.error(` 读不出 ${doc.path}，这一次不清理没人引用的附件`, err);
+				console.error(` 读不出 ${doc.path}，这一次不清理未引用的图片`, err);
 				return null;
 			}
 		}
@@ -763,12 +763,12 @@ export class ImageTasks implements TaskActions {
 	}
 
 	/**
-	 * 清理**没人引用的图片附件**（自己实现，不依赖 Clear Unused Images）。
+	 * 清理**未引用的图片**（自行实现，不依赖 Clear Unused Images）。
 	 *
-	 * 判定与保守之处见 `image/unused.ts` 的文件头：只清图片、只认笔记与 canvas 里的引用、
-	 * 带路径的引用只保护它指的那一个文件、走回收站。单张删不掉只记日志，不拖垮整批。
+	 * 判定与保守处理见 `image/unused.ts` 的文件头：只清理图片、只识别笔记与 canvas 中的引用、
+	 * 带路径的引用只保护它指向的文件、使用回收站。单张无法删除时只记录日志，不中断整批。
 	 *
-	 * @returns 送进回收站的张数
+	 * @returns 移入回收站的张数
 	 */
 	async clearUnusedImages(): Promise<number> {
 		const images = this.app.vault.getFiles().filter(file => isImageFileName(file.name));
@@ -791,15 +791,15 @@ export class ImageTasks implements TaskActions {
 	}
 
 	/**
-	 * 「清理没人引用的图片附件」命令：先让用户确认，再动手（删除是破坏性操作）。
+	 * 「清理未引用的图片」命令：先让用户确认，再执行（删除是破坏性操作）。
 	 *
-	 * 与「整理图片」里那一步是同一个实现（`clearUnusedImages`），只是多一道确认。
+	 * 与「整理图片」中的清理步骤是同一个实现（`clearUnusedImages`），只是多一道确认。
 	 */
 	async clearUnusedImagesWithConfirm(): Promise<void> {
 		const images = this.app.vault.getFiles().filter(file => isImageFileName(file.name));
 		const references = await this.collectReferenceDocuments();
 		if (!references) {
-			new Notice('有笔记读取失败，本次未清理。');
+			new Notice('有笔记读取失败，本次未清理图片。');
 			return;
 		}
 
@@ -812,9 +812,9 @@ export class ImageTasks implements TaskActions {
 		new ConfirmRenameModal(this.app, unused.length, async () => {
 			await this.runner.run(
 				{
-					label: '清理没人引用的图片',
+					label: '清理未引用的图片',
 					files: unused,
-					failureMessage: '处理失败，请打开开发者控制台查看原因。',
+					failureMessage: '处理失败，请打开开发者控制台查看错误信息。',
 				},
 				async (ctx) => {
 					let removed = 0;
@@ -825,7 +825,7 @@ export class ImageTasks implements TaskActions {
 								await this.app.fileManager.trashFile(file);
 								removed++;
 							} catch (err) {
-								console.error(` 清理 ${file.path} 失败（不影响其它图片）`, err);
+								console.error(` 清理 ${file.path} 失败（不影响其他图片）`, err);
 							}
 						}
 						ctx.progress.step(i + 1);
@@ -834,14 +834,14 @@ export class ImageTasks implements TaskActions {
 						ctx.progress.clear();
 						return '没有清理任何图片。';
 					}
-					ctx.progress.finish(' 清理完成');
-						return `已把 ${removed} 张没有被引用的图片移到回收站（只清图片，只认笔记与 canvas 里的引用）。`;
+					ctx.progress.finish('清理完成');
+					return `已将 ${removed} 张未引用的图片移到回收站（只处理图片，引用范围包括笔记与 canvas）。`;
 				}
 			);
 		}, {
-			title: '确认清理没人引用的图片',
-			message: `发现 ${unused.length} 张图片没有任何笔记或 canvas 引用，确认清理？`,
-			warning: '图片会送进回收站，可恢复。',
+			title: '确认清理未引用的图片',
+			message: `发现 ${unused.length} 张图片未被任何笔记或 canvas 引用，确认清理？`,
+			warning: '图片将移入回收站，可恢复。',
 			confirmLabel: '确认清理',
 		}).open();
 	}
@@ -849,14 +849,14 @@ export class ImageTasks implements TaskActions {
 	// ------------------------------------------------------------------ 图片位置与大小
 
 	/**
-	 * 整理图片位置：把引用了别处图片的链接，改为指向笔记自己附件夹里的图片。
+	 * 整理图片位置：把引用其他位置图片的链接，改为指向笔记自己附件文件夹中的图片。
 	 *
-	 * 解决复制粘贴笔记后的典型问题 —— 本地附件夹里没有这张图，链接仍然指向原文件夹，
-	 * 一旦原图被移动、改名或删除，笔记里的图片就没了。
+	 * 解决复制粘贴笔记后的典型问题：本地附件文件夹中没有这张图片，链接仍指向原文件夹，
+	 * 原图被移动、重命名或删除后，笔记中的图片就会失效。
 	 *
-	 * 别处还有笔记在用的图**复制**一份过来（源文件留下，那篇笔记不受影响）；只有本笔记在用的图
-	 * 直接**搬**过来 —— 只复制的话，旧附件夹会剩下一整份没人管的重复图，而「清理没人引用的附件」
-	 * 按文件名判定引用（同名副本永远清不掉）。判定见 `countDocumentUsages`。
+	 * 其他笔记仍在使用的图片**复制**一份过来（源文件保留，那篇笔记不受影响）；只有本笔记使用的图片
+	 * 直接**移入**：只复制的话，旧附件文件夹会剩下一份无人管理的重复图片，而「清理未引用的图片」
+	 * 按文件名判定引用（同名副本无法清理）。判定见 `countDocumentUsages`。
 	 */
 	async organizeImages(files: TFile[], where: string): Promise<void> {
 		const settings = this.getSettings();
@@ -864,7 +864,7 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '整理图片位置',
 				files,
-				failureMessage: '处理失败，请打开开发者控制台查看原因。',
+				failureMessage: '处理失败，请打开开发者控制台查看错误信息。',
 				needsIndex: true,
 			},
 			async (ctx) => {
@@ -875,9 +875,9 @@ export class ImageTasks implements TaskActions {
 				let skipped = 0;
 				const reasons: string[] = [];
 
-				// 「这张图还有别人在用吗」的判定表：全库文档扫一遍、按文档去重。
-				// **第一次真要搬图时才扫**（没有需要搬运的图就一页笔记都不多读）；读不全就一律按
-				// "别人还在用"处理（返回一个大数 → 只复制），并把话说明白在结果里。
+				// 判断图片是否仍被其他文档使用：扫描整个仓库的文档并按文档去重。
+				// **第一次真正需要移入图片时才扫描**（没有需要移动的图片就不读取多余文档）；读取不完整时
+				// 一律按「其他文档仍在使用」处理（返回一个大数，只复制），并在结果中说明。
 				let usageTable: Promise<DocumentUsage> | null = null;
 				let scanFailed = false;
 				const countUsages = async (name: string): Promise<number> => {
@@ -911,15 +911,15 @@ export class ImageTasks implements TaskActions {
 
 				let finalMsg: string;
 				if (touched > 0) {
-					ctx.progress.finish(' 整理完成');
-					const parts = [` ${where}共整理 ${touched} 篇笔记`];
-					if (moved > 0) parts.push(`搬过来 ${moved} 张`);
+					ctx.progress.finish('整理完成');
+					const parts = [`${where}共整理 ${touched} 篇笔记`];
+					if (moved > 0) parts.push(`移入 ${moved} 张`);
 					if (copied > 0) parts.push(`复制 ${copied} 张`);
 					if (relinked > 0) parts.push(`改写 ${relinked} 处链接`);
 					if (skipped > 0) parts.push(`跳过 ${skipped} 处`);
 					finalMsg = parts.join('，') + '。';
 					if (scanFailed) {
-						finalMsg += '（有笔记读不出来，这次只复制、不搬走 —— 读不到就不能断言那张图没别人在用。）';
+						finalMsg += '（有笔记读取失败，本次只复制、不移入。无法读取时不能确认图片是否被其他笔记引用。）';
 					}
 				} else {
 					ctx.progress.clear();
@@ -942,7 +942,7 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '设置图片大小',
 				files,
-				failureMessage: '处理失败，请打开开发者控制台查看原因。',
+				failureMessage: '处理失败，请打开开发者控制台查看错误信息。',
 			},
 			async (ctx) => {
 				let changedFiles = 0;
@@ -963,8 +963,8 @@ export class ImageTasks implements TaskActions {
 				}
 
 				if (changedLinks > 0) {
-					ctx.progress.finish(' 尺寸设置完成');
-					return `${scopeLabel}处理完毕！共修改 ${changedLinks} 处图片尺寸（${changedFiles} 篇笔记）。`;
+					ctx.progress.finish('尺寸设置完成');
+					return `${scopeLabel}共修改 ${changedLinks} 处图片尺寸（${changedFiles} 篇笔记）。`;
 				}
 				ctx.progress.clear();
 				return '没有需要修改的图片尺寸。';
@@ -1026,7 +1026,7 @@ export class ImageTasks implements TaskActions {
 	 *   "文字 + 图片"。这时**不放位图**（有位图微信就不解析 HTML 了）、**也不放文件列表**
 	 *   （有文件列表 QQ 就只当图片上传，文字不会出现 —— 用户实测过）。拼法见 `rich-copy.ts`。
 	 *
-	 * 与其它任务不同，这个不需要批量外壳：它不动仓库、只跑一条系统命令，
+	 * 与其它任务不同，这个不需要批量外壳：它不动仓库、只执行一条系统命令，
 	 * 结果一句话就能说完（复制了几张、能不能粘）。**解析不出来的直接说清楚为什么**，
 	 * 因为"点了没反应"比"提示没找到"更让人摸不着头脑。
 	 */
@@ -1039,7 +1039,7 @@ export class ImageTasks implements TaskActions {
 		const plan = await resolveImagePlan(this.app, file.path, refs);
 		const images = plan.images;
 		if (images.length === 0) {
-			new Notice(plan.unresolved > 0 ? `引用的 ${plan.unresolved} 张图片都没有找到文件。` : '没有找到图片文件。');
+			new Notice(plan.unresolved > 0 ? `引用的 ${plan.unresolved} 张图片文件均未找到。` : '没有找到图片文件。');
 			return;
 		}
 
@@ -1053,7 +1053,7 @@ export class ImageTasks implements TaskActions {
 			new Notice(describeCopyResult(plan, rich !== null), 3000);
 		} catch (e) {
 			console.error(' [Note Tidy] 复制图片失败：', e);
-			new Notice('复制图片失败，请打开开发者控制台查看原因。');
+			new Notice('复制图片失败，请打开开发者控制台查看错误信息。');
 		}
 	}
 
@@ -1105,11 +1105,11 @@ export class ImageTasks implements TaskActions {
 	 */
 	async typeset(files: TFile[], where: string): Promise<void> {
 		await this.runPerFile(
-			' 排版修复',
+			'修复排版',
 			files,
 			async (file) => (await this.typesetOne(file)) ? 1 : 0,
 			(count, processed, failed) =>
-				` ${where}共修复了 ${count} 篇笔记的排版。` +
+				`${where}共修复 ${count} 篇笔记的排版。` +
 				`本次处理 ${processed} 篇${failed > 0 ? `（${failed} 篇出错）` : ''}；${this.describeLayoutSwitches()}`
 		);
 	}
@@ -1130,12 +1130,12 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '快速修复聊天记录',
 				files: file ? [file] : [],
-				failureMessage: '处理失败，请打开开发者控制台查看原因。',
+				failureMessage: '处理失败，请打开开发者控制台查看错误信息。',
 			},
 			async (ctx) => {
 				if (!file) return '请先打开一篇笔记。';
 
-				// ① 外部路径的图片 → 收进仓库并换成内部链接
+				// ① 外部路径的图片 → 导入仓库并换成内部链接
 				const transferred = await transferExternalImages(this.app, this.getSettings(), file);
 				// ② 文本排版（空格 / 缩进 / 聊天记录 / 标签 / 公式）
 				const typeset = await this.typesetOne(file);
@@ -1145,11 +1145,11 @@ export class ImageTasks implements TaskActions {
 					return '没有需要修复的内容。';
 				}
 
-				ctx.progress.finish(' 修复完成');
+				ctx.progress.finish('修复完成');
 				const done: string[] = [];
-				if (transferred) done.push('已转换外部图片');
+				if (transferred) done.push('已导入外部图片');
 				if (typeset) done.push('已修复排版');
-				return `聊天记录快速修复完成（${done.join('，')}）。${this.describeLayoutSwitches()}`;
+				return `聊天记录已修复（${done.join('，')}）。${this.describeLayoutSwitches()}`;
 			}
 		);
 	}
@@ -1267,7 +1267,7 @@ export class ImageTasks implements TaskActions {
 			text = remote.content;
 			createdImages = remote.created;
 		}
-		// 与「排版选中内容」同一条流水线：中文 / 英文 / 标点 / 公式顺手整一遍
+		// 与「排版选中内容」同一条流水线：中文 / 英文 / 标点 / 公式同时整一遍
 		text = formatNoteText(text, this.getTextPipelineOptions());
 
 		// 插在当前光标处；光标那一行前面已经有字时先空一行，免得标题粘在正文后面
@@ -1282,8 +1282,8 @@ export class ImageTasks implements TaskActions {
 			throw error;
 		}
 
-		const tail = failed ? '，后续页失败' : '';
-		new Notice(`已导入 ${uniquePosts.length} 楼${tail}。`);
+		const tail = failed ? '，后续分页抓取失败' : '';
+		new Notice(`已导入 ${uniquePosts.length} 个楼层${tail}。`);
 
 		if (settings.bangumiTitleMode === 'rename' && title) {
 			await this.renameNoteToTitle(file, title);
@@ -1306,7 +1306,7 @@ export class ImageTasks implements TaskActions {
 			await this.app.fileManager.renameFile(file, target);
 		} catch (error) {
 			console.error(`[ImageTransfer] 重命名笔记失败：${file.path} → ${target}`, error);
-			new Notice('重命名失败，请打开开发者控制台查看原因。');
+			new Notice('重命名失败，请打开开发者控制台查看错误信息。');
 		}
 	}
 
@@ -1334,19 +1334,19 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '排版选中内容',
 				files: [file],
-				failureMessage: '处理失败，请打开开发者控制台查看原因。',
+				failureMessage: '处理失败，请打开开发者控制台查看错误信息。',
 			},
 			async (ctx) => {
 				const result = await this.typesetEditorRange(file, editor, from, to, SELECTION_FIX_PLAN);
 				if (result.status === 'unchanged') {
 					ctx.progress.clear();
-					return '选中的内容没有需要修复的地方。';
+					return '选中内容没有需要修改的地方。';
 				}
 				if (result.status === 'skipped') {
 					ctx.progress.clear();
-					return '这段内容已经变了，没有改动它。';
+					return '选中内容已变化，本次未修改。';
 				}
-				ctx.progress.finish(' 排版完成');
+				ctx.progress.finish('排版完成');
 				return `选中内容已排版。${this.describeLayoutSwitches()}`;
 			}
 		);
@@ -1372,11 +1372,11 @@ export class ImageTasks implements TaskActions {
 			{
 				label: '粘贴为聊天记录',
 				files: [file],
-				failureMessage: '粘贴失败，请打开开发者控制台查看原因。',
+				failureMessage: '粘贴失败，请打开开发者控制台查看错误信息。',
 			},
 			async (ctx) => {
 				editor.replaceSelection(formatChatLog(text, this.getChatLogOptions()));
-				ctx.progress.finish(' 已粘贴');
+				ctx.progress.finish('已粘贴');
 				return '已按聊天记录格式粘贴。';
 			}
 		);
@@ -1412,12 +1412,12 @@ export class ImageTasks implements TaskActions {
 	 * 范围与文本修复完全同一套（`[粘贴起点, 光标处)`），**只改这一段、不写盘**，
 	 * 撤销一次即可回退。别的插件的粘贴（Obsidian 自己存下的截图、别家插件插进来的图、
 	 * 粘贴文本里带的图片链接）都走它；**本插件自己接管的那条路**（`pasteImages`）不用它 ——
-	 * 那一条是我们自己写的，尺寸在 `fixPastedRange` / 这里当场就做掉了。
+	 * 那一条是我们自己写的，尺寸在 `fixPastedRange` / 这里立即就做掉了。
 	 *
 	 * 为什么单独留一条路：**别人家的粘贴**可能分几次放进编辑器（一张一张存盘 / 转码，
 	 * 每存好一张才插一条链接），而文本修复那边一笔只做一次。粘贴过后的几秒里，
 	 * 这段范围每变一次就再看一眼（见 `ui/paste-watch.ts` 的观望表）；
-	 * 已经有尺寸的图片不会再动，所以重复跑是幂等的。
+	 * 已经有尺寸的图片不会再动，所以重复执行是幂等的。
 	 *
 	 * @returns 是否真的改了
 	 */
@@ -1445,10 +1445,10 @@ export class ImageTasks implements TaskActions {
 
 	/**
 	 * 粘贴图片：**我们自己接管这次粘贴** —— 把剪贴板里的图片一张一张存进附件夹
-	 * （名字不撞、顺手转成目标格式），再把剪贴板的文字与图片链接写进正文，最后修一遍那一段。
+	 * （名字不撞、同时转成目标格式），再把剪贴板的文字与图片链接写进正文，最后修一遍那一段。
 	 *
 	 * 为什么接管：编辑器里的图片粘贴以前交给 Image Converter 的自动粘贴，但它那边是
-	 * **并发**跑的（`handlePaste` 里 `files.map(async …)`）：一批图各算各的输出名，
+	 * **并发**执行的（`handlePaste` 里 `files.map(async …)`）：一批图各算各的输出名，
 	 * 同一秒算出来的名字撞在一起，后写的那个直接 `File already exists` 丢图
 	 * （2026-09 用户实测"粘两张只剩第一张"）。它既没有开关、也不看 `defaultPrevented`，
 	 * 我们只能让它别再管（它的「Never process filenames」填 `*`），由我们把这件事做对。
@@ -1571,7 +1571,7 @@ export class ImageTasks implements TaskActions {
 		// ② 排版（开了才做）：
 		//    像聊天记录 —— 先把这一段原本那一层缩进剥掉，让流水线看到"顶格的这一段"，
 		//    排完版再由 `placeBlockAt` 整块放到光标那一层（顺序反了会覆盖正文自己的缩进）；
-		//    不像 —— 一个字的正文都不改（也不跑流水线），只把整块的行首缩进对齐到光标那一层：
+		//    不像 —— 一个字的正文都不改（也不执行流水线），只把整块的行首缩进对齐到光标那一层：
 		//    编辑器粘贴只把第一行放在光标那一列、其余行从第 0 列开始。
 		const chatLog = plan.typeset && (looksLikeChatLog(core) || looksLikeBangumiLog(core));
 		let typed = plan.typeset && chatLog ? dedentBy(core, indent.baseIndent) : core;
@@ -1584,7 +1584,7 @@ export class ImageTasks implements TaskActions {
 			typed = placeBlockAt(formatNoteText(typed, pipelineOptions), indent.prefix);
 		} else if (plan.typeset) {
 			// 缩进对齐要连**起点那一行的行首缩进**一起看（`shiftBlockTo` 剥的正是那一截，
-			// 剥掉再按光标那一层加上，重复跑才不会越缩越深）；正文用收图之后的那一份
+			// 剥掉再按光标那一层加上，重复执行才不会越缩越深）；正文用收图之后的那一份
 			const lead = text.substring(0, Math.max(0, from - replaceFrom));
 			typed = shiftBlockTo(lead + core, indent.prefix);
 		}
@@ -1700,7 +1700,7 @@ export class ImageTasks implements TaskActions {
 		if (settings.headingLevelFix) enabled.push('标题级别');
 		if (settings.mathLayout) enabled.push('公式');
 		if (settings.tagLayout) enabled.push(settings.tagSort ? '标签（含排序）' : '标签');
-		if (settings.blockSort) enabled.push('板块排序');
+		if (settings.blockSort) enabled.push('内容块排序');
 		return `已开启：${enabled.join('、')}。`;
 	}
 
@@ -1709,7 +1709,7 @@ export class ImageTasks implements TaskActions {
 	/**
 	 * 逐篇处理 + 统一汇总（原 main.ts 的 runPerFile）。
 	 *
-	 * 单篇失败**不中断整批**：记下失败的篇数继续跑完，最后在提示里说明并打日志。
+	 * 单篇失败**不中断整批**：记下失败的篇数继续执行完，最后在提示里说明并打日志。
 	 * 以前一篇读不出来就会把后面所有笔记都跳过 —— 表现为"整库没修、单篇能修"。
 	 *
 	 * @param handle 单篇处理函数，返回本篇产生的改动数量（0 表示没有变化）
@@ -1724,7 +1724,7 @@ export class ImageTasks implements TaskActions {
 		after?: () => Promise<void>
 	): Promise<void> {
 		await this.runner.run(
-			{ label, files, failureMessage: '处理失败，请打开开发者控制台查看原因。', needsIndex: true },
+			{ label, files, failureMessage: '处理失败，请打开开发者控制台查看错误信息。', needsIndex: true },
 			async (ctx) => {
 				let total = 0;
 				let processed = 0;
@@ -1737,7 +1737,7 @@ export class ImageTasks implements TaskActions {
 						try {
 							total += await handle(file, ctx);
 						} catch (e) {
-							// 单篇出错不拖垮整批：继续跑，最后一起汇报
+							// 单篇出错不拖垮整批：继续执行，最后一起汇报
 							failed++;
 							console.error(` [ImageTransfer] ${file.path} 处理失败：`, e);
 						}
@@ -1750,14 +1750,14 @@ export class ImageTasks implements TaskActions {
 
 				let finalMsg: string;
 				if (total > 0) {
-					ctx.progress.finish(' 处理完成');
+					ctx.progress.finish('处理完成');
 					finalMsg = success(total, processed, failed);
 				} else {
 					ctx.progress.clear();
-					finalMsg = '没有需要处理的笔记。';
+					finalMsg = '没有需要修改的内容。';
 				}
 				if (failed > 0) {
-					finalMsg += ` 有 ${failed} 篇处理失败，详情见控制台。`;
+					finalMsg += ` 有 ${failed} 篇处理失败，详情见开发者控制台。`;
 				}
 				return finalMsg;
 			}

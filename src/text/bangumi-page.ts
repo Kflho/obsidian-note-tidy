@@ -1,7 +1,7 @@
 /**
  * Bangumi 讨论页的网页层：网址校验 + HTML → 结构化楼层。
  *
- * 不走 `DOMParser`：`src/text/` 是纯函数区（不 import obsidian，测试在 Node 里跑），
+ * 不走 `DOMParser`：`src/text/` 是纯函数区（不 import obsidian，测试在 Node 里执行），
  * 而 bangumi 的讨论页结构很稳定（`div#post_<id>` 一件一件排开），用正则切块就够，
  * 还能把页面快照直接当测试夹具。
  */

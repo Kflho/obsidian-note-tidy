@@ -43,14 +43,14 @@ export interface ImageTransferSettings {
 	/** pngquant 的质量档（`min-max`，默认 `65-80`；与 Image Converter 那一项同名同义） */
 	pngquantQuality: string;
 	/**
-	 * 「整理图片」时是否顺手把还不是目标格式的图片转换成目标格式
+	 * 「整理图片」时是否同时把还不是目标格式的图片转换成目标格式
 	 * （目标格式看 `vaultConvertFormat`，与那两条转换命令同一个开关）。
 	 *
 	 * 整理图片本来就是"把仓库里的图片收拾干净"，统一格式是这份收拾的一部分。
 	 */
 	tidyConvertFormat: boolean;
 	/**
-	 * 「合并重复图片」跑完是否顺手清理一次"没人引用的图片"
+	 * 「合并重复图片」执行完是否同时清理一次"没人引用的图片"
 	 * （自己实现，见 `image/unused.ts`；不依赖 Clear Unused Images）。
 	 */
 	autoClearUnusedImages: boolean;
@@ -73,9 +73,9 @@ export interface ImageTransferSettings {
 	autoSetImageSizeOnPaste: boolean;
 	/**
 	 * 在编辑器里粘贴图片文件时**由本插件接管**：自己把图片存进附件夹（一张一张、名字不撞、
-	 * 顺手转成 `vaultConvertFormat`）并写好链接，一次粘多张也不会漏。
+	 * 同时转成 `vaultConvertFormat`）并写好链接，一次粘多张也不会漏。
 	 *
-	 * 为什么必须自己管：别的图片插件那条自动粘贴是**并发**跑的（Image Converter 的
+	 * 为什么必须自己管：别的图片插件那条自动粘贴是**并发**执行的（Image Converter 的
 	 * `handlePaste` 里 `files.map(async …)`）：一次粘多张时每张各算各的输出名，同一秒算出来的
 	 * 名字撞在一起，后写的直接 `File already exists` 丢图（2026-09 用户报的"粘两张只剩第一张"）。
 	 * 关掉这一项就恢复"别人家的粘贴"行为（观察者 + 文本修复 + 尺寸观望表；别的插件没接管时
@@ -210,7 +210,7 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	customAttachmentFolder: 'Attachments',
 	imageNamePreset: 'Pasted image {YYYY}{MM}{DD}{HH}{mm}{ss}',
 	renameLinkFormat: 'full',
-	// 导入的图片转成目标格式（默认开）：外部路径图片收进仓库时顺手统一格式，
+	// 导入的图片转成目标格式（默认开）：外部路径图片收进仓库时同时统一格式，
 	// 不转的话仓库里会攒一堆 png/jpg（转码用插件自带的 canvas 编码器，不依赖别的插件）
 	convertImportedImages: true,
 	// 图片格式转换默认转 webp：仓库里绝大多数图片都该是 webp（省空间、Obsidian 原生支持）
@@ -221,10 +221,10 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	// 路径留空＝按 PATH 与常见安装位置自动找它
 	pngquantPath: '',
 	pngquantQuality: '65-80',
-	// 整理时顺手统一图片格式（默认开）：整理图片就是"把仓库里的图片收拾干净"，
+	// 整理时同时统一图片格式（默认开）：整理图片就是"把仓库里的图片收拾干净"，
 	// 格式统一是其中一环；目标格式沿用 vaultConvertFormat
 	tidyConvertFormat: true,
-	// 合并完顺手清一遍"没人引用的图片"（默认开，自己实现，见 image/unused.ts）：
+	// 合并完同时清一遍"没人引用的图片"（默认开，自己实现，见 image/unused.ts）：
 	// 与合并互补 —— 合并收的是"同一张图存了两份"，它收的是"一张都没人引用"
 	autoClearUnusedImages: true,
 	// 左侧栏图标：一键整理（图标沿用 Clear Unused Images 那个 `image-file`，方便直接换掉它那个按钮）
@@ -232,7 +232,7 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	imageSizeWidth: '100',
 	imageSizeHeight: '',
 	imageSizeOverwrite: true,
-	// 粘贴进来的图片顺手套上默认尺寸（默认开）：粘贴的多半是聊天截图，尺寸统一了笔记才整齐；
+	// 粘贴进来的图片同时套上默认尺寸（默认开）：粘贴的多半是聊天截图，尺寸统一了笔记才整齐；
 	// 只改刚粘的那一段，宽度留空 / 填错时整步不动，撤销一次即可回退
 	autoSetImageSizeOnPaste: true,
 	// 粘贴图片由本插件接管（默认开）：一次粘多张时别的插件会并发撞名丢图，我们一张一张来
@@ -266,7 +266,7 @@ export const DEFAULT_SETTINGS: ImageTransferSettings = {
 	// 楼层内部默认紧凑；不同楼层之间默认留一行
 	bangumiBlankLineWithinPost: false,
 	bangumiBlankLineBetweenPosts: true,
-	// 粘贴聊天记录就顺手修好：默认开启（判定从宽到窄分两档 —— 带日期的"用户名 + 时间戳"头部
+	// 粘贴聊天记录就同时修好：默认开启（判定从宽到窄分两档 —— 带日期的"用户名 + 时间戳"头部
 	// 一条就算，只有时分秒的那种要两条），不想让它自动改笔记的在设置里关掉即可，
 	// 手动那条命令 / 菜单项不受影响
 	autoFixChatLogOnPaste: true,

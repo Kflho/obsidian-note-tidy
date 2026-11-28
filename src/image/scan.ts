@@ -95,7 +95,7 @@ function collectFromLine(line: string, lineStart: number, out: ImageRef[]): void
  * @param baseOffset 这段文本在整篇笔记里的起始偏移（选区 / 单行片段用得上），默认 0
  */
 export function collectImageRefs(text: string, baseOffset = 0): ImageRef[] {
-	// 两种嵌入都以 `!` 开头，先挡掉绝大多数调用（选区变化很频繁，这段每次都要跑）
+	// 两种嵌入都以 `!` 开头，先挡掉绝大多数调用（选区变化很频繁，这段每次都要执行）
 	if (!text.includes('!')) return [];
 
 	const lines = text.split('\n');

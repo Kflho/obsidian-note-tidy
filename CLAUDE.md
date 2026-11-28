@@ -61,13 +61,13 @@ npm test
 
 ## 硬约束
 
-1. **排版幂等**：每个排版函数跑两遍结果一致；整条流水线迭代到不动点。
+1. **排版幂等**：每个排版函数执行两遍结果一致；整条流水线迭代到不动点。
 2. **保护区**：frontmatter、围栏/缩进代码块、GFM 表格、行内代码、已有 `$…$` 不碰；公式识别只在 `text/inline-scan.ts`，行级判断用 `mathOpaqueLines`。
 3. **不替作者补删**：只做规则明说的事；没有改动就返回原内容，`tasks.ts` 据此跳过写盘。
 4. **图片名全库唯一**：新名字只由 `image/naming.ts` 的 `generateUniqueTargetPath` 生成；调用方必须传全库文件名表。
 5. **单一数据源**：设置面板字段在 `settings/fields/`；规则出处与测试映射在 `bin/reference_docs/rule-registry.ts`；受管图片格式在 `image/constants.ts`。
 6. **稳定接口**：命令 ID、导出符号、设置字段名不改；改名要同步规则登记表、测试与迁移。
-7. **`src/text/` 不 import `obsidian`**：纯函数可在测试仓脱离 Obsidian 跑。
+7. **`src/text/` 不 import `obsidian`**：纯函数可在测试仓脱离 Obsidian 执行。
 
 ## 复制图片
 
@@ -75,7 +75,7 @@ npm test
 - PowerShell 用 `powershell.exe -NoProfile -NonInteractive -File`（STA）；不要用 `pwsh`。
 - 图文混排写 `CF_HTML` + `CF_UNICODETEXT`，不写文件列表；图片内嵌 data URI，超限才退回 `file:///`；混排不放位图。
 - 纯图片写文件列表，单张可加位图；不写文本格式，避免部分程序粘贴两次。
-- 脚本内容是常量，写到临时目录固定名，不重写；用户内容走旁边 JSON/HTML/TXT 数据文件，路径 base64；插件加载时空跑一次预热；复制请求排队。
+- 脚本内容是常量，写到临时目录固定名，不重写；用户内容走旁边 JSON/HTML/TXT 数据文件，路径 base64；插件加载时空执行一次预热；复制请求排队。
 - Windows 写 HTML 用 Win32 `SetClipboardData`，打开 → 清空 → 写入整段重试；`CF_HTML` 偏移按字节、补零到 10 位。
 
 ## 粘贴与菜单

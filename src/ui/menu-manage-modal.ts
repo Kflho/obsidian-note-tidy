@@ -87,7 +87,7 @@ export class MenuManageModal extends Modal {
 		contentEl.createEl('h2', { text: '右键菜单' });
 		contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: '按 图片 / 笔记 / 文件夹列出菜单项。打开显示，关闭隐藏；关掉的项仍留在清单里。',
+			text: '按图片、笔记、文件夹列出菜单项。开关打开时显示，关闭时隐藏；关闭的项仍保留在清单中。',
 		});
 
 		for (const scope of MENU_SCOPES) {
@@ -116,8 +116,8 @@ export class MenuManageModal extends Modal {
 			contentEl.createEl('p', {
 				cls: 'setting-item-description',
 				text: detected.length === 0
-					? '最近一次没有检测到这个菜单（可能还没在它上面右键过）。下面是已经隐藏的项目：'
-					: '以下为该菜单中的其它项目，含已经关掉的（关掉的项也留在这里，随时能再打开）：',
+					? '最近一次没有检测到这个菜单，可能还没有在它上面右键过。以下是已经隐藏的项目：'
+					: '以下是该菜单中的其他项目，包括已关闭的项；已关闭的项保留在此处，可随时重新打开。',
 			});
 			for (const title of items) {
 				const hidden = this.isHidden(scope, title);

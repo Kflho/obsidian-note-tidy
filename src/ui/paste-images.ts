@@ -4,7 +4,7 @@
  * ## 为什么是我们接管
  *
  * 编辑器里粘贴图片时，本来一直是 Image Converter 的自动粘贴在管。但它那边是
- * **并发**跑的（`handlePaste` 里 `files.map(async …)`）：一批图各算各的输出名，
+ * **并发**执行的（`handlePaste` 里 `files.map(async …)`）：一批图各算各的输出名，
  * 同一秒算出来的名字撞在一起，后写的那个直接 `File already exists` 丢图 ——
  * 2026-09 用户实测"粘两张只剩第一张"。它既没有开关、也不看 `defaultPrevented`，
  * 我们抢不了这次粘贴，只能让它别再管（它的「Never process filenames」填 `*`），
@@ -127,7 +127,7 @@ export class PasteTakeoverHint {
 	maybeShow(): void {
 		if (this.shown) return;
 		this.shown = true;
-		this.notify('其他插件接管了图片粘贴。要让 Note Tidy 处理，请把它的「Never process filenames」填 *。');
+		this.notify('其他插件已接管图片粘贴。如需 Note Tidy 处理，请在该插件设置中将「Never process filenames」设为 *。');
 	}
 
 	/** 忘掉"已经提示过"（测试用） */

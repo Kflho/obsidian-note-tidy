@@ -115,7 +115,7 @@ function queryAll<T extends Element>(root: Element | Document, selector: string)
 	return withQuery.querySelectorAll ? Array.from(withQuery.querySelectorAll(selector)) : [];
 }
 
-/** 当前文档（Node 里跑测试时没有 `document`，返回 null 就行） */
+/** 当前文档（Node 里执行测试时没有 `document`，返回 null 就行） */
 function currentDocument(): Document | null {
 	return typeof document === 'undefined' ? null : document;
 }
@@ -143,7 +143,7 @@ function menuItemTitle(element: Element): string {
  * 把本插件加的项挪到菜单**最前面**。
  *
  * `addItem` 只能往后加，而 Obsidian 自己的项早就加好了，所以顺序只能在显示之后于 DOM 上重排。
- * 这一步紧跟着 `show*` 做（同一个任务里跑完，浏览器还没绘制），用户看不到跳动。
+ * 这一步紧跟着 `show*` 做（同一个任务里执行完，浏览器还没绘制），用户看不到跳动。
  *
  * @param ownTitles 我们自己的项标题（按想要的显示顺序给）
  */
@@ -165,7 +165,7 @@ export function moveOwnItemsFirst(menu: Menu, ownTitles: string[], doc: Document
 /**
  * 这一轮上膛里"每份菜单里出现过哪些标题"（原型那层记的，**含被隐藏名单拦下的**）。
  *
- * 记它干什么：实例那层（`publish`）补读 DOM 时，**被 `addItem` 当场拦下的项压根不在 DOM 里**
+ * 记它干什么：实例那层（`publish`）补读 DOM 时，**被 `addItem` 立即拦下的项压根不在 DOM 里**
  * （隐藏就是这么生效的），只读 DOM 就会漏掉它们；从 DOM 里摘掉的那些同理，摘之前也记一笔。
  * 漏掉一项 = 管理面板上少一个开关 = 用户关掉的项再也打不开（2026-09 的 bug：文件夹菜单的「删除」，
  * 用户原话"关掉的选项就不显示了，也就是永远打不开了"）。
@@ -467,11 +467,11 @@ export function installMenuInjector(menuClass: typeof Menu, options: MenuInjecto
 }
 
 /**
- * 用替身跑一遍菜单项的构建函数，只为拿到它的标题。
+ * 用替身执行一次菜单项的构建函数，只为拿到它的标题。
  *
  * `Menu.addItem(cb)` 是"先加进去、再让 cb 配置它"，要**在加之前**判断该不该加，
  * 就得先知道标题。替身是个 Proxy：`setTitle` 记下标题，其余方法一律 no-op 并继续链式，
- * 所以 `item.setTitle(…).setIcon(…).onClick(…)` 这种写法照样跑得通。
+ * 所以 `item.setTitle(…).setIcon(…).onClick(…)` 这种写法照样执行得通。
  */
 export function probeMenuItemTitle(builder: (item: MenuItem) => unknown): string | null {
 	let title: string | null = null;

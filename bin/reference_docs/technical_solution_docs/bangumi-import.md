@@ -87,7 +87,7 @@
 - 支持 `bgm.tv` / `bangumi.tv` 的 `group/topic/<id>`，以及同结构的
   `subject/topic/<id>`；
 - `requestUrl` 抓 HTML → `parseBangumiPage` → `formatBangumiPosts` →
-  按 `bangumiImageMode` 处理图片 → 再跑一遍 `formatNoteText`（空格 / 缩进 / 公式等统一）→ 插到当前光标；
+  按 `bangumiImageMode` 处理图片 → 再执行一次 `formatNoteText`（空格 / 缩进 / 公式等统一）→ 插到当前光标；
 - 分页：`extractBangumiPageUrls` 从页面里的 `?page=N` / `?p=N` 链接继续抓后续页（同 host、同 path、去重、
   排除当前页；上限 50 页）；后续页失败时保留前面已抓到的内容并提示；
 - 只在用户点命令、填网址并确认时联网；失败给 Notice，不静默；
@@ -95,7 +95,7 @@
 
 ## 幂等
 
-排版后的文本没有 `#N - 日期` 头，`formatBangumiLog` 再跑一遍原样返回；
+排版后的文本没有 `#N - 日期` 头，`formatBangumiLog` 再执行一次原样返回；
 网页导入那条路是"先解析成结构化帖子再排版"，更不会二次解析自己的输出。
 
 ## 测试

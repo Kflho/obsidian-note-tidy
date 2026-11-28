@@ -25,7 +25,7 @@ import * as path from 'path';
  *
  * - 同一份内容第二次起 0.28 秒（判过的结论按**内容**缓存，2026-11 实测）；
  * - 换个文件名但字节一样，照样 0.28 秒 —— 缓存认的是内容，不是路径；
- * - 同样的脚本只把"写剪贴板"那行去掉，第一次跑就 0.28 秒（`SetDataObject` 就是那个触发点）。
+ * - 同样的脚本只把"写剪贴板"那行去掉，第一次执行就 0.28 秒（`SetDataObject` 就是那个触发点）。
  *
  * 老写法把图片路径以 base64 写进脚本正文，于是**每复制一张图都产生一份新内容**，
  * 每次都等满 10 秒（最初以为是命令行变化，改成固定 `-File` 路径后依旧 10 秒，原因在正文）。
@@ -33,11 +33,11 @@ import * as path from 'path';
  * 所以现在：
  *
  * 1. **脚本是常量**（`clipboardWorkerScript()`，不接任何参数），写到固定路径，
- *    内容没变就不重写；它不含任何用户内容，不用删。第一次跑完之后系统就认这份字节了；
+ *    内容没变就不重写；它不含任何用户内容，不用删。第一次执行完之后系统就认这份字节了；
  * 2. **用户内容全部走旁边的数据文件**：这次要复制哪些图 / HTML / 纯文本由
  *    `note-tidy-clipboard.json`、`.html`、`.txt` 三个固定名文件送进去（路径经 `-PayloadPath`
- *    参数传入，命令行因此也恒定），跑完即删；
- * 3. **插件加载时先空跑一次**（`prewarmClipboard`）：万一系统把结论作废了（换了病毒库），
+ *    参数传入，命令行因此也恒定），执行完即删；
+ * 3. **插件加载时先空执行一次**（`prewarmClipboard`）：万一系统把结论作废了（换了病毒库），
  *    那 10 秒也发生在后台，用户点「复制图片」时不再等。
  *
  * ## 为什么不只用 `Set-Clipboard -Path`
@@ -71,7 +71,7 @@ function fixedScriptPath(): string {
 	return path.join(os.tmpdir(), 'note-tidy-clipboard.ps1');
 }
 
-/** 这次的参数写哪儿：固定名，跑完即删 */
+/** 这次的参数写哪儿：固定名，执行完即删 */
 function fixedPayloadPath(): string {
 	return path.join(os.tmpdir(), 'note-tidy-clipboard.json');
 }
@@ -79,7 +79,7 @@ function fixedPayloadPath(): string {
 /**
  * 图文混排的原文写哪儿。
  *
- * 名字写死在脚本里（`note-tidy-clipboard.html`），这里按同一个目录拼出来 —— 改名字要两边一起改。
+ * 名字硬编码在脚本里（`note-tidy-clipboard.html`），这里按同一个目录拼出来 —— 改名字要两边一起改。
  * 不套 base64 直接落盘：选区一大段文字时 HTML 可能有几兆，套 base64 要多背 1/3 体积。
  */
 function fixedHtmlPath(): string {
@@ -91,7 +91,7 @@ function fixedTextPath(): string {
 	return path.join(os.tmpdir(), 'note-tidy-clipboard.txt');
 }
 
-/** 要执行的命令（纯数据，方便单测；真正跑起来在 `copyOnce`） */
+/** 要执行的命令（纯数据，方便单测；真正执行起来在 `copyOnce`） */
 export interface ClipboardCommand {
 	file: string;
 	args: string[];
@@ -100,7 +100,7 @@ export interface ClipboardCommand {
 	 * 不含用户内容，所以不用删（删了也不会退化成 10 秒，见文件头）。
 	 */
 	scriptFile?: { path: string; content: string };
-	/** Windows 下始终有：这次复制的东西（用户内容全在这里），跑完删掉 */
+	/** Windows 下始终有：这次复制的东西（用户内容全在这里），执行完删掉 */
 	payloadFile?: {
 		path: string;
 		/** 模式与图片路径（base64）的 JSON */
@@ -281,7 +281,7 @@ export function buildAppleScript(paths: string[]): string {
 }
 
 /**
- * Windows 上"跑工作脚本"的命令（纯函数）。命令行恒定：脚本路径与参数文件路径都固定。
+ * Windows 上"执行工作脚本"的命令（纯函数）。命令行恒定：脚本路径与参数文件路径都固定。
  *
  * @param payload 这次要做什么
  * @param scriptPath 工作脚本路径（测试里可指定）
@@ -344,7 +344,7 @@ export function clipboardCommandFor(
 	return null;
 }
 
-/** 跑一条命令（真正动剪贴板的那一步，不好单测，逻辑都在上面的纯函数里） */
+/** 执行一条命令（真正动剪贴板的那一步，不好单测，逻辑都在上面的纯函数里） */
 function runCommand(command: ClipboardCommand): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		execFile(command.file, command.args, { windowsHide: true }, (error, _stdout, stderr) => {
@@ -383,7 +383,7 @@ async function writePayloadFile(file: NonNullable<ClipboardCommand['payloadFile'
 	if (file.text !== null) await fs.writeFile(fixedTextPath(), file.text, 'utf8');
 }
 
-/** 参数文件里有用户内容（选区原文），跑完就删；删不掉不影响这次复制 */
+/** 参数文件里有用户内容（选区原文），执行完就删；删不掉不影响这次复制 */
 async function removePayloadFiles(): Promise<void> {
 	await Promise.all(
 		[fixedPayloadPath(), fixedHtmlPath(), fixedTextPath()].map(file =>
@@ -434,10 +434,10 @@ export function copyImageFiles(
 }
 
 /**
- * 插件加载后先在后台空跑一次工作脚本。
+ * 插件加载后先在后台空执行一次工作脚本。
  *
  * 系统对**新脚本内容**的判定要 10 秒（见文件头），而那笔账不该算在用户第一次复制头上：
- * 这里先跑一遍，把"这份字节已经判过"的结论放进系统缓存里。失败无所谓 —— 复制时还会再跑。
+ * 这里先执行一次，把"这份字节已经判过"的结论放进系统缓存里。失败无所谓 —— 复制时还会再执行。
  */
 export function prewarmClipboard(platform: string = process.platform): Promise<void> {
 	if (platform !== 'win32') return Promise.resolve();
@@ -447,7 +447,7 @@ export function prewarmClipboard(platform: string = process.platform): Promise<v
 	}).catch(() => undefined);
 }
 
-/** 写脚本 / 写参数 / 跑命令 / 删参数：一笔复制的全部动作 */
+/** 写脚本 / 写参数 / 执行命令 / 删参数：一笔复制的全部动作 */
 async function execute(command: ClipboardCommand): Promise<void> {
 	try {
 		if (command.scriptFile) await ensureScriptFile(command.scriptFile);

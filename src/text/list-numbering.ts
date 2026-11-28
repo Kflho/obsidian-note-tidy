@@ -133,7 +133,7 @@ export function fixListNumbers(content: string): string {
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i] ?? '';
 
-		// 保护区：整段跳过，也顺手切断列表（不跨代码块/表格数编号）
+		// 保护区：整段跳过，也同时切断列表（不跨代码块/表格数编号）
 		if (protectedLines[i] || codeLines[i] || tableLines[i]) {
 			open.length = 0;
 			sawBlank = false;

@@ -68,7 +68,7 @@ export default class ImageTransferPlugin extends Plugin {
 		this.refreshRibbonIcon();
 
 		this.addSettingTab(new ImageTransferSettingTab(this.app, this));
-		// 剪贴板脚本先在后台空跑一次：系统判一份**没见过的脚本内容**要 10 秒（见
+		// 剪贴板脚本先在后台空执行一次：系统判一份**没见过的脚本内容**要 10 秒（见
 		// image/clipboard.ts 文件头），这笔账放在加载时扛掉，别让用户第一次点「复制图片」等
 		void prewarmClipboard();
 	}

@@ -83,7 +83,7 @@ function classify(line: string): UnitKind {
 	if (text.startsWith('|') || text.startsWith('!') || text.startsWith('<')) return 'barrier';
 	// 聊天记录：一条消息一块（头部 + 正文），整块原地不动，排乱了整段对话就毁了
 	if (CHAT_HEADER_RE.test(text)) return 'chat';
-	// 脚注定义：渲染时本来就固定在文末，别在正文里搬来搬去
+	// 脚注定义：渲染时本来就固定在文末，别在正文里移入搬去
 	if (FOOTNOTE_RE.test(text)) return 'barrier';
 	if (LIST_RE.test(body)) return 'item';
 	return 'paragraph';
@@ -146,7 +146,7 @@ function readUnit(
  * 有序列表重排后重新编号。
  *
  * Markdown 渲染时编号是自动的，但源文件里出现 `2.` 在 `1.` 前面还是很难看，
- * 所以排序完顺手把编号写顺。只在**整组都是有序列表、同一种编号风格、编号本身是连续的一段**
+ * 所以排序完同时把编号写顺。只在**整组都是有序列表、同一种编号风格、编号本身是连续的一段**
  * 时才动手 —— 作者特意写的 `1. 1. 1.` 或 `3. 5. 8.` 一律保持原样。
  *
  * @param ordered 排好序之后该位置上的块（按输出顺序）

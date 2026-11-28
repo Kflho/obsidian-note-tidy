@@ -376,7 +376,7 @@ export function formatTags(content: string, options: TagLayoutOptions = DEFAULT_
 		const line = lines[index] ?? '';
 		const current = parsedAt(parsed, index);
 
-		// 保护区、缩进代码、公式、空行、只有引用标记的行：原样输出，也顺手切断"块"
+		// 保护区、缩进代码、公式、空行、只有引用标记的行：原样输出，也同时切断"块"
 		if (isOpaque(index) || current.body.trim() === '') {
 			out.push(line);
 			index++;

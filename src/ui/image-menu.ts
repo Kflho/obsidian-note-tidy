@@ -66,27 +66,27 @@ export const IMAGE_SUBMENU_TITLE = '图片功能';
 export const TEXT_SUBMENU_TITLE = '文本排版';
 
 /**
- * 「整理图片」的正式名字。
+ * 「整理图片」的名称。
  *
  * 命令面板（`tidy-images`）、文件 / 文件夹右键的「图片功能」二级栏、左侧栏图标提示语
- * 共用这一份 —— 它干的活（转换格式 + 合并重复副本 + 清理没人引用的附件）只写一处，
- * 免得三个入口各写一遍、改一处漏两处。
+ * 共用这一份。转换格式、合并重复图片、清理未引用图片这三步写在管理面板的说明与
+ * README 中，菜单与命令面板只显示名称。
  */
-export const TIDY_IMAGES_LABEL = '整理图片（转换格式 + 合并重复副本 + 清理没人引用的附件）';
+export const TIDY_IMAGES_LABEL = '整理图片';
 
 /**
- * 这六项各自的图标与说明（管理面板显示用）。
- * 标题不放这儿：`copy` 那条会写成"复制 3 张图片"，按张数算。
+ * 这几项各自的图标与说明（管理面板显示用）。
+ * 标题不放这里：`copy` 那条会写成「复制 3 张图片」，按张数计算。
  */
 export const OWN_ITEMS: Record<OwnItemKey, { title: string; icon: string; desc: string }> = {
-	copy: { title: '复制图片（Note Tidy）', icon: 'copy', desc: '复制图片文件，可粘贴到文件夹或聊天窗口' },
-	quickSize: { title: QUICK_SIZE_MENU_TITLE, icon: 'image', desc: '用默认尺寸修改图片大小' },
-	quickFix: { title: QUICK_FIX_MENU_TITLE, icon: 'zap', desc: '转换外部图片并修复整篇排版' },
-	typesetSelection: { title: TYPESET_SELECTION_MENU_TITLE, icon: 'wand-2', desc: '只排版选中内容，并转换选区里的外部图片' },
-	pasteChat: { title: PASTE_CHAT_MENU_TITLE, icon: 'clipboard-paste', desc: '把剪贴板内容按完整聊天记录格式粘贴' },
-	manage: { title: MANAGE_MENU_TITLE, icon: 'settings-2', desc: '打开右键菜单管理面板' },
-	imageSubmenu: { title: IMAGE_SUBMENU_TITLE, icon: 'image', desc: '转换图片、重命名、整理位置、整理图片、设置大小' },
-	textSubmenu: { title: TEXT_SUBMENU_TITLE, icon: 'message-square', desc: '修复笔记排版' },
+	copy: { title: '复制图片（Note Tidy）', icon: 'copy', desc: '复制图片文件，可粘贴到文件夹或聊天窗口。' },
+	quickSize: { title: QUICK_SIZE_MENU_TITLE, icon: 'image', desc: '用默认尺寸修改当前笔记的图片大小。' },
+	quickFix: { title: QUICK_FIX_MENU_TITLE, icon: 'zap', desc: '导入当前笔记的外部图片，并修复整篇排版。' },
+	typesetSelection: { title: TYPESET_SELECTION_MENU_TITLE, icon: 'wand-2', desc: '只排版选中内容，并导入选区中的外部图片。' },
+	pasteChat: { title: PASTE_CHAT_MENU_TITLE, icon: 'clipboard-paste', desc: '按完整聊天记录格式粘贴剪贴板内容。' },
+	manage: { title: MANAGE_MENU_TITLE, icon: 'settings-2', desc: '打开右键菜单管理面板。' },
+	imageSubmenu: { title: IMAGE_SUBMENU_TITLE, icon: 'image', desc: '导入外部图片、重命名、整理位置、整理图片、设置大小。' },
+	textSubmenu: { title: TEXT_SUBMENU_TITLE, icon: 'message-square', desc: '修复笔记排版。' },
 };
 
 /**

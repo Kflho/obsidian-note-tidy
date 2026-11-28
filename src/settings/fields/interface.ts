@@ -1,11 +1,10 @@
 import type { FieldSection } from './types';
 
 /**
- * 「菜单与交互」一页：跟笔记内容无关、只跟"界面在哪儿给你入口"有关的设置。
+ * 「菜单与交互」一页：与笔记内容无关、只与「入口在界面的哪个位置」有关的设置。
  *
- * 分两组：**入口**（右键菜单里放我们哪些项、藏掉别人哪些项）与**快捷键 / 状态栏**
- * （Ctrl+C 接管、选区图片张数）。以前这三节（状态栏 / 右键菜单 / 复制）平铺在设置面板顶层，
- * 夹在图片与排版中间，找起来要来回扫 —— 2026-09 收进这一页。
+ * 分两组：**入口**（右键菜单中显示本插件的哪些项、隐藏其他插件的哪些项）
+ * 与**快捷键 / 状态栏**（Ctrl+C 接管、选中内容的图片数量）。
  */
 
 export const INTERFACE_SECTION: FieldSection = {
@@ -19,49 +18,49 @@ export const INTERFACE_SECTION: FieldSection = {
 				{
 					key: 'imageMenuCopyItem',
 					name: '「复制图片」',
-					desc: '',
+					desc: '显示在图片菜单与笔记菜单中。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'imageMenuQuickSizeItem',
 					name: '「快速设置图片大小」',
-					desc: '',
+					desc: '显示在图片菜单与笔记菜单中。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'imageMenuQuickFixItem',
 					name: '「快速修复聊天记录」',
-					desc: '',
+					desc: '显示在图片菜单与笔记菜单中。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'imageMenuTypesetItem',
 					name: '「排版选中内容」',
-					desc: '',
+					desc: '有选区时出现在笔记菜单中。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'noteMenuPasteChatItem',
 					name: '「粘贴为聊天记录」',
-					desc: 'Ctrl+V 粘贴的是纯内容。',
+					desc: 'Ctrl+V 粘贴纯内容，此菜单项粘贴完整格式。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'imageMenuManageItem',
 					name: '「管理右键菜单」',
-					desc: '',
+					desc: '显示在图片、笔记、文件三个右键菜单中。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'fileMenuImageSubmenu',
 					name: '「图片功能」二级栏',
-					desc: '',
+					desc: '文件与文件夹菜单中的入口。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'fileMenuTextSubmenu',
 					name: '「文本排版」二级栏',
-					desc: '',
+					desc: '文件与文件夹菜单中的入口。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
@@ -77,14 +76,14 @@ export const INTERFACE_SECTION: FieldSection = {
 			fields: [
 				{
 					key: 'takeOverCopyShortcut',
-					name: '「Ctrl+C」优先复制图片',
-					desc: '默认关；开启后选中图片按 Ctrl+C 复制文件，而不是复制文字。',
+					name: 'Ctrl+C 优先复制图片',
+					desc: '选中图片时按 Ctrl+C 复制图片文件，而不是链接文字。默认关闭。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'showSelectionImageCount',
-					name: '显示选中内容的图片数量',
-					desc: '默认关；勾选后在状态栏报出选中的张数。',
+					name: '状态栏显示选中图片数量',
+					desc: '选中内容变化时更新，没有图片时留空。默认关闭。',
 					control: { type: 'toggle' },
 				},
 			],

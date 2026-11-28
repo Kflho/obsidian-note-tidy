@@ -5,18 +5,18 @@ import type { FieldSection } from './types';
 /**
  * 「文本排版」一页：排版流水线每一步的开关与选项。
  *
- * 分组的顺序**照着流水线走**（见 `text/pipeline.ts` 文件头）：
- * 行首与标记 → 聊天记录 → Bangumi 讨论 → 公式 → 空格（文字间距 / 标点与符号）→ 标签与板块。
- * 这样"某一处排版不满意"时能顺着页面从上往下找到那一步，而不用记模块名。
+ * 分组顺序与流水线一致（见 `text/pipeline.ts` 文件头）：
+ * 行首与标记 → 聊天记录 → Bangumi 讨论 → 公式 → 空格 → 标签与内容块。
+ * 这样某一处排版不符合预期时，可以按页面顺序找到对应的步骤。
  *
- * 每一节的说明文字都对着笔记里的《排版格式》规范写，
- * 改规则时先改规范、再改这里的文案、最后改对应模块的实现（见 rule-registry.ts）。
+ * 每一节的说明文字以笔记中的《排版格式》规范为准。
+ * 修改规则时先改规范，再改这里的文案，最后改对应模块的实现（见 rule-registry.ts）。
  */
 
 export const TEXT_SECTION: FieldSection = {
 	type: 'page',
 	heading: '文本排版',
-	desc: '控制笔记里的缩进、标题、聊天记录、公式与空格。',
+	desc: '笔记的缩进、标题、聊天记录、公式与空格。',
 	groups: [
 		{
 			heading: '行首与标记',
@@ -24,12 +24,12 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'textLeadingIndentFix',
 					name: '行首缩进修复',
-					desc: '修复行首缩进，以及列表、引用标记前面的空格。',
+					desc: '修复行首缩进，以及列表、引用标记前的空格。',
 					control: {
 						type: 'dropdown',
 						options: {
-							smart: '智能：列表子项保留，其余行首空格删掉 (推荐)',
-							strict: '严格：行首只留 tab，空格全删',
+							smart: '智能：保留列表子项，删除其余行首空格（推荐）',
+							strict: '严格：行首只保留制表符',
 							off: '关闭',
 						},
 					},
@@ -55,43 +55,43 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'chatShowUsername',
 					name: '显示用户名',
-					desc: '右键「粘贴为聊天记录」用；纯内容只留正文。',
+					desc: '开启后，完整格式包含该字段；Ctrl+V 粘贴的纯内容不含。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'chatShowDate',
 					name: '显示日期',
-					desc: '',
+					desc: '开启后，完整格式包含该字段；Ctrl+V 粘贴的纯内容不含。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'chatShowTime',
 					name: '显示时间',
-					desc: '',
+					desc: '开启后，完整格式包含该字段；Ctrl+V 粘贴的纯内容不含。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'chatMergeSameUser',
-					name: '同一个人多句话合并',
-					desc: '连发多条时只留第一条的用户名和时间。',
+					name: '同一用户连续消息合并',
+					desc: '同一用户连续发送多条消息时合并为一条，只保留第一条的用户名与时间。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'chatBlankLineBetweenMessages',
 					name: '消息之间插入空行',
-					desc: '纯文字消息之间会插入空行；纯内容不会插入。',
+					desc: '在相邻消息之间插入一个空行；纯内容不插入空行。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'chatImageOrder',
 					name: '图文消息中图片的位置',
-					desc: '纯内容里图片位置不变。',
+					desc: '控制完整格式中图片相对文字的位置；纯内容保持原顺序。',
 					control: {
 						type: 'dropdown',
 						options: {
 							keep: '保持原顺序',
-							above: '图片在上方',
-							below: '图片在下方',
+							above: '图片在文字上方',
+							below: '图片在文字下方',
 						},
 					},
 				},
@@ -103,11 +103,11 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'chatIndent',
 					name: '正文缩进',
-					desc: 'Ctrl+V 和右键粘贴共用。',
+					desc: 'Ctrl+V 与右键「粘贴为聊天记录」共用。',
 					control: {
 						type: 'dropdown',
 						options: {
-							tab: '制表符 (tab)',
+							tab: '制表符',
 							'2': '2 个空格',
 							'4': '4 个空格',
 							none: '不缩进',
@@ -117,13 +117,13 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'chatSortByTime',
 					name: '相邻消息按时间排序',
-					desc: '只在同一人的相邻消息之间调整。',
+					desc: '仅调整相邻消息的顺序，不改变内容。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'chatStripMentions',
 					name: '去掉 @ 提及',
-					desc: '',
+					desc: '删除消息正文中的 @昵称。默认关闭。',
 					control: { type: 'toggle' },
 				},
 			],
@@ -134,55 +134,55 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'bangumiShowFloor',
 					name: '显示楼层号',
-					desc: '默认开；楼层号写在每层开头。',
+					desc: '在用户名后显示序号。默认关闭。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'bangumiShowTime',
 					name: '显示楼层时间',
-					desc: '默认开；时间取自楼层头部。',
+					desc: '在用户名后显示时间。默认关闭。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'bangumiShowSignature',
 					name: '保留签名',
-					desc: '',
+					desc: '保留用户名后的签名。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'bangumiStripReactions',
 					name: '去掉贴贴与页面控件',
-					desc: '默认开；正文保持不变，只去掉计数与页面控件。',
+					desc: '删除贴贴计数与页面控件，正文保持不变。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'bangumiStripSmiles',
 					name: '去掉表情',
-					desc: '开启后表情文字（如 [表情]）不写进笔记。',
+					desc: '删除表情文字（如 (bgm38)）。默认关闭。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'bangumiLinkUsers',
 					name: '用户名带主页链接',
-					desc: '默认关；开启后点用户名可跳回主页。',
+					desc: '网页导入时为用户名添加主页链接。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'bangumiImageMode',
 					name: '网页导入时的图片',
-					desc: '选择保留链接或收进仓库。',
+					desc: '选择保留远程链接或导入到仓库。',
 					control: {
 						type: 'dropdown',
 						options: {
 							link: '保留远程链接（默认）',
-							import: '收进仓库（静态图片；GIF / 视频留链接）',
+							import: '导入到仓库（静态图片；GIF 与视频保留链接）',
 						},
 					},
 				},
 				{
 					key: 'bangumiTitleMode',
 					name: '网页导入时的标题',
-					desc: '选择丢弃、插为二级标题，或重命名当前文件。',
+					desc: '选择丢弃标题、插为二级标题，或重命名当前文件。',
 					control: {
 						type: 'dropdown',
 						options: {
@@ -195,13 +195,13 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'bangumiBlankLineWithinPost',
 					name: '楼层内部段落间留空行',
-					desc: '同一条回复里的段落之间是否留空行。',
+					desc: '在同一条回复的段落之间留空行。默认关闭。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'bangumiBlankLineBetweenPosts',
 					name: '不同楼层之间留空行',
-					desc: '',
+					desc: '开启后，在两段内容之间插入一个空行。默认开启。',
 					control: { type: 'toggle' },
 				},
 			],
@@ -211,14 +211,14 @@ export const TEXT_SECTION: FieldSection = {
 			fields: [
 				{
 					key: 'textMathWrapSymbols',
-					name: '正文数学符号自动加公式',
-					desc: '把正文里的数学符号写成公式。',
+					name: '数学符号自动转为公式',
+					desc: '把正文中的数学符号写成 $…$ 公式。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'mathLayout',
 					name: '公式排版',
-					desc: '整理公式代码的空格与换行。',
+					desc: '整理 $$…$$ 中 LaTeX 代码的空格与换行。默认关闭。',
 					control: { type: 'toggle' },
 				},
 			],
@@ -229,11 +229,11 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'spacingCjkLatin',
 					name: '中文与英文之间',
-					desc: '默认开；写成「中文 English」。',
+					desc: '写成「中文 English」。默认开启。',
 					control: {
 						type: 'dropdown',
 						options: {
-							space: '空一个字宽 (推荐)',
+							space: '空一个字宽（推荐）',
 							keep: '保持原样',
 						},
 					},
@@ -242,11 +242,11 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'spacingCjkDigit',
 					name: '中文与数字之间',
-					desc: '默认关；开启后写成「第 3 章」。',
+					desc: '选择不留空格、空一个字宽或保持原样。默认不留空格。',
 					control: {
 						type: 'dropdown',
 						options: {
-							none: '不留空格 (按笔记规则，推荐)',
+							none: '不留空格（按笔记规则，推荐）',
 							space: '空一个字宽',
 							keep: '保持原样',
 						},
@@ -256,11 +256,11 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'spacingLatinDigit',
 					name: '英文与数字之间',
-					desc: '默认保持原样；需要时改成空一格。',
+					desc: '选择保持原样或空一个字宽。默认保持原样。',
 					control: {
 						type: 'dropdown',
 						options: {
-							keep: '保持原样 (推荐)',
+							keep: '保持原样（推荐）',
 							space: '空一个字宽',
 						},
 					},
@@ -269,11 +269,11 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'spacingMathText',
 					name: '公式与文字之间',
-					desc: '默认开；写成「文字 $x$ 文字」。',
+					desc: '写成「文字 $x$ 文字」。默认开启。',
 					control: {
 						type: 'dropdown',
 						options: {
-							space: '空一个字宽 (推荐)',
+							space: '空一个字宽（推荐）',
 							keep: '保持原样',
 						},
 					},
@@ -282,7 +282,7 @@ export const TEXT_SECTION: FieldSection = {
 				{
 					key: 'spacingChapterTitle',
 					name: '标题标记与标题内容之间',
-					desc: '默认开；写成「## 标题」。',
+					desc: '写成「## 标题」。默认开启。',
 					control: { type: 'toggle' },
 				},
 			],
@@ -292,63 +292,63 @@ export const TEXT_SECTION: FieldSection = {
 			fields: [
 				{
 					key: 'spacingFullPunct',
-					name: '全角标点两侧不留空格',
-					desc: '默认开；写成「你好，世界」。',
+					name: '全角标点前后不留空格',
+					desc: '删除该标点前后的空格。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'spacingHalfPunct',
 					name: '半角标点前不留空格、后空一格',
-					desc: '默认开；写成「a, b」。',
+					desc: '对半角标点 , . ! ? : 生效。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'spacingBracketInner',
-					name: '括号前后都没有空格',
-					desc: '',
+					name: '括号内侧不留空格',
+					desc: '写成「中文（说明）」与「f(x)」。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'spacingDigitUnit',
 					name: '数字与单位之间空一格',
-					desc: '默认关；开启后写成「10 km」。',
+					desc: '写成「10 km」。单位需在内置单位表中。默认关闭。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'spacingHalfToFullPunct',
 					name: '标点全半角按语境',
-					desc: '默认开；中文句子用全角，英文与公式用半角。',
+					desc: '中文句子使用全角标点，英文与公式使用半角标点。默认开启。',
 					control: { type: 'toggle' },
 				},
 				{
 					key: 'spacingSymbolPad',
-					name: '符号自己的空格规则',
-					desc: '',
+					name: '符号间距规则',
+					desc: '按符号分别处理空格，如逗号后空一格、竖线前后空一格。默认开启。',
 					control: { type: 'toggle' },
 				},
 			],
 		},
 		{
-			heading: '标签与板块',
+			heading: '标签与内容块',
 			fields: [
 				{
 					key: 'tagLayout',
 					name: '标签排版',
-					desc: '把标签移到块尾。',
+					desc: '把行内标签移到所在内容块的末尾。默认关闭。',
 					control: { type: 'toggle' },
 					rerenderOnChange: true,
 				},
 				{
 					key: 'tagSort',
 					name: '标签排序',
-					desc: '标签按首字母排序。',
+					desc: '同一处出现的多个标签按首字母排序。',
 					control: { type: 'toggle' },
 					disabled: (settings) => !settings.tagLayout,
 				},
 				{
 					key: 'blockSort',
 					name: '内容块排序',
-					desc: '',
+					desc: '按首字母排序笔记中的内容块。默认关闭。',
 					control: { type: 'toggle' },
 				},
 			],

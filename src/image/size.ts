@@ -69,10 +69,10 @@ export function validateImageSize(width: string, height: string): string | null 
 	const w = width.trim();
 	const h = height.trim();
 
-	if (w !== '' && !/^\d+$/.test(w)) return '宽度只能填数字';
-	if (h !== '' && !/^\d+$/.test(h)) return '高度只能填数字';
-	if (w === '' && h !== '') return '请先填写宽度：只填高度无法生效';
-	if (w === '0' || h === '0') return '尺寸需要大于 0';
+	if (w !== '' && !/^\d+$/.test(w)) return '宽度只能填数字。';
+	if (h !== '' && !/^\d+$/.test(h)) return '高度只能填数字。';
+	if (w === '' && h !== '') return '请先填写宽度；只填高度无法生效。';
+	if (w === '0' || h === '0') return '尺寸必须大于 0。';
 	return null;
 }
 
@@ -83,7 +83,7 @@ export function validateImageSize(width: string, height: string): string | null 
  *
  * 1. 开关关着（`autoSetImageSizeOnPaste`）；
  * 2. **宽度留空** —— 那一档在「设置图片大小」里的意思是"移除已有尺寸"，
- *    粘贴时自动去删尺寸不是这个功能该做的事（要删就手动跑一次）；
+ *    粘贴时自动去删尺寸不是这个功能该做的事（要删就手动执行一次）；
  * 3. 尺寸填错了（与「快速设置图片大小」共用同一个 `validateImageSize`，不给用户改坏链接的机会）。
  *
  * 参数只要这四个字段（结构类型）：设置对象里有旧版本没有的字段也无所谓。
@@ -201,7 +201,7 @@ export function applyImageSize(rawContent: string, options: ImageSizeOptions): I
 		const link = (size: string) => (size === '' ? `![[${target}]]` : `![[${target}${escape}|${size}]]`);
 
 		if (alias === undefined || alias === '') {
-			// 没有尺寸：补上；移除模式下顺手清掉多余的空别名
+			// 没有尺寸：补上；移除模式下同时清掉多余的空别名
 			if (targetSize === '') return alias === '' ? link('') : null;
 			return link(targetSize);
 		}

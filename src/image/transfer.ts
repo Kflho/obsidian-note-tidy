@@ -21,7 +21,7 @@ import type { ImageNamingSettings } from './naming';
 /** 导入功能需要的设置项（结构子集，避免依赖 settings/） */
 export interface TransferSettings extends AttachmentLocationSettings, ImageNamingSettings {
 	/**
-	 * 导入的图片顺手转成目标格式（`vaultConvertFormat` + `convertQuality`，见 `image/convert.ts`）。
+	 * 导入的图片同时转成目标格式（`vaultConvertFormat` + `convertQuality`，见 `image/convert.ts`）。
 	 * 解不开的格式按原格式导入，不影响图片进库。`undefined` 当作开。
 	 */
 	convertImportedImages?: boolean;
@@ -185,7 +185,7 @@ export async function transferImagesInText(
  * 远程图片导入：Bangumi 网页里的正文图片是 `https://…jpg`，聊天记录那条
  * `transferImagesInText` 只认 `file:///…` / 盘符路径，所以这里补一条**只给网页导入用**的入口。
  *
- * 不把这个逻辑放进 `transferImagesInText`：那条路会在整库排版 / 粘贴时跑，
+ * 不把这个逻辑放进 `transferImagesInText`：那条路会在整库排版 / 粘贴时执行，
  * 不能让普通排版突然去下载全库的远程图片。
  */
 

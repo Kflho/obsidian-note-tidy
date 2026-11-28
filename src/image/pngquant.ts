@@ -54,7 +54,7 @@ export interface PngquantProbeResult {
 	version: string;
 }
 
-/** 跑一次 pngquant：成功返回压缩后的 PNG 字节，任何不对劲都返回 `null`（调用方按"这一步不做"处理） */
+/** 执行一次 pngquant：成功返回压缩后的 PNG 字节，任何不对劲都返回 `null`（调用方按"这一步不做"处理） */
 export type PngquantRunner = (
 	settings: PngquantSettings,
 	bytes: ArrayBuffer,
@@ -108,7 +108,7 @@ export function pngquantCandidates(
 export type PngquantProbe = (configured: string) => Promise<PngquantProbeResult | null>;
 
 /**
- * 真正去跑一次 `--version`：按候选顺序试，第一个有回话的算数。
+ * 真正去执行一次 `--version`：按候选顺序试，第一个有回话的算数。
  *
  * 只在"要动手之前"问一次（命令 / 整理图片各问一次），不是每张图都问 ——
  * 每张都探测等于每张多起一个进程。
@@ -132,7 +132,7 @@ export function setPngquantProbe(probe: PngquantProbe | null): void {
 /**
  * 探测一次并把结果记下来：`runPngquant` 之后就用记下来的那个路径（不必每张图重找一遍）。
  *
- * 记在**这一层**（而不是各探测实现里）是刻意的：测试换掉探测实现时，缓存行为与真跑时一样。
+ * 记在**这一层**（而不是各探测实现里）是刻意的：测试换掉探测实现时，缓存行为与真执行时一样。
  */
 export async function probePngquant(configured = ''): Promise<PngquantProbeResult | null> {
 	const key = configured.trim();
@@ -160,7 +160,7 @@ export function resolvePngquantExecutable(configured: string): string {
  *
  * @param settings 可执行文件路径 + 质量档
  * @param bytes 待压缩的 PNG 字节
- * @param args 覆盖命令行参数（**只有测试用**：换成 `['-e', 脚本]` 跑一个假 pngquant）
+ * @param args 覆盖命令行参数（**只有测试用**：换成 `['-e', 脚本]` 执行一个假 pngquant）
  * @returns 压缩后的 PNG 字节；找不到可执行文件 / 非零退出 / 输出为空 / 输出不是 PNG 时 `null`
  */
 export const runPngquant: PngquantRunner = async (settings, bytes, args) => {
@@ -206,7 +206,7 @@ export const runPngquant: PngquantRunner = async (settings, bytes, args) => {
 				finish(null);
 				return;
 			}
-			// 拷一份独立的 ArrayBuffer：`Buffer` 的底层池子可能比这一份数据大得多
+			// 复制一份独立的 ArrayBuffer：`Buffer` 的底层池子可能比这一份数据大得多
 			finish(
 				output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength)
 			);
@@ -226,7 +226,7 @@ function warnOnce(executable: string, message: string, err: unknown): void {
 }
 
 /**
- * 跑一次 `<候选> --version`：能起来、退出码 0、stdout 有内容才算找到。
+ * 执行一次 `<候选> --version`：能起来、退出码 0、stdout 有内容才算找到。
  *
  * 超时保底 5 秒（进程卡住时别把整批拖死）；计时器 `unref()`，不挡着进程退出（测试里尤其重要）。
  */

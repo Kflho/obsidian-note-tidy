@@ -49,7 +49,7 @@
  * - 中文与中文之间的空格（可能是《新 吊带袜天使》这类故意留的，标点概论 3 也要求别乱删）；
  * - 数学运算符（`ctrl+c` 不能加空格，数学符号 1 自己也写了"非数学语境就不加"）。
  *
- * 幂等：每条规则的结果都是"恰好一个空格"或"没有空格"，输出再跑一次不会变。
+ * 幂等：每条规则的结果都是"恰好一个空格"或"没有空格"，输出再执行一次不会变。
  */
 import { markProtectedLines, markIndentedCodeLines, markTableLines } from '../line-scan';
 import { mathRanges } from '../inline-scan';
@@ -170,7 +170,7 @@ function formatLine(line: string, options: SpacingOptions): string {
 /**
  * 空格排版：给整篇笔记补 / 删 中文、英文、数字、公式、标点之间的空格。
  *
- * 幂等：输出的每个位置要么恰好一个空格、要么没有空格，再跑一次不会变。
+ * 幂等：输出的每个位置要么恰好一个空格、要么没有空格，再执行一次不会变。
  *
  * @param content 笔记原文
  * @param options 八条规则的开关（由插件设置转换而来）
