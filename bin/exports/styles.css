@@ -1,0 +1,56 @@
+/* Note Tidy — notice suppression during batch operations.
+   批量期间靠 body 上的 suppress-notices 压住整批刷屏通知；批量结束时 body 上的类会
+   立刻撤掉（结果通知要马上弹出来），那几条还没到期的旧通知改由 .note-tidy-suppressed
+   逐条藏住，到期自己消失。
+   用 body 前缀提高选择器特异性，避免 !important：Obsidian 自身的 .notice /
+   .notice-container 都是单类选择器，多一层限定即可稳定压过。 */
+body.suppress-notices .notice-container,
+body.suppress-notices .notice,
+body .note-tidy-suppressed {
+	display: none;
+	visibility: hidden;
+	opacity: 0;
+	pointer-events: none;
+}
+
+/* 设置面板：排版格式下的子分组标题（Obsidian 自带的 setHeading 只有一级）。
+   Obsidian 1.13+ 走声明式设置（分组自带 heading），这条只在旧版本生效。 */
+.ait-settings-subheading h4 {
+	margin: 1.4em 0 0.2em;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	letter-spacing: 0.05em;
+}
+
+/* 左侧栏的「整理图片」图标：设置里关掉时隐藏它（图标本身不重建，
+   所以开关一改就能立刻生效；用 !important 压过 Obsidian 对 ribbon 项的 display 规则） */
+.side-dock-ribbon-action.note-tidy-ribbon-hidden {
+	display: none !important;
+}
+
+/* 图片大小弹窗：改动预览列表 */
+.ait-size-preview {
+	margin-top: 0.5em;
+}
+
+.ait-size-samples {
+	max-height: 12em;
+	overflow-y: auto;
+	margin: 0.5em 0;
+	padding: 0.5em;
+	border-radius: var(--radius-s);
+	background-color: var(--background-secondary);
+}
+
+.ait-size-sample {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.6;
+	word-break: break-all;
+}
+
+.ait-size-sample code {
+	background-color: transparent;
+	padding: 0;
+}
