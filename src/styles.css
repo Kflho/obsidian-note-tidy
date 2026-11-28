@@ -13,8 +13,46 @@ body .note-tidy-suppressed {
 	pointer-events: none;
 }
 
-/* 设置面板：排版格式下的子分组标题（Obsidian 自带的 setHeading 只有一级）。
-   Obsidian 1.13+ 走声明式设置（分组自带 heading），这条只在旧版本生效。 */
+/* 设置页字号与间距：入口卡片、分区标题、设置项名称、说明。
+   只作用于本插件容器；字号 20/16/14/13；行上下 12px，分组标题上 24px，控件与文字之间 8px。 */
+.note-tidy-settings .setting-item {
+	padding: 12px 0;
+	align-items: flex-start;
+}
+
+.note-tidy-settings .setting-item-name {
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 1.4;
+}
+
+.note-tidy-settings .setting-item-description {
+	max-width: 44em;
+	color: var(--text-muted);
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.note-tidy-settings .setting-item-control {
+	flex: 0 0 auto;
+	max-width: 260px;
+}
+
+.note-tidy-settings .setting-item-heading {
+	padding-top: 24px;
+}
+
+.note-tidy-settings .setting-item-heading .setting-item-name {
+	font-size: 18px;
+	font-weight: 600;
+}
+
+/* 入口页是三张可点击的分区卡片：标题略大于设置项，说明保持 13px。 */
+.note-tidy-settings .setting-group > .setting-items > .setting-item.tappable .setting-item-name {
+	font-size: 16px;
+	font-weight: 600;
+}
+
 .ait-settings-subheading h4 {
 	margin: 1.4em 0 0.2em;
 	color: var(--text-muted);

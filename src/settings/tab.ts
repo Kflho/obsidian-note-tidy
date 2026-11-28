@@ -128,6 +128,9 @@ export class ImageTransferSettingTab extends PluginSettingTab {
 	 * 定义里的 key 就是 settings 的字段名，读写走下面的 getControlValue / setControlValue。
 	 */
 	getSettingDefinitions(): SettingDefinitionItem[] {
+		// getSettingDefinitions 在容器挂载完成前调用；此时加类会被随后的 className 赋值覆盖。
+		// 等下一帧再加，确保类保留。
+		window.setTimeout(() => this.containerEl?.addClass('note-tidy-settings'), 0);
 		return SETTINGS_SECTIONS.map(section => section.type === 'group'
 			? {
 				type: 'group',
