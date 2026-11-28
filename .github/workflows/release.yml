@@ -27,6 +27,18 @@ jobs:
               with:
                   ref: ${{ inputs.tag || github.ref_name }}
 
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+                  cache-dependency-path: src/package-lock.json
+
+            - name: Build
+              run: |
+                  npm ci --prefix src
+                  npm run build --prefix src
+
             - name: Check tag matches manifest version
               run: |
                   version="$(node -p "require('./manifest.json').version")"
